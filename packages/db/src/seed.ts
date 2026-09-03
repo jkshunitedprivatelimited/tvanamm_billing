@@ -6,10 +6,10 @@ const DEMO_FRANCHISE = '11111111-1111-4111-8111-111111111111';
 const DEMO_OUTLET = '22222222-2222-4222-8222-222222222222';
 
 /**
- * Development-only demo data. Reference data (roles, permissions, the JKSH
- * organization, the TVANAMM brand) ships as migrations and is always present;
- * this adds a throwaway franchise and outlet so a developer can exercise the
- * flows locally. Refuses to run when NODE_ENV=production.
+ * Development-only demo data. Reference data (roles, capabilities, the JKSH
+ * organization, TVANAMM/T Leaf brands) ships as migrations. This adds a demo
+ * franchise + active outlet and, when BOOTSTRAP_*_PHONE is set, ready-to-use
+ * OTP login accounts. Refuses to run when NODE_ENV=production.
  */
 export async function seedDevData(pool: Pool): Promise<{ seeded: boolean }> {
   if (process.env.NODE_ENV === 'production') {
@@ -17,42 +17,41 @@ export async function seedDevData(pool: Pool): Promise<{ seeded: boolean }> {
   }
 
   await pool.query(
-    `insert into identity.franchises (id, organization_id, brand_id, name, slug)
-     values ($1, $2, $3, 'Demo Franchise', 'demo-franchise')
+    `insert into billing.franchises (id, organization_id, brand_id, name, slug)
+     values ($1,$2,$3,'Demo Franchise','demo-franchise')
      on conflict (id) do nothing`,
     [DEMO_FRANCHISE, JKSH_ORG, TVANAMM_BRAND],
   );
 
   await pool.query(
-    `insert into identity.outlets
-       (id, organization_id, franchise_id, name, slug, address, phone, timezone)
-     values ($1, $2, $3, 'Demo Outlet - Kukatpally', 'demo-outlet-kukatpally',
-             'Plot 1, KPHB, Hyderabad, Telangana 500072', '+914012345678', 'Asia/Kolkata')
+    `insert into billing.outlets
+       (id, organization_id, brand_id, franchise_id, ownership_type, status,
+        display_name, slug, phone, address_line, city, state, postal_code, timezone,
+        billing_enabled)
+     values ($1,$2,$3,$4,'franchise_owned','active','Demo Outlet - Kukatpally',
+             'demo-outlet-kukatpally','+914012345678','Plot 1, KPHB','Hyderabad',
+             'Telangana','500072','Asia/Kolkata', true)
      on conflict (id) do nothing`,
-    [DEMO_OUTLET, JKSH_ORG, DEMO_FRANCHISE],
+    [DEMO_OUTLET, JKSH_ORG, TVANAMM_BRAND, DEMO_FRANCHISE],
   );
 
-  // Optional bootstrap login accounts so the apps are usable locally.
   const adminPhone = process.env.BOOTSTRAP_ADMIN_PHONE;
   if (adminPhone) {
-    await upsertOtpUser(pool, {
+    await upsertOtpAccount(pool, {
       phone: adminPhone,
-      fullName: 'Bootstrap Central Admin',
+      displayName: 'Bootstrap Central Admin',
       isInternal: true,
       role: 'central_admin',
-      organizationId: JKSH_ORG,
+      franchiseId: null,
     });
   }
-
   const ownerPhone = process.env.BOOTSTRAP_OWNER_PHONE;
   if (ownerPhone) {
-    await upsertOtpUser(pool, {
+    await upsertOtpAccount(pool, {
       phone: ownerPhone,
-      fullName: 'Bootstrap Franchise Owner',
+      displayName: 'Bootstrap Franchise Owner',
       isInternal: false,
       role: 'franchise_owner',
-      organizationId: JKSH_ORG,
-      brandId: TVANAMM_BRAND,
       franchiseId: DEMO_FRANCHISE,
     });
   }
@@ -60,33 +59,28 @@ export async function seedDevData(pool: Pool): Promise<{ seeded: boolean }> {
   return { seeded: true };
 }
 
-async function upsertOtpUser(
+async function upsertOtpAccount(
   pool: Pool,
   params: {
     phone: string;
-    fullName: string;
+    displayName: string;
     isInternal: boolean;
     role: 'central_admin' | 'accountant' | 'franchise_owner';
-    organizationId: string;
-    brandId?: string;
-    franchiseId?: string;
+    franchiseId: string | null;
   },
 ): Promise<void> {
   const { rows } = await pool.query<{ id: string }>(
-    `insert into identity.users (full_name, phone, account_state, is_internal, has_auth_login, activated_at)
-     values ($1, $2, 'active', $3, true, now())
-     on conflict (phone) where (has_auth_login and phone is not null)
-       do update set full_name = excluded.full_name, account_state = 'active'
+    `insert into identity.account_profiles (mobile, display_name, status, is_internal, activated_at)
+     values ($1,$2,'active',$3, now())
+     on conflict (mobile) do update set display_name = excluded.display_name, status = 'active'
      returning id`,
-    [params.fullName, params.phone, params.isInternal],
+    [params.phone, params.displayName, params.isInternal],
   );
-  const userId = rows[0]?.id;
-  if (!userId) return;
+  const accountId = rows[0]?.id;
+  if (!accountId) return;
   await pool.query(
-    `insert into identity.memberships
-       (user_id, role, organization_id, brand_id, franchise_id, outlet_id)
-     values ($1, $2, $3, $4, $5, null)
-     on conflict do nothing`,
-    [userId, params.role, params.organizationId, params.brandId ?? null, params.franchiseId ?? null],
+    `insert into identity.memberships (account_id, role_key, organization_id, franchise_id)
+     values ($1,$2,$3,$4) on conflict do nothing`,
+    [accountId, params.role, JKSH_ORG, params.franchiseId],
   );
 }

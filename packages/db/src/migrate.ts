@@ -4,15 +4,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 
-const MIGRATIONS_ROOT = fileURLToPath(
-  new URL('../../../database', import.meta.url),
+/** Single ordered migration list (`docs/plans/billing-data-api-plan.md` §13). */
+const MIGRATIONS_DIR = fileURLToPath(
+  new URL('../../../database/migrations', import.meta.url),
 );
 
-/** Systems are applied in this order; files inside a system sort by name. */
-const SYSTEM_ORDER = ['identity', 'billing', 'stock'] as const;
-
 export interface MigrationFile {
-  system: string;
   name: string;
   fullPath: string;
   sql: string;
@@ -26,36 +23,30 @@ export interface MigrationRecord {
 }
 
 export async function loadMigrationFiles(
-  root = MIGRATIONS_ROOT,
+  dir = MIGRATIONS_DIR,
 ): Promise<MigrationFile[]> {
-  const files: MigrationFile[] = [];
-
-  for (const system of SYSTEM_ORDER) {
-    const dir = path.join(root, system);
-    let entries: string[];
-    try {
-      entries = await readdir(dir);
-    } catch {
-      continue;
-    }
-
-    const sqlFiles = entries
-      .filter((entry) => entry.endsWith('.sql'))
-      .sort((a, b) => a.localeCompare(b));
-
-    for (const entry of sqlFiles) {
-      const fullPath = path.join(dir, entry);
-      const sql = await readFile(fullPath, 'utf8');
-      files.push({
-        system,
-        name: `${system}/${entry}`,
-        fullPath,
-        sql,
-        checksum: createHash('sha256').update(sql).digest('hex'),
-      });
-    }
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return [];
   }
 
+  const sqlFiles = entries
+    .filter((entry) => entry.endsWith('.sql'))
+    .sort((a, b) => a.localeCompare(b));
+
+  const files: MigrationFile[] = [];
+  for (const entry of sqlFiles) {
+    const fullPath = path.join(dir, entry);
+    const sql = await readFile(fullPath, 'utf8');
+    files.push({
+      name: entry,
+      fullPath,
+      sql,
+      checksum: createHash('sha256').update(sql).digest('hex'),
+    });
+  }
   return files;
 }
 

@@ -7,6 +7,11 @@ export {
   type PoolClient,
 } from './pg.js';
 export {
+  applyContext,
+  withActorContext,
+  type DbContext,
+} from './context.js';
+export {
   createServiceRoleClient,
   createAuthClient,
   createUserScopedClient,
