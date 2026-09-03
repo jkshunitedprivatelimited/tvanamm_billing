@@ -14,7 +14,8 @@ export const capabilitySchema = z.enum([
   'identity.session.revoke',
   'identity.audit.read',
 
-  // Outlet lifecycle and configuration
+  // Franchise + outlet lifecycle and configuration
+  'billing.franchise.manage',
   'billing.outlet.create',
   'billing.outlet.lifecycle',
   'billing.outlet.manage',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createBillCommandSchema, createRefundCommandSchema } from './billing.js';
+import { createBillCommandSchema, createRefundCommandSchema } from './billing';
 
 describe('billing commands', () => {
   it('accepts Cash and UPI bill commands with valid receipt numbers', () => {
@@ -28,4 +28,3 @@ describe('billing commands', () => {
     expect(result.success).toBe(false);
   });
 });
-

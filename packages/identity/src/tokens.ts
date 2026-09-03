@@ -39,7 +39,10 @@ export interface ParsedCredential {
   nonceHash: string;
 }
 
-export function parseTerminalCredential(secret: string, credential: string): ParsedCredential | null {
+export function parseTerminalCredential(
+  secret: string,
+  credential: string,
+): ParsedCredential | null {
   const parts = credential.split('.');
   if (parts.length !== 5) return null;
   const [prefix, terminalId, publicId, nonce, sig] = parts as [
@@ -92,9 +95,7 @@ export function nonceHashMatches(nonceHash: string, storedHash: string): boolean
 // --- Activation codes & invitation tokens ------------------------------
 
 export function hashActivationCode(secret: string, code: string): string {
-  return b64url(
-    createHmac('sha256', secret).update(`activation:${code.toUpperCase()}`).digest(),
-  );
+  return b64url(createHmac('sha256', secret).update(`activation:${code.toUpperCase()}`).digest());
 }
 export function activationCodeMatches(secret: string, code: string, storedHash: string): boolean {
   return nonceHashMatches(hashActivationCode(secret, code), storedHash);

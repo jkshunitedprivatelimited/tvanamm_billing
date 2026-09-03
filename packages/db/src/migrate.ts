@@ -5,9 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 
 /** Single ordered migration list (`docs/plans/billing-data-api-plan.md` §13). */
-const MIGRATIONS_DIR = fileURLToPath(
-  new URL('../../../database/migrations', import.meta.url),
-);
+const MIGRATIONS_DIR = fileURLToPath(new URL('../../../database/migrations', import.meta.url));
 
 export interface MigrationFile {
   name: string;
@@ -22,9 +20,7 @@ export interface MigrationRecord {
   applied_at: string;
 }
 
-export async function loadMigrationFiles(
-  dir = MIGRATIONS_DIR,
-): Promise<MigrationFile[]> {
+export async function loadMigrationFiles(dir = MIGRATIONS_DIR): Promise<MigrationFile[]> {
   let entries: string[];
   try {
     entries = await readdir(dir);
@@ -109,17 +105,15 @@ export async function migrate(pool: Pool): Promise<MigrateResult> {
     try {
       await client.query('begin');
       await client.query(file.sql);
-      await client.query(
-        'insert into identity.schema_migrations (id, checksum) values ($1, $2)',
-        [file.name, file.checksum],
-      );
+      await client.query('insert into identity.schema_migrations (id, checksum) values ($1, $2)', [
+        file.name,
+        file.checksum,
+      ]);
       await client.query('commit');
       applied.push(file.name);
     } catch (error) {
       await client.query('rollback');
-      throw new Error(
-        `Migration ${file.name} failed: ${(error as Error).message}`,
-      );
+      throw new Error(`Migration ${file.name} failed: ${(error as Error).message}`);
     } finally {
       client.release();
     }

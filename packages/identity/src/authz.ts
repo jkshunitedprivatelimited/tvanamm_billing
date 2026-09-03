@@ -1,6 +1,6 @@
 import type { AccessScope, ActorContext, Capability } from '@jksh/contracts';
-import { authorize, type PolicyContext } from './authorize.js';
-import { IdentityError } from './errors.js';
+import { authorize, type PolicyContext } from './authorize';
+import { IdentityError } from './errors';
 
 /** Throw a typed forbidden/fresh-auth error unless the actor is allowed. */
 export function ensureAllowed(

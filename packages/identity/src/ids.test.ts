@@ -5,13 +5,13 @@ import {
   generateEmployeeCode,
   isReceiptNumber,
   nextReceiptPrefix,
-} from './ids.js';
+} from './ids';
 
 describe('receipt numbers', () => {
   it('formats YYYYMMDD-Tnn-nnnnnn', () => {
-    expect(
-      formatReceiptNumber({ year: 2026, month: 9, day: 3 }, 'T01', 1),
-    ).toBe('20260903-T01-000001');
+    expect(formatReceiptNumber({ year: 2026, month: 9, day: 3 }, 'T01', 1)).toBe(
+      '20260903-T01-000001',
+    );
   });
 
   it('validates the shape', () => {

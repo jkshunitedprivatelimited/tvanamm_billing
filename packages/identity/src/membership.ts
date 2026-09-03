@@ -25,7 +25,11 @@ export function resolveAdminRouting(memberships: readonly MembershipRow[]): Admi
   const only = usable[0];
   if (!only) return { outcome: 'no_admin_access' };
   if (usable.length === 1) {
-    return { outcome: 'single_workspace', membershipId: only.id, redirectTo: redirectFor(only.role) };
+    return {
+      outcome: 'single_workspace',
+      membershipId: only.id,
+      redirectTo: redirectFor(only.role),
+    };
   }
   return { outcome: 'select_workspace', membershipIds: usable.map((m) => m.id) };
 }
@@ -61,8 +65,7 @@ export function businessDate(now: Date, timeZone: string): BusinessDate {
     month: '2-digit',
     day: '2-digit',
   }).formatToParts(now);
-  const get = (type: string): number =>
-    Number(parts.find((p) => p.type === type)?.value ?? '0');
+  const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? '0');
   return { year: get('year'), month: get('month'), day: get('day') };
 }
 

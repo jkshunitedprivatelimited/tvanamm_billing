@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { mobileNumberSchema } from './identity.js';
+import { mobileNumberSchema } from './identity';
 
 // --- Admin login: Supabase Auth mobile OTP (MSG91 delivers the SMS) --------
 
@@ -63,7 +63,8 @@ export const pinLoginResultSchema = z.discriminatedUnion('outcome', [
   }),
   z.object({
     outcome: z.literal('rejected'),
-    reason: z.enum(['invalid', 'locked', 'terminal_revoked', 'employee_inactive', 'outlet_inactive']),
+    // Every bad-PIN case collapses to `invalid`; only terminal/outlet state is disclosed.
+    reason: z.enum(['invalid', 'locked', 'terminal_revoked', 'outlet_inactive']),
     retryAfterSeconds: z.number().int().nonnegative().optional(),
   }),
 ]);
@@ -81,5 +82,7 @@ export type CreateInvitationCommand = z.infer<typeof createInvitationCommandSche
 
 export const acceptInvitationCommandSchema = z.object({
   token: z.string().min(20).max(400),
+  phone: mobileNumberSchema,
+  code: z.string().regex(/^\d{4,8}$/),
 });
 export type AcceptInvitationCommand = z.infer<typeof acceptInvitationCommandSchema>;

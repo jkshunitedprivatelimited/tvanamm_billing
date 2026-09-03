@@ -9,7 +9,7 @@ import {
   nonceHashMatches,
   parseOperatorToken,
   parseTerminalCredential,
-} from './tokens.js';
+} from './tokens';
 
 const SECRET = 'unit-test-secret-key-at-least-32-characters';
 
@@ -18,12 +18,18 @@ describe('terminal credential', () => {
     const terminalId = '00000000-0000-4000-8000-0000000000cc';
     const minted = mintTerminalCredential(SECRET, terminalId);
     const parsed = parseTerminalCredential(SECRET, minted.credential);
-    expect(parsed).toMatchObject({ terminalId, publicId: minted.publicId, nonceHash: minted.nonceHash });
+    expect(parsed).toMatchObject({
+      terminalId,
+      publicId: minted.publicId,
+      nonceHash: minted.nonceHash,
+    });
   });
   it('rejects a tampered signature and a wrong secret', () => {
     const minted = mintTerminalCredential(SECRET, '00000000-0000-4000-8000-0000000000cc');
     expect(parseTerminalCredential(SECRET, `${minted.credential.slice(0, -2)}xy`)).toBeNull();
-    expect(parseTerminalCredential('another-secret-key-32-characters-min', minted.credential)).toBeNull();
+    expect(
+      parseTerminalCredential('another-secret-key-32-characters-min', minted.credential),
+    ).toBeNull();
   });
 });
 

@@ -7,10 +7,10 @@ import type {
   MembershipRole,
   WorkspaceCard,
 } from '@jksh/contracts';
-import { systemContext } from './db-context.js';
-import { recordAudit } from './audit.js';
-import { IdentityError } from './errors.js';
-import { resolveAdminRouting, sortWorkspaceCards, type MembershipRow } from './membership.js';
+import { systemContext } from './db-context';
+import { recordAudit } from './audit';
+import { IdentityError } from './errors';
+import { resolveAdminRouting, sortWorkspaceCards, type MembershipRow } from './membership';
 
 export interface RequestMeta {
   correlationId?: string;
@@ -19,10 +19,7 @@ export interface RequestMeta {
   deviceLabel?: string;
 }
 
-async function loadMembershipRows(
-  client: PoolClient,
-  accountId: string,
-): Promise<MembershipRow[]> {
+async function loadMembershipRows(client: PoolClient, accountId: string): Promise<MembershipRow[]> {
   const { rows } = await client.query<{
     id: string;
     role_key: MembershipRole;

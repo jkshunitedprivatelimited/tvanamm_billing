@@ -62,9 +62,7 @@ export function otpSendGate(
     return { allowed: false, retryAfterSeconds: secondsUntil(state.lockedUntil, now) };
   }
   if (state.lastSentAt) {
-    const nextAllowed = new Date(
-      state.lastSentAt.getTime() + policy.resendCooldownSeconds * 1000,
-    );
+    const nextAllowed = new Date(state.lastSentAt.getTime() + policy.resendCooldownSeconds * 1000);
     if (nextAllowed > now) {
       return { allowed: false, retryAfterSeconds: secondsUntil(nextAllowed, now) };
     }

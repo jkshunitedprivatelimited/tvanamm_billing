@@ -15,4 +15,3 @@ export const eventEnvelopeSchema = z.object({
 });
 
 export type EventEnvelope = z.infer<typeof eventEnvelopeSchema>;
-

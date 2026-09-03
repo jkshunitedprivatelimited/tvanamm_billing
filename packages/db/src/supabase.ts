@@ -25,11 +25,9 @@ export function createServiceRoleClient() {
  * (signInWithPassword, MFA challenge) from server code. No session persistence.
  */
 export function createAuthClient() {
-  return createClient(
-    need('SUPABASE_URL'),
-    need('SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY'),
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
+  return createClient(need('SUPABASE_URL'), need('SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY'), {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 /**
@@ -37,14 +35,10 @@ export function createAuthClient() {
  * by attaching their access token. RLS applies.
  */
 export function createUserScopedClient(accessToken: string) {
-  return createClient(
-    need('SUPABASE_URL'),
-    need('SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY'),
-    {
-      auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-    },
-  );
+  return createClient(need('SUPABASE_URL'), need('SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY'), {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  });
 }
 
 export type { SupabaseClient };

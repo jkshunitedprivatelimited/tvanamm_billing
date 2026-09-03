@@ -10,14 +10,14 @@ import type {
   SetEmployeeStatusCommand,
   UpdateEmployeeCommand,
 } from '@jksh/contracts';
-import { contextForActor } from './db-context.js';
-import { ensureAllowed } from './authz.js';
-import { FRESH_AUTH_SECONDS } from './authorize.js';
-import { generateEmployeeCode } from './ids.js';
-import { hashPin, isValidPinFormat, isWeakPin, pinLookup } from './pin.js';
-import { recordAudit } from './audit.js';
-import { IdentityError } from './errors.js';
-import type { RequestMeta } from './admin-auth.js';
+import { contextForActor } from './db-context';
+import { ensureAllowed } from './authz';
+import { FRESH_AUTH_SECONDS } from './authorize';
+import { generateEmployeeCode } from './ids';
+import { hashPin, isValidPinFormat, isWeakPin, pinLookup } from './pin';
+import { recordAudit } from './audit';
+import { IdentityError } from './errors';
+import type { RequestMeta } from './admin-auth';
 
 interface OutletScope {
   organization_id: string;
@@ -37,8 +37,10 @@ async function writePin(
   client: PoolClient,
   params: { employeeId: string; outletId: string; pin: string; setBy: string | null },
 ): Promise<void> {
-  if (!isValidPinFormat(params.pin)) throw new IdentityError('invalid_pin', 'PIN must be four digits');
-  if (isWeakPin(params.pin)) throw new IdentityError('invalid_pin', 'Choose a less predictable PIN');
+  if (!isValidPinFormat(params.pin))
+    throw new IdentityError('invalid_pin', 'PIN must be four digits');
+  if (isWeakPin(params.pin))
+    throw new IdentityError('invalid_pin', 'Choose a less predictable PIN');
   const secret = identityTokenSecret();
   const lookup = pinLookup(secret, params.outletId, params.pin);
 
@@ -47,7 +49,8 @@ async function writePin(
       where outlet_id = $1 and pin_lookup = $2 and id <> $3`,
     [params.outletId, lookup, params.employeeId],
   );
-  if (clash.rowCount) throw new IdentityError('pin_not_unique', 'That PIN is already used at this outlet');
+  if (clash.rowCount)
+    throw new IdentityError('pin_not_unique', 'That PIN is already used at this outlet');
 
   const hash = await hashPin(params.pin);
   await client.query(
@@ -77,9 +80,10 @@ export async function createEmployee(
     const id = randomUUID();
     let employeeCode = generateEmployeeCode();
     for (let i = 0; i < 5; i += 1) {
-      const c = await client.query(`select 1 from identity.store_employees where employee_code = $1`, [
-        employeeCode,
-      ]);
+      const c = await client.query(
+        `select 1 from identity.store_employees where employee_code = $1`,
+        [employeeCode],
+      );
       if (c.rowCount === 0) break;
       employeeCode = generateEmployeeCode();
     }
@@ -88,9 +92,23 @@ export async function createEmployee(
       `insert into identity.store_employees
          (id, outlet_id, organization_id, franchise_id, employee_code, full_name, mobile, status, created_by)
        values ($1,$2,$3,$4,$5,$6,$7,'active',$8)`,
-      [id, cmd.outletId, scope.organization_id, scope.franchise_id, employeeCode, cmd.fullName, cmd.mobile, actor.accountId ?? null],
+      [
+        id,
+        cmd.outletId,
+        scope.organization_id,
+        scope.franchise_id,
+        employeeCode,
+        cmd.fullName,
+        cmd.mobile,
+        actor.accountId ?? null,
+      ],
     );
-    await writePin(client, { employeeId: id, outletId: cmd.outletId, pin: cmd.initialPin, setBy: actor.accountId ?? null });
+    await writePin(client, {
+      employeeId: id,
+      outletId: cmd.outletId,
+      pin: cmd.initialPin,
+      setBy: actor.accountId ?? null,
+    });
 
     await recordAudit(client, {
       action: 'employee.created',
@@ -159,7 +177,10 @@ export async function updateEmployee(
       sets.push(`mobile = $${String(values.length)}`);
     }
     if (sets.length === 0) return;
-    await client.query(`update identity.store_employees set ${sets.join(', ')} where id = $1`, values);
+    await client.query(
+      `update identity.store_employees set ${sets.join(', ')} where id = $1`,
+      values,
+    );
     await recordAudit(client, {
       action: 'employee.updated',
       result: 'success',

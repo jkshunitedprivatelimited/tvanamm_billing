@@ -11,7 +11,7 @@ import {
   registerFailure,
   registerSuccess,
   verifyPinHash,
-} from './pin.js';
+} from './pin';
 
 describe('PIN format', () => {
   it('accepts exactly four digits', () => {
@@ -92,8 +92,10 @@ describe('lockout FSM', () => {
     expect(gate.retryAfterSeconds).toBe(DEFAULT_LOCKOUT_POLICY.hardLockSeconds - 60);
     // After the lock window it is clear again.
     expect(
-      attemptGate(state, new Date(t0.getTime() + DEFAULT_LOCKOUT_POLICY.hardLockSeconds * 1000 + 1000))
-        .blocked,
+      attemptGate(
+        state,
+        new Date(t0.getTime() + DEFAULT_LOCKOUT_POLICY.hardLockSeconds * 1000 + 1000),
+      ).blocked,
     ).toBe(false);
   });
 

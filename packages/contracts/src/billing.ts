@@ -37,4 +37,3 @@ export const createRefundCommandSchema = z.object({
 });
 
 export type CreateRefundCommand = z.infer<typeof createRefundCommandSchema>;
-

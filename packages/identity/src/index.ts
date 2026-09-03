@@ -10,10 +10,10 @@ export type {
   EmployeeStatus,
 } from '@jksh/contracts';
 
-export * from './errors.js';
-export * from './authorize.js';
-export { ensureAllowed } from './authz.js';
-export * from './membership.js';
+export * from './errors';
+export * from './authorize';
+export { ensureAllowed } from './authz';
+export * from './membership';
 export {
   isValidPinFormat,
   isWeakPin,
@@ -25,13 +25,15 @@ export {
   registerFailure,
   registerSuccess,
   isHardLocked,
+  verifyDummyPin,
   DEFAULT_LOCKOUT_POLICY,
+  TERMINAL_LOCKOUT_POLICY,
   EMPTY_ATTEMPT_STATE,
   PIN_PATTERN,
   type AttemptState,
   type AttemptGate,
   type LockoutPolicy,
-} from './pin.js';
+} from './pin';
 export {
   otpSendGate,
   otpVerifyGate,
@@ -43,15 +45,15 @@ export {
   type OtpAttemptState,
   type OtpPolicy,
   type OtpGate,
-} from './otp.js';
+} from './otp';
 export {
   checkAndRecordOtpSend,
   checkOtpVerify,
   recordOtpVerifyFailure,
   resetOtpAttempts,
   type OtpGateResult,
-} from './otp-attempts.js';
-export * from './ids.js';
+} from './otp-attempts';
+export * from './ids';
 export {
   mintTerminalCredential,
   parseTerminalCredential,
@@ -67,8 +69,8 @@ export {
   type ParsedCredential,
   type MintedOperatorToken,
   type ParsedOperatorToken,
-} from './tokens.js';
-export { recordAudit, type AuditInput } from './audit.js';
+} from './tokens';
+export { recordAudit, type AuditInput } from './audit';
 export {
   getSmsSender,
   setSmsSender,
@@ -78,8 +80,8 @@ export {
   type SmsSender,
   type SmsSendResult,
   type Msg91Config,
-} from './sms-sender.js';
-export { systemContext, contextForActor } from './db-context.js';
+} from './sms-sender';
+export { systemContext, contextForActor } from './db-context';
 export {
   resolveAdminAfterVerify,
   listWorkspaceCards,
@@ -89,35 +91,26 @@ export {
   type RequestMeta,
   type ResolvedWorkspace,
   type AdminActorInput,
-} from './admin-auth.js';
-export { setAccountStatus } from './account.js';
-export {
-  createFranchiseOwnerInvitation,
-  acceptInvitation,
-} from './invitations.js';
-export {
-  createOutlet,
-  outletLifecycle,
-  updateOutletConfig,
-  listOutlets,
-} from './outlet.js';
+} from './admin-auth';
+export { setAccountStatus } from './account';
+export { createFranchiseOwnerInvitation, acceptInvitation } from './invitations';
+export { createFranchise, listFranchises } from './franchise';
+export { createOutlet, outletLifecycle, updateOutletConfig, listOutlets } from './outlet';
 export {
   createEmployee,
   updateEmployee,
   setEmployeeStatus,
   resetEmployeePin,
   listEmployees,
-} from './employee.js';
-export {
-  issueActivationCode,
-  registerTerminal,
-  listTerminals,
-  revokeTerminal,
-} from './terminal.js';
+} from './employee';
+export { issueActivationCode, registerTerminal, listTerminals, revokeTerminal } from './terminal';
 export {
   pinLogin,
   loadOperatorContext,
   lockOperator,
   endOperatorSession,
+  rejectOperatorSession,
+  getOperatorSummary,
   type PinLoginOutput,
-} from './store-auth.js';
+  type OperatorSummary,
+} from './store-auth';

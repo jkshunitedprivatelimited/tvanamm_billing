@@ -1,6 +1,6 @@
 import type { DbContext } from '@jksh/db';
 import type { ActorContext } from '@jksh/contracts';
-import { IdentityError } from './errors.js';
+import { IdentityError } from './errors';
 
 /** Trusted pre-authentication identity operations (OTP link, PIN login,
  *  terminal registration, invitation acceptance). No user context yet. */

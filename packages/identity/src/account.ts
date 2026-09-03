@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { withActorContext, type Pool } from '@jksh/db';
 import type { AccountStatus, ActorContext } from '@jksh/contracts';
-import { contextForActor } from './db-context.js';
-import { ensureAllowed } from './authz.js';
-import { FRESH_AUTH_SECONDS } from './authorize.js';
-import { recordAudit } from './audit.js';
-import { IdentityError } from './errors.js';
-import type { RequestMeta } from './admin-auth.js';
+import { contextForActor } from './db-context';
+import { ensureAllowed } from './authz';
+import { FRESH_AUTH_SECONDS } from './authorize';
+import { recordAudit } from './audit';
+import { IdentityError } from './errors';
+import type { RequestMeta } from './admin-auth';
 
 const TIMESTAMP_COLUMN: Partial<Record<AccountStatus, string>> = {
   active: 'activated_at',
@@ -36,10 +36,13 @@ export async function setAccountStatus(
   );
 
   return withActorContext(pool, contextForActor(actor), async (client) => {
-    const { rows } = await client.query<{ id: string; auth_user_id: string | null; status: AccountStatus }>(
-      `select id, auth_user_id, status from identity.account_profiles where id = $1 for update`,
-      [accountId],
-    );
+    const { rows } = await client.query<{
+      id: string;
+      auth_user_id: string | null;
+      status: AccountStatus;
+    }>(`select id, auth_user_id, status from identity.account_profiles where id = $1 for update`, [
+      accountId,
+    ]);
     const row = rows[0];
     if (!row) throw new IdentityError('not_found', 'Account not found');
 

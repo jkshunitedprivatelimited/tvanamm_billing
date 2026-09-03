@@ -19,6 +19,7 @@ export const auditActionSchema = z.enum([
   'account.status_changed',
   'membership.changed',
   'workspace.selected',
+  'franchise.created',
   'outlet.created',
   'outlet.activated',
   'outlet.suspended',

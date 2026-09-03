@@ -4,9 +4,30 @@ import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
 export const PIN_PATTERN = /^\d{4}$/;
 
 const TRIVIAL_PINS = new Set([
-  '0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999',
-  '1234', '2345', '3456', '4567', '5678', '6789', '0123',
-  '9876', '8765', '7654', '6543', '5432', '4321', '3210',
+  '0000',
+  '1111',
+  '2222',
+  '3333',
+  '4444',
+  '5555',
+  '6666',
+  '7777',
+  '8888',
+  '9999',
+  '1234',
+  '2345',
+  '3456',
+  '4567',
+  '5678',
+  '6789',
+  '0123',
+  '9876',
+  '8765',
+  '7654',
+  '6543',
+  '5432',
+  '4321',
+  '3210',
 ]);
 
 export function isValidPinFormat(pin: string): boolean {
@@ -38,6 +59,17 @@ export async function verifyPinHash(hashValue: string, pin: string): Promise<boo
   } catch {
     return false;
   }
+}
+
+// A fixed argon2id hash used to spend comparable CPU when no employee matches,
+// so a caller cannot distinguish "unknown PIN" from "wrong PIN" by timing.
+// (hash of a random string; never equal to any real PIN hash.)
+const DUMMY_HASH =
+  '$argon2id$v=19$m=19456,t=2,p=1$ZGV2LW9ubHktZHVtbXktc2FsdA$mBEZ8G0h3q1n2c4v6b8n0m2k4h6j8l0p2r4t6v8x0z2';
+
+/** Constant-ish-time no-op verification for the "no matching employee" path. */
+export async function verifyDummyPin(pin: string): Promise<void> {
+  await verifyPinHash(DUMMY_HASH, pin);
 }
 
 /**
@@ -79,6 +111,15 @@ export const DEFAULT_LOCKOUT_POLICY: LockoutPolicy = {
   hardLockSeconds: 15 * 60,
 };
 
+/** Terminal-wide policy: a little more headroom for a shared device, but still
+ *  stops PIN-space enumeration long before it succeeds. */
+export const TERMINAL_LOCKOUT_POLICY: LockoutPolicy = {
+  softAt: 5,
+  cooldownLadderSeconds: [10, 20, 45, 90],
+  hardLockAt: 10,
+  hardLockSeconds: 15 * 60,
+};
+
 export const EMPTY_ATTEMPT_STATE: AttemptState = {
   failedCount: 0,
   lastFailedAt: null,
@@ -99,9 +140,7 @@ export function attemptGate(
   if (state.lockedUntil && state.lockedUntil.getTime() > now.getTime()) {
     return {
       blocked: true,
-      retryAfterSeconds: Math.ceil(
-        (state.lockedUntil.getTime() - now.getTime()) / 1000,
-      ),
+      retryAfterSeconds: Math.ceil((state.lockedUntil.getTime() - now.getTime()) / 1000),
     };
   }
   if (
@@ -141,9 +180,6 @@ export function registerSuccess(): AttemptState {
   return { ...EMPTY_ATTEMPT_STATE };
 }
 
-export function isHardLocked(
-  state: AttemptState,
-  now: Date,
-): boolean {
+export function isHardLocked(state: AttemptState, now: Date): boolean {
   return !!state.lockedUntil && state.lockedUntil.getTime() > now.getTime();
 }

@@ -1,5 +1,5 @@
 import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
-import { systemContext } from './db-context.js';
+import { systemContext } from './db-context';
 import {
   DEFAULT_OTP_POLICY,
   EMPTY_OTP_STATE,
@@ -9,7 +9,7 @@ import {
   registerOtpVerifyFailure,
   resetOtpState,
   type OtpAttemptState,
-} from './otp.js';
+} from './otp';
 
 async function load(client: PoolClient, mobile: string): Promise<OtpAttemptState> {
   const { rows } = await client.query<{
@@ -106,7 +106,11 @@ export async function recordOtpVerifyFailure(
   });
 }
 
-export async function resetOtpAttempts(pool: Pool, mobile: string, now = new Date()): Promise<void> {
+export async function resetOtpAttempts(
+  pool: Pool,
+  mobile: string,
+  now = new Date(),
+): Promise<void> {
   await withActorContext(pool, systemContext(), (client) =>
     save(client, mobile, resetOtpState(now)),
   );

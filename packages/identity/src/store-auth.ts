@@ -2,23 +2,26 @@ import { randomUUID } from 'node:crypto';
 import { identityTokenSecret } from '@jksh/config';
 import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
 import type { ActorContext, PinLoginCommand, PinLoginResult } from '@jksh/contracts';
-import { systemContext } from './db-context.js';
+import { contextForActor, systemContext } from './db-context';
 import {
   attemptGate,
+  isHardLocked,
   pinLookup,
   registerFailure,
   registerSuccess,
+  verifyDummyPin,
   verifyPinHash,
+  TERMINAL_LOCKOUT_POLICY,
   type AttemptState,
-} from './pin.js';
+} from './pin';
 import {
   mintOperatorToken,
   nonceHashMatches,
   parseOperatorToken,
   parseTerminalCredential,
-} from './tokens.js';
-import { recordAudit } from './audit.js';
-import type { RequestMeta } from './admin-auth.js';
+} from './tokens';
+import { recordAudit } from './audit';
+import type { RequestMeta } from './admin-auth';
 
 export interface PinLoginOutput {
   result: PinLoginResult;
@@ -27,12 +30,41 @@ export interface PinLoginOutput {
 
 const OPERATOR_SESSION_HOURS = 16;
 
-type RejectReason = 'invalid' | 'locked' | 'terminal_revoked' | 'employee_inactive' | 'outlet_inactive';
+/** Only the terminal/outlet state is disclosed; every bad-PIN case is generic. */
+type RejectReason = 'invalid' | 'locked' | 'terminal_revoked' | 'outlet_inactive';
 
 function reject(reason: RejectReason, retryAfterSeconds?: number): PinLoginOutput {
   return {
     result: { outcome: 'rejected', reason, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) },
   };
+}
+
+async function loadTerminalAttempt(client: PoolClient, terminalId: string): Promise<AttemptState> {
+  const { rows } = await client.query<{
+    failed_count: number;
+    last_failed_at: Date | null;
+    lock_time: Date | null;
+  }>(
+    `insert into identity.terminal_pin_attempts (terminal_id) values ($1)
+       on conflict (terminal_id) do update set terminal_id = excluded.terminal_id
+     returning failed_count, last_failed_at, lock_time`,
+    [terminalId],
+  );
+  const r = rows[0] ?? { failed_count: 0, last_failed_at: null, lock_time: null };
+  return { failedCount: r.failed_count, lastFailedAt: r.last_failed_at, lockedUntil: r.lock_time };
+}
+
+async function saveTerminalAttempt(
+  client: PoolClient,
+  terminalId: string,
+  state: AttemptState,
+): Promise<void> {
+  await client.query(
+    `update identity.terminal_pin_attempts
+       set failed_count = $2, last_failed_at = $3, lock_time = $4
+     where terminal_id = $1`,
+    [terminalId, state.failedCount, state.lastFailedAt, state.lockedUntil],
+  );
 }
 
 export async function pinLogin(
@@ -75,6 +107,62 @@ export async function pinLogin(
     );
     if (outlet.rows[0]?.status !== 'active') return reject('outlet_inactive');
 
+    // ---- Terminal-wide brute-force gate (checked before any employee lookup).
+    const termAttempt = await loadTerminalAttempt(client, term.id);
+    const termGate = attemptGate(termAttempt, now, TERMINAL_LOCKOUT_POLICY);
+    if (termGate.blocked) {
+      await recordAudit(client, {
+        action: 'pin.locked',
+        result: 'denied',
+        organizationId: term.organization_id,
+        franchiseId: term.franchise_id,
+        outletId: term.outlet_id,
+        terminalId: term.id,
+        correlationId,
+        metadata: { scope: 'terminal', terminalFailedCount: termAttempt.failedCount },
+      });
+      return reject('locked', termGate.retryAfterSeconds);
+    }
+
+    /** Record a failed attempt against the terminal (and the employee, if known),
+     *  audit it without any PIN, and return the generic invalid response. */
+    const fail = async (
+      reason: string,
+      employee?: { id: string; state: AttemptState },
+    ): Promise<PinLoginOutput> => {
+      const nextTerm = registerFailure(termAttempt, now, TERMINAL_LOCKOUT_POLICY);
+      await saveTerminalAttempt(client, term.id, nextTerm);
+      let empHardLocked = false;
+      let empRetry = 0;
+      if (employee) {
+        const nextEmp = registerFailure(employee.state, now);
+        await client.query(
+          `update identity.store_employees
+             set failed_attempts = $2, last_failed_at = $3, lock_time = $4 where id = $1`,
+          [employee.id, nextEmp.failedCount, nextEmp.lastFailedAt, nextEmp.lockedUntil],
+        );
+        empHardLocked = isHardLocked(nextEmp, now);
+        empRetry = attemptGate(nextEmp, now).retryAfterSeconds;
+      }
+      const termHardLocked = isHardLocked(nextTerm, now);
+      await recordAudit(client, {
+        action: termHardLocked || empHardLocked ? 'pin.locked' : 'pin.login_failed',
+        result: termHardLocked || empHardLocked ? 'denied' : 'failure',
+        ...(employee ? { actorEmployeeId: employee.id } : {}),
+        organizationId: term.organization_id,
+        franchiseId: term.franchise_id,
+        outletId: term.outlet_id,
+        terminalId: term.id,
+        correlationId,
+        metadata: { reason, terminalFailedCount: nextTerm.failedCount },
+      });
+      const retry = Math.max(
+        attemptGate(nextTerm, now, TERMINAL_LOCKOUT_POLICY).retryAfterSeconds,
+        empRetry,
+      );
+      return reject('invalid', retry || undefined);
+    };
+
     const lookup = pinLookup(secret, term.outlet_id, cmd.pin);
     const { rows: empRows } = await client.query<{
       id: string;
@@ -95,58 +183,32 @@ export async function pinLogin(
     const emp = empRows[0];
 
     if (!emp?.pin_hash) {
-      await recordAudit(client, {
-        action: 'pin.login_failed',
-        result: 'failure',
-        organizationId: term.organization_id,
-        franchiseId: term.franchise_id,
-        outletId: term.outlet_id,
-        terminalId: term.id,
-        correlationId,
-        metadata: { reason: 'no_match' },
-      });
-      return reject('invalid');
+      await verifyDummyPin(cmd.pin); // equalize timing vs. a real verification
+      return fail('no_match');
     }
 
-    const state: AttemptState = {
+    const empState: AttemptState = {
       failedCount: emp.failed_attempts,
       lastFailedAt: emp.last_failed_at,
       lockedUntil: emp.lock_time,
     };
-    const gate = attemptGate(state, now);
-    if (gate.blocked) return reject('locked', gate.retryAfterSeconds);
+    const empGate = attemptGate(empState, now);
+    if (empGate.blocked) return reject('locked', empGate.retryAfterSeconds);
 
-    if (emp.status !== 'active') return reject('employee_inactive');
-
-    const ok = await verifyPinHash(emp.pin_hash, cmd.pin);
-    if (!ok) {
-      const next = registerFailure(state, now);
-      await client.query(
-        `update identity.store_employees
-           set failed_attempts = $2, last_failed_at = $3, lock_time = $4 where id = $1`,
-        [emp.id, next.failedCount, next.lastFailedAt, next.lockedUntil],
-      );
-      const hardLocked = (next.lockedUntil?.getTime() ?? 0) > now.getTime();
-      await recordAudit(client, {
-        action: hardLocked ? 'pin.locked' : 'pin.login_failed',
-        result: hardLocked ? 'denied' : 'failure',
-        actorEmployeeId: emp.id,
-        organizationId: term.organization_id,
-        franchiseId: term.franchise_id,
-        outletId: term.outlet_id,
-        terminalId: term.id,
-        correlationId,
-        metadata: { failedCount: next.failedCount },
-      });
-      return reject('invalid', attemptGate(next, now).retryAfterSeconds || undefined);
+    if (emp.status !== 'active') {
+      await verifyDummyPin(cmd.pin);
+      return fail('employee_inactive', { id: emp.id, state: empState });
     }
 
-    // Success.
-    const reset = registerSuccess();
+    const ok = await verifyPinHash(emp.pin_hash, cmd.pin);
+    if (!ok) return fail('wrong_pin', { id: emp.id, state: empState });
+
+    // Success: reset both counters.
+    await saveTerminalAttempt(client, term.id, registerSuccess());
     await client.query(
       `update identity.store_employees
-         set failed_attempts = $2, last_failed_at = $3, lock_time = $4 where id = $1`,
-      [emp.id, reset.failedCount, reset.lastFailedAt, reset.lockedUntil],
+         set failed_attempts = 0, last_failed_at = null, lock_time = null where id = $1`,
+      [emp.id],
     );
     // Switching operator ends any prior open context on this terminal.
     await client.query(
@@ -172,7 +234,9 @@ export async function pinLogin(
         new Date(now.getTime() + OPERATOR_SESSION_HOURS * 3_600_000),
       ],
     );
-    await client.query(`update identity.terminals set last_validated_at = now() where id = $1`, [term.id]);
+    await client.query(`update identity.terminals set last_validated_at = now() where id = $1`, [
+      term.id,
+    ]);
 
     await recordAudit(client, {
       action: 'login.succeeded',
@@ -330,6 +394,65 @@ export async function endOperatorSession(
       terminalId: session.terminal_id,
       sessionId: session.id,
       correlationId: meta.correlationId ?? randomUUID(),
+    });
+  });
+}
+
+export interface OperatorSummary {
+  employeeName: string;
+  employeeCode: string;
+  outletName: string;
+}
+
+/** The operator's own name + outlet, read under operator RLS context. */
+export async function getOperatorSummary(
+  pool: Pool,
+  actor: ActorContext,
+): Promise<OperatorSummary | null> {
+  if (actor.kind !== 'operator' || !actor.employeeId) return null;
+  return withActorContext(pool, contextForActor(actor), async (client) => {
+    const { rows } = await client.query<{
+      full_name: string;
+      employee_code: string;
+      display_name: string;
+    }>(
+      `select se.full_name, se.employee_code, o.display_name
+         from identity.store_employees se
+         join billing.outlets o on o.id = se.outlet_id
+        where se.id = $1`,
+      [actor.employeeId],
+    );
+    const r = rows[0];
+    return r
+      ? { employeeName: r.full_name, employeeCode: r.employee_code, outletName: r.display_name }
+      : null;
+  });
+}
+
+/** End the operator session created moments ago (employee tapped "Not me"). */
+export async function rejectOperatorSession(
+  pool: Pool,
+  token: string,
+  meta: RequestMeta = {},
+): Promise<void> {
+  await withActorContext(pool, systemContext(), async (client) => {
+    const session = await loadOperatorSession(client, token);
+    if (!session) return;
+    await client.query(
+      `update identity.operator_sessions
+         set status = 'ended', ended_at = now(), revoked_reason = 'not_me'
+       where id = $1 and status <> 'ended'`,
+      [session.id],
+    );
+    await recordAudit(client, {
+      action: 'operator.logout',
+      result: 'success',
+      actorEmployeeId: session.employee_id,
+      outletId: session.outlet_id,
+      terminalId: session.terminal_id,
+      sessionId: session.id,
+      correlationId: meta.correlationId ?? randomUUID(),
+      metadata: { reason: 'not_me' },
     });
   });
 }

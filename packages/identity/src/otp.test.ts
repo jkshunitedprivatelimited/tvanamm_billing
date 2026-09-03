@@ -7,7 +7,7 @@ import {
   registerOtpSend,
   registerOtpVerifyFailure,
   resetOtpState,
-} from './otp.js';
+} from './otp';
 
 const t0 = new Date('2026-09-03T10:00:00.000Z');
 

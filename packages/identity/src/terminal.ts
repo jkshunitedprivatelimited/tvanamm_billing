@@ -9,14 +9,14 @@ import type {
   TerminalRegistered,
   TerminalSummary,
 } from '@jksh/contracts';
-import { contextForActor, systemContext } from './db-context.js';
-import { ensureAllowed } from './authz.js';
-import { FRESH_AUTH_SECONDS } from './authorize.js';
-import { generateActivationCode, nextReceiptPrefix } from './ids.js';
-import { activationCodeMatches, hashActivationCode, mintTerminalCredential } from './tokens.js';
-import { recordAudit } from './audit.js';
-import { IdentityError } from './errors.js';
-import type { RequestMeta } from './admin-auth.js';
+import { contextForActor, systemContext } from './db-context';
+import { ensureAllowed } from './authz';
+import { FRESH_AUTH_SECONDS } from './authorize';
+import { generateActivationCode, nextReceiptPrefix } from './ids';
+import { activationCodeMatches, hashActivationCode, mintTerminalCredential } from './tokens';
+import { recordAudit } from './audit';
+import { IdentityError } from './errors';
+import type { RequestMeta } from './admin-auth';
 
 interface OutletRow {
   organization_id: string;
@@ -118,7 +118,8 @@ export async function registerTerminal(
     if (!codeRow || !activationCodeMatches(secret, cmd.code, codeRow.code_hash)) {
       throw new IdentityError('activation_code_invalid', 'Activation code is not valid');
     }
-    if (codeRow.consumed_at) throw new IdentityError('activation_code_consumed', 'Code already used');
+    if (codeRow.consumed_at)
+      throw new IdentityError('activation_code_consumed', 'Code already used');
     if (codeRow.expires_at.getTime() <= Date.now()) {
       throw new IdentityError('activation_code_expired', 'Code has expired');
     }
@@ -128,7 +129,9 @@ export async function registerTerminal(
       throw new IdentityError('outlet_not_active', 'Outlet is not active');
     }
 
-    await client.query(`select id from billing.outlets where id = $1 for update`, [codeRow.outlet_id]);
+    await client.query(`select id from billing.outlets where id = $1 for update`, [
+      codeRow.outlet_id,
+    ]);
 
     const replaced = await client.query<{ id: string }>(
       `update identity.terminals

@@ -6,9 +6,9 @@
  *
  * Reads DATABASE_URL from the environment. Loads .env if present.
  */
-import { createPool } from './pg.js';
-import { migrate, migrationStatus } from './migrate.js';
-import { seedDevData } from './seed.js';
+import { createPool } from './pg';
+import { migrate, migrationStatus } from './migrate';
+import { seedDevData } from './seed';
 
 async function loadDotEnv(): Promise<void> {
   try {

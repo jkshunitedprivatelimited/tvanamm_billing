@@ -9,12 +9,14 @@ import { createPool, type Pool } from '@jksh/db';
 import { migrate } from '@jksh/db/migrate';
 import { seedDevData } from '@jksh/db';
 import type { ActorContext } from '@jksh/contracts';
-import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth.js';
-import { createOutlet, outletLifecycle, listOutlets } from './outlet.js';
-import { issueActivationCode, registerTerminal, listTerminals } from './terminal.js';
-import { createEmployee, setEmployeeStatus } from './employee.js';
-import { pinLogin } from './store-auth.js';
-import { authorize } from './authorize.js';
+import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth';
+import { createFranchise, listFranchises } from './franchise';
+import { createFranchiseOwnerInvitation, acceptInvitation } from './invitations';
+import { createOutlet, outletLifecycle, listOutlets } from './outlet';
+import { issueActivationCode, registerTerminal, listTerminals } from './terminal';
+import { createEmployee, setEmployeeStatus } from './employee';
+import { pinLogin } from './store-auth';
+import { authorize } from './authorize';
 
 const RUN = !!process.env.DATABASE_URL;
 const JKSH_ORG = '01000000-0000-4000-8000-000000000001';
@@ -28,11 +30,13 @@ let runFranchiseId: string;
 let runOutletId: string;
 
 async function seedAccount(phone: string, role: string, franchiseId: string | null): Promise<void> {
+  const internal = role === 'central_admin' || role === 'accountant';
   const { rows } = await pool.query<{ id: string }>(
-    `insert into identity.account_profiles (mobile, display_name, status, activated_at)
-     values ($1,$2,'active',now())
-     on conflict (mobile) do update set status = 'active' returning id`,
-    [phone, `Test ${role}`],
+    `insert into identity.account_profiles (mobile, display_name, status, is_internal, activated_at)
+     values ($1,$2,'active',$3,now())
+     on conflict (mobile) do update set status = 'active', is_internal = excluded.is_internal
+     returning id`,
+    [phone, `Test ${role}`, internal],
   );
   await pool.query(
     `insert into identity.memberships (account_id, role_key, organization_id, franchise_id)
@@ -94,29 +98,32 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
   afterAll(async () => {
     // Leave the shared database as we found it.
     try {
-      await pool.query(
-        `delete from identity.operator_sessions where outlet_id = $1`,
-        [runOutletId],
-      );
+      await pool.query(`delete from identity.operator_sessions where outlet_id = $1`, [
+        runOutletId,
+      ]);
       await pool.query(
         `delete from identity.terminal_credentials where terminal_id in
            (select id from identity.terminals where outlet_id = $1)`,
         [runOutletId],
       );
-      await pool.query(`delete from identity.terminal_activation_codes where outlet_id = $1`, [runOutletId]);
+      await pool.query(`delete from identity.terminal_activation_codes where outlet_id = $1`, [
+        runOutletId,
+      ]);
       await pool.query(`delete from identity.terminals where outlet_id = $1`, [runOutletId]);
       await pool.query(`delete from identity.store_employees where outlet_id = $1`, [runOutletId]);
       await pool.query(`delete from billing.outlets where id = $1`, [runOutletId]);
-      await pool.query(`delete from identity.memberships where franchise_id = $1`, [runFranchiseId]);
+      await pool.query(`delete from identity.memberships where franchise_id = $1`, [
+        runFranchiseId,
+      ]);
       await pool.query(`delete from billing.franchises where id = $1`, [runFranchiseId]);
       await pool.query(`delete from identity.account_profiles where mobile in ($1,$2)`, [
         adminPhone,
         ownerPhone,
       ]);
-      await pool.query(`delete from identity.otp_attempts where mobile in ($1,$2,'+919999999999')`, [
-        adminPhone,
-        ownerPhone,
-      ]);
+      await pool.query(
+        `delete from identity.otp_attempts where mobile in ($1,$2,'+919999999999')`,
+        [adminPhone, ownerPhone],
+      );
     } catch {
       // best effort
     }
@@ -124,15 +131,22 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
   });
 
   it('rejects an OTP for a phone with no account', async () => {
-    const r = await resolveAdminAfterVerify(pool, { authUserId: randomUUID(), phone: '+919999999999' });
+    const r = await resolveAdminAfterVerify(pool, {
+      authUserId: randomUUID(),
+      phone: '+919999999999',
+    });
     expect(r.result.outcome).toBe('rejected');
   });
 
   it('resolves a central admin and grants outlet.create but not sale.create', async () => {
     const actor = await actorFor(adminPhone);
     expect(actor.role).toBe('central_admin');
-    expect(authorize(actor, 'billing.outlet.create', { organizationId: JKSH_ORG }).allowed).toBe(true);
-    expect(authorize(actor, 'billing.sale.create', { organizationId: JKSH_ORG }).allowed).toBe(false);
+    expect(authorize(actor, 'billing.outlet.create', { organizationId: JKSH_ORG }).allowed).toBe(
+      true,
+    );
+    expect(authorize(actor, 'billing.sale.create', { organizationId: JKSH_ORG }).allowed).toBe(
+      false,
+    );
   });
 
   it('denies a Franchise Owner creating an outlet (capability + RLS)', async () => {
@@ -176,7 +190,10 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
     });
     expect(emp.employeeCode).toMatch(/^EMP-/);
 
-    expect((await pinLogin(pool, { terminalCredential: term.terminalCredential, pin: '0000' })).result.outcome).toBe('rejected');
+    expect(
+      (await pinLogin(pool, { terminalCredential: term.terminalCredential, pin: '0000' })).result
+        .outcome,
+    ).toBe('rejected');
 
     const ok = await pinLogin(pool, { terminalCredential: term.terminalCredential, pin });
     expect(ok.result.outcome).toBe('resolved');
@@ -186,7 +203,34 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
     }
 
     await setEmployeeStatus(pool, owner, emp.employeeId, { status: 'disabled' });
-    expect((await pinLogin(pool, { terminalCredential: term.terminalCredential, pin })).result.outcome).toBe('rejected');
+    expect(
+      (await pinLogin(pool, { terminalCredential: term.terminalCredential, pin })).result.outcome,
+    ).toBe('rejected');
+  }, 30_000);
+
+  it('locks the terminal after repeated nonexistent-PIN guesses', async () => {
+    const owner = await actorFor(ownerPhone);
+    const code = await issueActivationCode(pool, owner, {
+      outletId: runOutletId,
+      label: 'Brute-force test',
+      expiresInMinutes: 60,
+    });
+    const term = await registerTerminal(pool, {
+      code: code.code,
+      deviceLabel: 'iPad C',
+      paperWidthMm: 80,
+    });
+
+    let lockedAt = 0;
+    for (let i = 1; i <= 12 && lockedAt === 0; i += 1) {
+      // Rotate the guess so it never matches an employee; each still counts.
+      const guess = String(1000 + i).padStart(4, '0');
+      const r = await pinLogin(pool, { terminalCredential: term.terminalCredential, pin: guess });
+      if (r.result.outcome === 'rejected' && r.result.reason === 'locked') lockedAt = i;
+      else expect(r.result.outcome).toBe('rejected');
+    }
+    expect(lockedAt).toBeGreaterThan(0);
+    expect(lockedAt).toBeLessThanOrEqual(12);
   }, 30_000);
 
   it('suspending an outlet revokes its terminal', async () => {
@@ -215,8 +259,75 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
     expect(ownerOutlets.every((o) => o.franchiseId === runFranchiseId)).toBe(true);
   });
 
+  it('runs the franchise + invitation onboarding path with its guard rails', async () => {
+    const admin = await actorFor(adminPhone);
+    const owner = await actorFor(ownerPhone);
+
+    // Central creates a franchise; Franchise Owner cannot.
+    const fr = await createFranchise(pool, admin, {
+      brandId: TVANAMM_BRAND,
+      name: `Onboard ${SUFFIX}`,
+    });
+    await expect(
+      createFranchise(pool, owner, { brandId: TVANAMM_BRAND, name: 'Nope' }),
+    ).rejects.toThrow(/Denied|row-level security/);
+
+    const seen = await listFranchises(pool, admin);
+    expect(seen.some((f) => f.id === fr.id)).toBe(true);
+
+    const inviteePhone = `+9171${SUFFIX.slice(-8).padStart(8, '0')}`;
+    const inv = await createFranchiseOwnerInvitation(pool, admin, {
+      fullName: 'New Owner',
+      phone: inviteePhone,
+      franchiseId: fr.id,
+    });
+
+    // Wrong phone is rejected.
+    await expect(acceptInvitation(pool, inv.token, '+919999999999')).rejects.toThrow(
+      /different mobile/,
+    );
+
+    // Correct phone accepts once; replay is rejected.
+    const accepted = await acceptInvitation(pool, inv.token, inviteePhone);
+    expect(accepted.accountId).toBe(inv.accountId);
+    await expect(acceptInvitation(pool, inv.token, inviteePhone)).rejects.toThrow(/not valid/);
+
+    // A superseding invitation cancels the prior open one.
+    const inv2 = await createFranchiseOwnerInvitation(pool, admin, {
+      fullName: 'New Owner',
+      phone: inviteePhone,
+      franchiseId: fr.id,
+    });
+    const inv3 = await createFranchiseOwnerInvitation(pool, admin, {
+      fullName: 'New Owner',
+      phone: inviteePhone,
+      franchiseId: fr.id,
+    });
+    await expect(acceptInvitation(pool, inv2.token, inviteePhone)).rejects.toThrow(/not valid/);
+    await acceptInvitation(pool, inv3.token, inviteePhone);
+
+    // An internal Central/Accountant mobile cannot be made a Franchise Owner.
+    await expect(
+      createFranchiseOwnerInvitation(pool, admin, {
+        fullName: 'Internal',
+        phone: adminPhone,
+        franchiseId: fr.id,
+      }),
+    ).rejects.toThrow(/internal/);
+
+    await pool.query(`delete from identity.invitations where mobile = $1`, [inviteePhone]);
+    await pool.query(
+      `delete from identity.memberships where account_id in (select id from identity.account_profiles where mobile = $1)`,
+      [inviteePhone],
+    );
+    await pool.query(`delete from identity.account_profiles where mobile = $1`, [inviteePhone]);
+    await pool.query(`delete from billing.franchises where id = $1`, [fr.id]);
+  }, 30_000);
+
   it('writes audit rows for login, outlet, and terminal actions', async () => {
-    const { rows } = await pool.query<{ action: string }>(`select distinct action from audit.events`);
+    const { rows } = await pool.query<{ action: string }>(
+      `select distinct action from audit.events`,
+    );
     const actions = new Set(rows.map((r) => r.action));
     expect(actions.has('login.succeeded')).toBe(true);
     expect(actions.has('outlet.created')).toBe(true);

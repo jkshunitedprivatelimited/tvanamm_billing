@@ -7,13 +7,13 @@ import type {
   OutletSummary,
   UpdateOutletConfigCommand,
 } from '@jksh/contracts';
-import { contextForActor } from './db-context.js';
-import { ensureAllowed } from './authz.js';
-import { FRESH_AUTH_SECONDS } from './authorize.js';
-import { recordAudit } from './audit.js';
-import { IdentityError } from './errors.js';
-import { generateActivationCode } from './ids.js';
-import type { RequestMeta } from './admin-auth.js';
+import { contextForActor } from './db-context';
+import { ensureAllowed } from './authz';
+import { FRESH_AUTH_SECONDS } from './authorize';
+import { recordAudit } from './audit';
+import { IdentityError } from './errors';
+import { generateActivationCode } from './ids';
+import type { RequestMeta } from './admin-auth';
 
 function slugify(name: string): string {
   const base = name
@@ -21,7 +21,10 @@ function slugify(name: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 48);
-  return `${base || 'outlet'}-${generateActivationCode().toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6)}`;
+  return `${base || 'outlet'}-${generateActivationCode()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 6)}`;
 }
 
 async function loadBrandOrg(
@@ -54,7 +57,8 @@ export async function createOutlet(
         `select 1 from billing.franchises where id = $1 and organization_id = $2 and brand_id = $3`,
         [cmd.franchiseId, organizationId, cmd.brandId],
       );
-      if (fr.rowCount === 0) throw new IdentityError('validation', 'Franchise does not match brand/org');
+      if (fr.rowCount === 0)
+        throw new IdentityError('validation', 'Franchise does not match brand/org');
     }
 
     const id = randomUUID();
@@ -101,7 +105,11 @@ export async function createOutlet(
 
 const LIFECYCLE: Record<
   OutletLifecycleCommand['action'],
-  { from: string[]; to: string; audit: 'outlet.activated' | 'outlet.suspended' | 'outlet.closed' | 'outlet.reactivated' }
+  {
+    from: string[];
+    to: string;
+    audit: 'outlet.activated' | 'outlet.suspended' | 'outlet.closed' | 'outlet.reactivated';
+  }
 > = {
   activate: { from: ['draft'], to: 'active', audit: 'outlet.activated' },
   suspend: { from: ['active'], to: 'suspended', audit: 'outlet.suspended' },

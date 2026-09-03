@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { mobileNumberSchema } from './identity.js';
+import { mobileNumberSchema } from './identity';
 
 export const outletOwnershipSchema = z.enum(['jksh_owned', 'franchise_owned']);
 export type OutletOwnership = z.infer<typeof outletOwnershipSchema>;
@@ -15,21 +15,35 @@ export const createOutletCommandSchema = z
     franchiseId: z.uuid().optional(),
     displayName: z.string().trim().min(2).max(120),
     legalName: z.string().trim().max(160).optional(),
-    phone: z.string().trim().regex(/^\+?[0-9][0-9\s-]{7,17}$/).optional(),
-    gstin: z.string().trim().regex(/^[0-9A-Z]{15}$/).optional(),
+    phone: z
+      .string()
+      .trim()
+      .regex(/^\+?[0-9][0-9\s-]{7,17}$/)
+      .optional(),
+    gstin: z
+      .string()
+      .trim()
+      .regex(/^[0-9A-Z]{15}$/)
+      .optional(),
     addressLine: z.string().trim().max(240).default(''),
     city: z.string().trim().max(80).default(''),
     state: z.string().trim().max(80).default(''),
     postalCode: z.string().trim().max(16).default(''),
     country: z.string().trim().length(2).default('IN'),
     timezone: z.string().min(3).max(64).default('Asia/Kolkata'),
-    paymentMethods: z.array(z.enum(['cash', 'upi'])).min(1).default(['cash', 'upi']),
+    paymentMethods: z
+      .array(z.enum(['cash', 'upi']))
+      .min(1)
+      .default(['cash', 'upi']),
   })
   .refine(
     (v) =>
       (v.ownershipType === 'franchise_owned' && !!v.franchiseId) ||
       (v.ownershipType === 'jksh_owned' && !v.franchiseId),
-    { message: 'franchiseId is required for franchise_owned and forbidden for jksh_owned', path: ['franchiseId'] },
+    {
+      message: 'franchiseId is required for franchise_owned and forbidden for jksh_owned',
+      path: ['franchiseId'],
+    },
   );
 export type CreateOutletCommand = z.infer<typeof createOutletCommandSchema>;
 
@@ -46,8 +60,16 @@ export type OutletLifecycleCommand = z.infer<typeof outletLifecycleCommandSchema
 export const updateOutletConfigCommandSchema = z.object({
   displayName: z.string().trim().min(2).max(120).optional(),
   legalName: z.string().trim().max(160).optional(),
-  phone: z.string().trim().regex(/^\+?[0-9][0-9\s-]{7,17}$/).optional(),
-  gstin: z.string().trim().regex(/^[0-9A-Z]{15}$/).optional(),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^\+?[0-9][0-9\s-]{7,17}$/)
+    .optional(),
+  gstin: z
+    .string()
+    .trim()
+    .regex(/^[0-9A-Z]{15}$/)
+    .optional(),
   addressLine: z.string().trim().max(240).optional(),
   city: z.string().trim().max(80).optional(),
   state: z.string().trim().max(80).optional(),

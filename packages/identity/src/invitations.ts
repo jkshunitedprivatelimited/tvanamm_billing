@@ -2,12 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { identityTokenSecret } from '@jksh/config';
 import { withActorContext, type Pool } from '@jksh/db';
 import type { ActorContext, CreateInvitationCommand } from '@jksh/contracts';
-import { contextForActor, systemContext } from './db-context.js';
-import { ensureAllowed } from './authz.js';
-import { hashInvitationToken, mintInvitationToken } from './tokens.js';
-import { recordAudit } from './audit.js';
-import { IdentityError } from './errors.js';
-import type { RequestMeta } from './admin-auth.js';
+import { contextForActor, systemContext } from './db-context';
+import { ensureAllowed } from './authz';
+import { hashInvitationToken, mintInvitationToken } from './tokens';
+import { recordAudit } from './audit';
+import { IdentityError } from './errors';
+import type { RequestMeta } from './admin-auth';
 
 const INVITE_TTL_HOURS = 72;
 
@@ -36,11 +36,18 @@ export async function createFranchiseOwnerInvitation(
       throw new IdentityError('validation', 'Franchise is outside your organization');
     }
 
-    const existing = await client.query<{ id: string; status: string }>(
-      `select id, status from identity.account_profiles where mobile = $1`,
+    const existing = await client.query<{ id: string; status: string; is_internal: boolean }>(
+      `select id, status, is_internal from identity.account_profiles where mobile = $1`,
       [cmd.phone],
     );
-    let accountId = existing.rows[0]?.id;
+    const existingRow = existing.rows[0];
+    if (existingRow?.is_internal) {
+      throw new IdentityError(
+        'conflict',
+        'That mobile belongs to an internal JKSH account; it cannot become a Franchise Owner',
+      );
+    }
+    let accountId = existingRow?.id;
     if (!accountId) {
       accountId = randomUUID();
       await client.query(
@@ -57,6 +64,14 @@ export async function createFranchiseOwnerInvitation(
        values ($1,'franchise_owner',$2,$3,$4)
        on conflict do nothing`,
       [accountId, actor.scope.organizationId, cmd.franchiseId, actor.accountId ?? null],
+    );
+
+    // Supersede any still-open invitation for this account so only one is valid.
+    await client.query(
+      `update identity.invitations
+         set status = 'cancelled', cancelled_at = now()
+       where account_id = $1 and status in ('pending','delivered')`,
+      [accountId],
     );
 
     const invitationId = randomUUID();
@@ -87,10 +102,16 @@ export async function createFranchiseOwnerInvitation(
   });
 }
 
-/** Marks a valid invitation accepted. First OTP login activates the account. */
+/**
+ * Consume a single-use invitation. The caller must have already verified an OTP
+ * for `phone`; this checks the token, expiry, and that `phone` is the exact
+ * invited mobile, then marks it accepted (replay-safe: status flips off
+ * pending/delivered).
+ */
 export async function acceptInvitation(
   pool: Pool,
   token: string,
+  phone: string,
   meta: RequestMeta = {},
 ): Promise<{ accountId: string }> {
   const secret = identityTokenSecret();
@@ -100,10 +121,11 @@ export async function acceptInvitation(
     const { rows } = await client.query<{
       id: string;
       account_id: string;
+      mobile: string;
       status: string;
       expires_at: Date;
     }>(
-      `select id, account_id, status, expires_at from identity.invitations
+      `select id, account_id, mobile, status, expires_at from identity.invitations
         where token_hash = $1 for update`,
       [tokenHash],
     );
@@ -111,13 +133,24 @@ export async function acceptInvitation(
     if (!inv || (inv.status !== 'pending' && inv.status !== 'delivered')) {
       throw new IdentityError('invitation_invalid', 'Invitation is not valid');
     }
+    if (inv.mobile !== phone) {
+      throw new IdentityError('invitation_invalid', 'Invitation was issued to a different mobile');
+    }
     if (inv.expires_at.getTime() <= Date.now()) {
-      await client.query(`update identity.invitations set status = 'expired' where id = $1`, [inv.id]);
+      await client.query(`update identity.invitations set status = 'expired' where id = $1`, [
+        inv.id,
+      ]);
       throw new IdentityError('invitation_expired', 'Invitation has expired');
     }
     await client.query(
       `update identity.invitations set status = 'accepted', accepted_at = now() where id = $1`,
       [inv.id],
+    );
+    await client.query(
+      `update identity.account_profiles
+         set status = 'active', activated_at = coalesce(activated_at, now())
+       where id = $1 and status = 'invited'`,
+      [inv.account_id],
     );
     await recordAudit(client, {
       action: 'invitation.accepted',

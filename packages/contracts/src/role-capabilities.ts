@@ -1,5 +1,5 @@
-import type { Capability } from './capabilities.js';
-import type { Role } from './identity.js';
+import type { Capability } from './capabilities';
+import type { Role } from './identity';
 
 /**
  * Role -> capability grants. Policy data, not code branching on role names:
@@ -17,6 +17,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'identity.terminal.revoke',
     'identity.session.revoke',
     'identity.audit.read',
+    'billing.franchise.manage',
     'billing.outlet.create',
     'billing.outlet.lifecycle',
     'billing.outlet.manage',

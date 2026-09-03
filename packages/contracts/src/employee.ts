@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { employeeStatusSchema, mobileNumberSchema } from './identity.js';
+import { employeeStatusSchema, mobileNumberSchema } from './identity';
 
 /** Franchise Owner (or Central) creates a Store Employee from name + mobile. */
 export const createEmployeeCommandSchema = z.object({

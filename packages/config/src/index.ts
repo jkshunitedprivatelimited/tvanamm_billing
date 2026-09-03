@@ -1,10 +1,7 @@
 import { z } from 'zod';
 
 /** New Supabase keys (sb_publishable_… / sb_secret_…) with legacy fallback. */
-function pick(
-  env: Record<string, string | undefined>,
-  ...keys: string[]
-): string | undefined {
+function pick(env: Record<string, string | undefined>, ...keys: string[]): string | undefined {
   for (const key of keys) {
     const value = env[key];
     if (value && value.length > 0) return value;
@@ -65,9 +62,7 @@ const serverEnvironmentSchema = z.object({
 
 export type ServerEnvironment = z.infer<typeof serverEnvironmentSchema>;
 
-export function parseServerEnvironment(
-  env: Record<string, string | undefined>,
-): ServerEnvironment {
+export function parseServerEnvironment(env: Record<string, string | undefined>): ServerEnvironment {
   const rawOrigins = env.ALLOWED_ORIGINS ?? 'http://localhost:3000,http://localhost:3001';
   return serverEnvironmentSchema.parse({
     nodeEnv: env.NODE_ENV,
@@ -77,7 +72,10 @@ export function parseServerEnvironment(
     supabaseJwksUrl: env.SUPABASE_JWKS_URL,
     directUrl: env.DIRECT_URL,
     databaseUrl: env.DATABASE_URL,
-    allowedOrigins: rawOrigins.split(',').map((v) => v.trim()).filter(Boolean),
+    allowedOrigins: rawOrigins
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean),
     identityTokenSecret: env.IDENTITY_TOKEN_SECRET,
   });
 }
@@ -95,9 +93,7 @@ export function serverEnvironment(): ServerEnvironment {
  * PIN lookup pepper, invitation tokens) without pulling in the full Supabase
  * environment.
  */
-export function identityTokenSecret(
-  env: Record<string, string | undefined> = process.env,
-): string {
+export function identityTokenSecret(env: Record<string, string | undefined> = process.env): string {
   const value = env.IDENTITY_TOKEN_SECRET;
   if (!value || value.length < 32) {
     throw new Error('IDENTITY_TOKEN_SECRET must be set and at least 32 characters');

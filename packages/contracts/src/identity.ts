@@ -5,11 +5,7 @@ import { z } from 'zod';
  * `store_employee` is NOT a membership role — Store Employees authenticate
  * through the operator-session path and get a fixed capability set.
  */
-export const membershipRoleSchema = z.enum([
-  'central_admin',
-  'accountant',
-  'franchise_owner',
-]);
+export const membershipRoleSchema = z.enum(['central_admin', 'accountant', 'franchise_owner']);
 export type MembershipRole = z.infer<typeof membershipRoleSchema>;
 
 /** All actor roles, including the operator-only `store_employee`. */
@@ -21,13 +17,7 @@ export const roleSchema = z.enum([
 ]);
 export type Role = z.infer<typeof roleSchema>;
 
-export const accountStatusSchema = z.enum([
-  'invited',
-  'active',
-  'suspended',
-  'locked',
-  'closed',
-]);
+export const accountStatusSchema = z.enum(['invited', 'active', 'suspended', 'locked', 'closed']);
 export type AccountStatus = z.infer<typeof accountStatusSchema>;
 
 export const employeeStatusSchema = z.enum(['active', 'suspended', 'disabled']);
