@@ -4,12 +4,18 @@ import { checkAndRecordOtpSend } from '@jksh/identity';
 import { db } from '@/server/pool';
 import { supabaseServer } from '@/server/supabase';
 import { jsonError } from '@/server/http';
+import { devOtpEnabled } from '@/server/dev-session';
 
 export async function POST(request: Request) {
   try {
     const { phone } = requestOtpCommandSchema.parse(await request.json());
+
+    if (devOtpEnabled()) {
+      // Fixed dev OTP: nothing to send.
+      return NextResponse.json({ sent: true, resendAvailableInSeconds: 0 });
+    }
+
     const gate = await checkAndRecordOtpSend(db(), phone);
-    // Same generic response whether or not we actually dispatched.
     if (gate.allowed) {
       const supabase = await supabaseServer();
       await supabase.auth.signInWithOtp({ phone });

@@ -92,6 +92,34 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
   }, 60_000);
 
   afterAll(async () => {
+    // Leave the shared database as we found it.
+    try {
+      await pool.query(
+        `delete from identity.operator_sessions where outlet_id = $1`,
+        [runOutletId],
+      );
+      await pool.query(
+        `delete from identity.terminal_credentials where terminal_id in
+           (select id from identity.terminals where outlet_id = $1)`,
+        [runOutletId],
+      );
+      await pool.query(`delete from identity.terminal_activation_codes where outlet_id = $1`, [runOutletId]);
+      await pool.query(`delete from identity.terminals where outlet_id = $1`, [runOutletId]);
+      await pool.query(`delete from identity.store_employees where outlet_id = $1`, [runOutletId]);
+      await pool.query(`delete from billing.outlets where id = $1`, [runOutletId]);
+      await pool.query(`delete from identity.memberships where franchise_id = $1`, [runFranchiseId]);
+      await pool.query(`delete from billing.franchises where id = $1`, [runFranchiseId]);
+      await pool.query(`delete from identity.account_profiles where mobile in ($1,$2)`, [
+        adminPhone,
+        ownerPhone,
+      ]);
+      await pool.query(`delete from identity.otp_attempts where mobile in ($1,$2,'+919999999999')`, [
+        adminPhone,
+        ownerPhone,
+      ]);
+    } catch {
+      // best effort
+    }
     await pool.end();
   });
 
