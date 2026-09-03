@@ -201,6 +201,8 @@ function EmployeeSection({
   const [mobile, setMobile] = useState('+91');
   const [pin, setPin] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
+  const [resetFor, setResetFor] = useState<string | null>(null);
+  const [resetPin, setResetPin] = useState('');
 
   return (
     <div className="card">
@@ -230,10 +232,12 @@ function EmployeeSection({
         <input id="en" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
         <label htmlFor="em">Mobile</label>
         <input id="em" value={mobile} onChange={(e) => setMobile(e.target.value.trim())} />
-        <label htmlFor="ep">Initial PIN</label>
+        <label htmlFor="ep">Initial PIN (4 digits)</label>
         <input
           id="ep"
+          type="password"
           inputMode="numeric"
+          autoComplete="new-password"
           maxLength={4}
           value={pin}
           onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
@@ -263,31 +267,73 @@ function EmployeeSection({
               <td>
                 <span className="pill">{e.lockedUntil ? 'locked' : e.status}</span>
               </td>
-              <td style={{ display: 'flex', gap: 6 }}>
-                <button
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => {
-                    const p = prompt('New four-digit PIN:');
-                    if (p)
+              <td>
+                {resetFor === e.id ? (
+                  <form
+                    style={{ display: 'flex', gap: 6, alignItems: 'center' }}
+                    onSubmit={(ev) => {
+                      ev.preventDefault();
+                      if (!/^\d{4}$/.test(resetPin)) return;
                       void onCall(`/api/v1/employees/${e.id}/reset-pin`, 'POST', {
-                        newPin: p,
-                      }).then((ok) => ok && router.refresh());
-                  }}
-                >
-                  Reset PIN
-                </button>
-                <button
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    void onCall(`/api/v1/employees/${e.id}/status`, 'PATCH', {
-                      status: e.status === 'active' ? 'disabled' : 'active',
-                    }).then((ok) => ok && router.refresh())
-                  }
-                >
-                  {e.status === 'active' ? 'Disable' : 'Reactivate'}
-                </button>
+                        newPin: resetPin,
+                      }).then((ok) => {
+                        if (ok) {
+                          setResetFor(null);
+                          setResetPin('');
+                          router.refresh();
+                        }
+                      });
+                    }}
+                  >
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="new-password"
+                      maxLength={4}
+                      placeholder="new PIN"
+                      value={resetPin}
+                      onChange={(ev) => setResetPin(ev.target.value.replace(/\D/g, ''))}
+                      style={{ width: 90, margin: 0 }}
+                    />
+                    <button type="submit" disabled={busy || resetPin.length !== 4}>
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => {
+                        setResetFor(null);
+                        setResetPin('');
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                ) : (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() => {
+                        setResetFor(e.id);
+                        setResetPin('');
+                      }}
+                    >
+                      Reset PIN
+                    </button>
+                    <button
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() =>
+                        void onCall(`/api/v1/employees/${e.id}/status`, 'PATCH', {
+                          status: e.status === 'active' ? 'disabled' : 'active',
+                        }).then((ok) => ok && router.refresh())
+                      }
+                    >
+                      {e.status === 'active' ? 'Disable' : 'Reactivate'}
+                    </button>
+                  </div>
+                )}
               </td>
             </tr>
           ))}

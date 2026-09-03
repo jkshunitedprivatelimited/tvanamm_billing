@@ -1,6 +1,7 @@
 import eslint from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
+import nextPlugin from '@next/eslint-plugin-next';
 
 export default tseslint.config(
   {
@@ -89,7 +90,19 @@ export default tseslint.config(
     ],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
+      globals: { ...globals.node },
       parserOptions: { projectService: false, project: false },
+    },
+  },
+  {
+    // Add the official Next.js rules to each app.
+    files: ['apps/**/*.{ts,tsx}'],
+    plugins: { '@next/next': nextPlugin },
+    rules: {
+      ...nextPlugin.configs.recommended.rules,
+      ...nextPlugin.configs['core-web-vitals'].rules,
+      // App Router only — no `pages/` directory.
+      '@next/next/no-html-link-for-pages': 'off',
     },
   },
 );

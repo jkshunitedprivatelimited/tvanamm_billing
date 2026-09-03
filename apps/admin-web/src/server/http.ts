@@ -1,18 +1,56 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
+import { z } from 'zod';
 import { IdentityError } from '@jksh/identity';
 import type { ActorContext } from '@jksh/contracts';
 import { getAdminActor } from './auth';
 
-export function jsonError(error: unknown): NextResponse {
-  if (error instanceof IdentityError) {
-    return NextResponse.json(
-      { error: error.code, message: error.message, details: error.details ?? null },
-      { status: error.httpStatus },
+const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate', Pragma: 'no-cache' };
+
+/** JSON response that is never cached and carries the correlation id. */
+export function apiJson(body: unknown, init: { status?: number; correlationId?: string } = {}) {
+  const headers: Record<string, string> = { ...NO_STORE };
+  if (init.correlationId) headers['x-correlation-id'] = init.correlationId;
+  return NextResponse.json(body, { status: init.status ?? 200, headers });
+}
+
+export function jsonError(error: unknown, correlationId?: string): NextResponse {
+  if (error instanceof z.ZodError) {
+    return apiJson(
+      {
+        error: 'validation',
+        message: 'Invalid request',
+        issues: error.issues.map((i) => i.path.join('.')),
+      },
+      { status: 400, ...(correlationId ? { correlationId } : {}) },
     );
   }
-  console.error('[admin-web] route error', error);
-  return NextResponse.json({ error: 'internal', message: 'Unexpected error' }, { status: 500 });
+  if (error instanceof IdentityError) {
+    return apiJson(
+      { error: error.code, message: error.message, details: error.details ?? null },
+      { status: error.httpStatus, ...(correlationId ? { correlationId } : {}) },
+    );
+  }
+  // Log the error only — never the request body, cookies, or credentials.
+  console.error('[admin-web] route error', error instanceof Error ? error.message : 'unknown');
+  return apiJson(
+    { error: 'internal', message: 'Unexpected error' },
+    { status: 500, ...(correlationId ? { correlationId } : {}) },
+  );
+}
+
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+/** Reject a cross-site cookie-authenticated mutation before any domain code runs. */
+export function assertSameOrigin(request: Request): void {
+  const origin = request.headers.get('origin');
+  if (!origin) return; // same-origin navigations / server-to-server send none
+  if (!ALLOWED_ORIGINS.includes(origin)) {
+    throw new IdentityError('forbidden', 'Cross-site request rejected', { httpStatus: 403 });
+  }
 }
 
 export function requestMeta(request: Request): {
@@ -20,13 +58,16 @@ export function requestMeta(request: Request): {
   userAgent?: string;
   ip?: string;
 } {
-  const ip =
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    request.headers.get('x-real-ip') ??
-    '';
+  // x-forwarded-for is only trusted when the deployment proxy overwrites it.
+  const trustProxy = process.env.TRUST_PROXY === 'true';
+  const ip = trustProxy
+    ? (request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+      request.headers.get('x-real-ip') ??
+      '')
+    : '';
   const userAgent = request.headers.get('user-agent') ?? '';
   return {
-    correlationId: crypto.randomUUID(),
+    correlationId: request.headers.get('x-correlation-id') ?? crypto.randomUUID(),
     ...(userAgent ? { userAgent } : {}),
     ...(ip ? { ip } : {}),
   };

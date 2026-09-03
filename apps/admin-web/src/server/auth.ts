@@ -11,35 +11,18 @@ import { DEV_COOKIE, devOtpEnabled, readDevSession, syntheticAuthUserId } from '
 export interface AuthUser {
   id: string;
   phone: string | null;
-  /** Seconds since the current Supabase session issued its access token. */
-  secondsSinceAuth: number;
 }
 
 export async function getAuthUser(): Promise<AuthUser | null> {
   if (devOtpEnabled()) {
     const dev = readDevSession((await cookies()).get(DEV_COOKIE)?.value);
-    if (dev) {
-      return {
-        id: syntheticAuthUserId(dev.phone),
-        phone: dev.phone,
-        secondsSinceAuth: Math.max(0, Math.floor((Date.now() - dev.issuedAt) / 1000)),
-      };
-    }
+    if (dev) return { id: syntheticAuthUserId(dev.phone), phone: dev.phone };
   }
 
   const supabase = await supabaseServer();
   const { data } = await supabase.auth.getUser();
   if (!data.user) return null;
-  const { data: sessionData } = await supabase.auth.getSession();
-  const session = sessionData.session;
-  const issuedAt = session?.expires_at
-    ? session.expires_at * 1000 - session.expires_in * 1000
-    : Date.now();
-  return {
-    id: data.user.id,
-    phone: data.user.phone ? `+${data.user.phone}` : null,
-    secondsSinceAuth: Math.max(0, Math.floor((Date.now() - issuedAt) / 1000)),
-  };
+  return { id: data.user.id, phone: data.user.phone ? `+${data.user.phone}` : null };
 }
 
 export async function getAdminActor(): Promise<{
@@ -50,11 +33,8 @@ export async function getAdminActor(): Promise<{
   if (!user) return { user: null, actor: null };
   const membershipId = readWorkspace((await cookies()).get(WS_COOKIE)?.value);
   try {
-    const actor = await buildAdminActor(db(), {
-      authUserId: user.id,
-      membershipId,
-      secondsSinceAuth: user.secondsSinceAuth,
-    });
+    // Fresh-auth age comes from the persisted last_otp_at, not the token.
+    const actor = await buildAdminActor(db(), { authUserId: user.id, membershipId });
     return { user, actor };
   } catch (error) {
     if (error instanceof IdentityError) return { user, actor: null };

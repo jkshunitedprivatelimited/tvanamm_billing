@@ -1,8 +1,25 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-/** Refreshes the Supabase auth session cookie on every request. */
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
 export async function middleware(request: NextRequest) {
+  // Reject cross-site cookie-authenticated mutations before any route runs.
+  if (request.nextUrl.pathname.startsWith('/api/') && MUTATING.has(request.method)) {
+    const origin = request.headers.get('origin');
+    if (origin && !ALLOWED_ORIGINS.includes(origin)) {
+      return NextResponse.json(
+        { error: 'forbidden', message: 'Cross-site request rejected' },
+        { status: 403 },
+      );
+    }
+  }
+
   let response = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
@@ -13,7 +30,7 @@ export async function middleware(request: NextRequest) {
     '';
   // Skip Supabase session refresh when using the temporary dev OTP path, or
   // when Supabase is not configured at all.
-  if (!url || !key || (process.env.ADMIN_DEV_OTP && process.env.NODE_ENV !== 'production')) {
+  if (!url || !key || (process.env.ADMIN_DEV_OTP && process.env.NODE_ENV === 'development')) {
     return response;
   }
 
