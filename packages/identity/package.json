@@ -1,0 +1,24 @@
+{
+  "name": "@jksh/identity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@jksh/config": "*",
+    "@jksh/contracts": "*",
+    "@jksh/db": "*",
+    "@node-rs/argon2": "^2.0.2",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "vitest": "^4.0.16"
+  }
+}
