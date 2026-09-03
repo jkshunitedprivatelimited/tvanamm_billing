@@ -1,0 +1,84 @@
+# Billing Dashboards and Reporting Plan
+
+## Confirmed Franchise Owner Navigation
+
+1. Franchise Owner authenticates with mobile SMS OTP.
+2. Landing dashboard shows a combined view across all owned outlets.
+3. Outlet cards display identity and a compact operational summary.
+4. Selecting a card enters that outlet's isolated dashboard and reports.
+5. A persistent outlet switcher returns to the portfolio or another owned outlet.
+6. API authorization derives permitted outlet IDs from memberships; the browser
+   cannot access an unrelated outlet by changing a URL.
+
+## Confirmed Date Filters
+
+- Today
+- Yesterday
+- Last 7 Days
+- Last 30 Days
+- Custom Date Range
+
+Custom dates use each outlet's business timezone. Combined reports normalize
+date boundaries per outlet before aggregation.
+
+## Confirmed Monthly Report
+
+- Generate the previous calendar month's report automatically after month close.
+- Run generation as a background job, never during a dashboard request.
+- Scope the report to the Franchise Owner's outlets.
+- Include outlet-by-outlet breakdown and a combined summary.
+- Store report version, generation state, totals, checksum, and audit metadata.
+- Notify the owner through the in-app notification center when ready.
+- Provide a short-lived authenticated download rather than a public file URL.
+- Retry safely without producing duplicate report versions.
+
+## Optimization
+
+- Dashboards query daily and shift summary projections, not full bill tables.
+- Projections update after committed bill/refund events and reconcile on a
+  schedule.
+- Combined dashboards aggregate only authorized outlet summaries.
+- Drill-down data loads only when an outlet/card is opened.
+- Cache versioned, user-scoped summaries briefly; never use a shared public cache
+  for financial data.
+- Large custom reports and Excel exports run asynchronously.
+
+## Confirmed Franchise Owner Metrics
+
+- Gross sales.
+- Discounts.
+- Refunds.
+- Net sales.
+- Cash total.
+- UPI total.
+- Bill count.
+- Combined values across owned outlets and individual outlet drill-down.
+
+## Confirmed Central Admin Dashboard
+
+- The same financial metrics across every JKSH-owned and franchise-owned outlet.
+- Brand, franchise, and outlet filters.
+- Active, suspended, and closed outlet counts.
+- Registered terminal state and last synchronization time.
+- Pending/failed offline synchronization indicators.
+- Archive/export/report job failures.
+- Drill-down without permission to create customer bills.
+
+## Confirmed Accountant Dashboard
+
+Accountant is an internal JKSH-only role. Central Admin creates and manages
+Accountant access; Franchise Owners cannot grant it.
+
+- Net sales and gross sales.
+- Cash and UPI reconciliation.
+- Refunds and audited adjustments.
+- GST/tax reporting totals retained internally.
+- Outlet and combined financial reports.
+- Excel export jobs and archive manifests.
+- No outlet/user/platform-security management.
+
+## Confirmed Monthly Notification
+
+- Monthly report readiness uses in-app notification only for MVP.
+- The notification opens the authenticated report/download screen.
+- No SMS, email, or public report link is sent.
