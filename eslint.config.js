@@ -34,9 +34,9 @@ export default tseslint.config(
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-unused-vars': [
         'error',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }
-      ]
-    }
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
   },
   {
     // React app code: keep type-checking, relax rules that fight idiomatic
@@ -45,8 +45,25 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: false }],
       '@typescript-eslint/no-confusing-void-expression': 'off',
-      '@typescript-eslint/no-deprecated': 'off'
-    }
+      '@typescript-eslint/no-deprecated': 'off',
+    },
+  },
+  {
+    // Pages and Route Handlers must go through @jksh/identity functions and the
+    // actor-context DB boundary — never a raw pool query
+    // (docs/plans/stage-1-audit-remediation.md P1).
+    files: ['apps/*/src/app/**/*.{ts,tsx}'],
+    ignores: ['apps/*/src/app/**/pool.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.type='MemberExpression'][callee.property.name='query']",
+          message:
+            'Do not run raw pool queries from a page or Route Handler. Call a @jksh/identity function that uses withActorContext.',
+        },
+      ],
+    },
   },
   {
     // Tests legitimately use non-null assertions and loose typing on fixtures.
@@ -59,8 +76,8 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-argument': 'off',
-      '@typescript-eslint/no-unsafe-call': 'off'
-    }
+      '@typescript-eslint/no-unsafe-call': 'off',
+    },
   },
   {
     files: [
@@ -68,12 +85,11 @@ export default tseslint.config(
       '**/*.mjs',
       '**/*.cjs',
       '**/*.config.{js,ts,mjs}',
-      '**/next.config.{js,mjs,ts}'
+      '**/next.config.{js,mjs,ts}',
     ],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {
-      parserOptions: { projectService: false, project: false }
-    }
-  }
+      parserOptions: { projectService: false, project: false },
+    },
+  },
 );
-

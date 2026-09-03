@@ -17,7 +17,11 @@ export function SessionControls() {
 
   return (
     <div style={{ display: 'flex', gap: 12, marginTop: 24, maxWidth: 380 }}>
-      <button className="ghost" disabled={busy} onClick={() => call('/api/v1/operator-sessions/lock')}>
+      <button
+        className="ghost"
+        disabled={busy}
+        onClick={() => call('/api/v1/operator-sessions/lock')}
+      >
         Lock terminal
       </button>
       <button disabled={busy} onClick={() => call('/api/v1/operator-sessions/logout')}>

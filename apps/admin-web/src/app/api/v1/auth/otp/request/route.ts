@@ -4,13 +4,14 @@ import { checkAndRecordOtpSend } from '@jksh/identity';
 import { db } from '@/server/pool';
 import { supabaseServer } from '@/server/supabase';
 import { jsonError } from '@/server/http';
-import { devOtpEnabled } from '@/server/dev-session';
+import { assertDevAuthSafe, devOtpEnabled } from '@/server/dev-session';
 
 export async function POST(request: Request) {
   try {
     const { phone } = requestOtpCommandSchema.parse(await request.json());
 
     if (devOtpEnabled()) {
+      assertDevAuthSafe();
       // Fixed dev OTP: nothing to send.
       return NextResponse.json({ sent: true, resendAvailableInSeconds: 0 });
     }

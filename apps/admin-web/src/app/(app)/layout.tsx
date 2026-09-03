@@ -18,7 +18,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           JKSH Admin · <span className="pill">{ROLE_LABEL[actor.role] ?? actor.role}</span>
         </strong>
         <nav>
-          <Link href="/">Outlets</Link>
+          {actor.role === 'accountant' ? (
+            <Link href="/reports">Reports</Link>
+          ) : (
+            <Link href="/">Outlets</Link>
+          )}
           <LogoutButton />
         </nav>
       </div>

@@ -17,7 +17,11 @@ export async function supabaseServer() {
   const jar = await cookies();
   return createServerClient(
     envOrThrow('NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_URL'),
-    envOrThrow('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY'),
+    envOrThrow(
+      'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+      'SUPABASE_PUBLISHABLE_KEY',
+      'SUPABASE_ANON_KEY',
+    ),
     {
       cookies: {
         getAll: () => jar.getAll(),

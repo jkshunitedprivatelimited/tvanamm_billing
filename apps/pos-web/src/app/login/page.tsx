@@ -53,14 +53,12 @@ export default function StoreLoginPage() {
       if (body.outcome === 'rejected') {
         setError(
           body.reason === 'locked'
-            ? `Locked. Try again in ${String(body.retryAfterSeconds ?? 60)}s.`
+            ? `Too many attempts. Try again in ${String(body.retryAfterSeconds ?? 60)}s.`
             : body.reason === 'terminal_revoked'
               ? 'This terminal is no longer active. Re-register it.'
               : body.reason === 'outlet_inactive'
                 ? 'This outlet is not active.'
-                : body.reason === 'employee_inactive'
-                  ? 'This account is not active.'
-                  : 'Incorrect PIN.',
+                : 'Incorrect PIN.',
         );
         return;
       }
@@ -97,9 +95,14 @@ export default function StoreLoginPage() {
           <button
             className="ghost"
             style={{ marginTop: 10 }}
+            disabled={busy}
             onClick={() => {
-              setPhase('pin');
-              setConfirmName('');
+              setBusy(true);
+              void fetch('/api/v1/operator-sessions/reject', { method: 'POST' }).finally(() => {
+                setPhase('pin');
+                setConfirmName('');
+                setBusy(false);
+              });
             }}
           >
             Not me

@@ -85,7 +85,9 @@ export function OutletDetail({
               {l.label}
             </button>
           ))}
-          {(LIFECYCLE[outlet.status] ?? []).length === 0 ? <span className="muted">No actions.</span> : null}
+          {(LIFECYCLE[outlet.status] ?? []).length === 0 ? (
+            <span className="muted">No actions.</span>
+          ) : null}
         </div>
       ) : null}
 
@@ -114,10 +116,15 @@ export function OutletDetail({
         >
           Issue activation code
         </button>
-        {outlet.status !== 'active' ? <span className="muted"> — outlet must be active</span> : null}
+        {outlet.status !== 'active' ? (
+          <span className="muted"> — outlet must be active</span>
+        ) : null}
         {code ? (
           <p className="ok">
-            Enter within 60 min: <span className="mono" style={{ fontSize: 18 }}>{code}</span>
+            Enter within 60 min:{' '}
+            <span className="mono" style={{ fontSize: 18 }}>
+              {code}
+            </span>
           </p>
         ) : null}
         <table style={{ marginTop: 12 }}>
@@ -262,7 +269,10 @@ function EmployeeSection({
                   disabled={busy}
                   onClick={() => {
                     const p = prompt('New four-digit PIN:');
-                    if (p) void onCall(`/api/v1/employees/${e.id}/reset-pin`, 'POST', { newPin: p }).then((ok) => ok && router.refresh());
+                    if (p)
+                      void onCall(`/api/v1/employees/${e.id}/reset-pin`, 'POST', {
+                        newPin: p,
+                      }).then((ok) => ok && router.refresh());
                   }}
                 >
                   Reset PIN

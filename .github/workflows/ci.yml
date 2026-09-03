@@ -44,6 +44,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Format check
+        run: npm run format:check
+
       - name: Lint
         run: npm run lint
 
@@ -71,6 +74,4 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # `high` is currently tripped only by a transitive postcss advisory inside
-      # next@15's own bundle (fixed in next@16). Gate on `critical` until we move.
-      - run: npm audit --audit-level=critical
+      - run: npm audit --omit=dev --audit-level=high

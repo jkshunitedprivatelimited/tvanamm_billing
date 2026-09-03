@@ -5,11 +5,7 @@ import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { OutletDetail } from './detail';
 
-export default async function OutletPage({
-  params,
-}: {
-  params: Promise<{ outletId: string }>;
-}) {
+export default async function OutletPage({ params }: { params: Promise<{ outletId: string }> }) {
   const actor = await requireAdminActor();
   const { outletId } = await params;
 

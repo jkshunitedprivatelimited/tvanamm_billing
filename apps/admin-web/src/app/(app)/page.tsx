@@ -1,15 +1,9 @@
 import Link from 'next/link';
-import { listOutlets } from '@jksh/identity';
+import { listFranchises, listOutlets } from '@jksh/identity';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { NewOutletForm } from './NewOutletForm';
-
-const STATUS_PILL: Record<string, string> = {
-  draft: 'draft',
-  active: 'active',
-  suspended: 'suspended',
-  closed: 'closed',
-};
+import { FranchisePanel } from './FranchisePanel';
 
 export default async function OutletsPage() {
   const actor = await requireAdminActor();
@@ -28,29 +22,30 @@ export default async function OutletsPage() {
     );
   }
 
-  const outlets = await listOutlets(db(), actor);
   const canCreate = actor.role === 'central_admin';
+  const [outlets, franchises] = await Promise.all([
+    listOutlets(db(), actor),
+    canCreate ? listFranchises(db(), actor) : Promise.resolve([]),
+  ]);
 
   return (
     <main>
-      <h1>{canCreate ? 'All outlets' : 'Your outlets'}</h1>
-      <p className="muted">
-        {canCreate
-          ? 'Central Admin creates outlets, then assigns Franchise Owner memberships.'
-          : 'Select an outlet to manage its terminal and employees.'}
-      </p>
+      <h1>{canCreate ? 'Central Admin' : 'Your outlets'}</h1>
 
-      {canCreate ? <NewOutletForm /> : null}
+      {canCreate ? <FranchisePanel franchises={franchises} /> : null}
+      {canCreate ? <NewOutletForm franchises={franchises} /> : null}
 
+      <h2 style={{ marginTop: 24 }}>Outlets</h2>
       <div className="grid">
         {outlets.map((o) => (
           <div key={o.id} className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <strong>{o.displayName}</strong>
-              <span className="pill">{STATUS_PILL[o.status] ?? o.status}</span>
+              <span className="pill">{o.status}</span>
             </div>
             <div className="muted" style={{ fontSize: 13 }}>
-              {o.brandName} · {o.ownershipType === 'jksh_owned' ? 'JKSH-owned' : (o.franchiseName ?? 'franchise')}
+              {o.brandName} ·{' '}
+              {o.ownershipType === 'jksh_owned' ? 'JKSH-owned' : (o.franchiseName ?? 'franchise')}
               {o.city ? ` · ${o.city}` : ''}
             </div>
             <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>

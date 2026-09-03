@@ -4,22 +4,52 @@ import { identityTokenSecret } from '@jksh/config';
 
 export const DEV_COOKIE = 'jksh_dev';
 
-export const devCookieOptions = {
-  httpOnly: true,
-  sameSite: 'lax' as const,
-  secure: false,
-  path: '/',
-  maxAge: 60 * 60 * 12,
-};
+/** Server-enforced lifetime of a dev session, independent of cookie maxAge. */
+export const DEV_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 
-/** TEMPORARY admin login: a fixed OTP, no SMS, no Supabase Auth. Non-prod only. */
+/**
+ * TEMPORARY admin login bypass: a fixed OTP, no SMS, no Supabase Auth. Requires
+ * ALL of `NODE_ENV=development`, `ALLOW_INSECURE_DEV_AUTH=true`, and a non-empty
+ * `ADMIN_DEV_OTP`. Removed entirely once Supabase Phone Auth + MSG91 is accepted
+ * (`docs/plans/stage-1-audit-remediation.md` P1).
+ */
 export function devOtpEnabled(): boolean {
-  return !!process.env.ADMIN_DEV_OTP && process.env.NODE_ENV !== 'production';
+  return (
+    process.env.NODE_ENV === 'development' &&
+    process.env.ALLOW_INSECURE_DEV_AUTH === 'true' &&
+    !!process.env.ADMIN_DEV_OTP
+  );
+}
+
+/** Throw if the insecure bypass is configured in an unsafe place. */
+export function assertDevAuthSafe(): void {
+  if (!devOtpEnabled()) return;
+  if (process.env.NODE_ENV !== 'development') {
+    throw new Error('ALLOW_INSECURE_DEV_AUTH must never be set outside development');
+  }
+  const base = process.env.NEXT_PUBLIC_ADMIN_WEB_URL ?? 'http://localhost:3000';
+  let host = '';
+  try {
+    host = new URL(base).hostname;
+  } catch {
+    host = '';
+  }
+  const loopback = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '';
+  if (!loopback) {
+    throw new Error(
+      `Insecure dev auth refused: NEXT_PUBLIC_ADMIN_WEB_URL host "${host}" is not loopback`,
+    );
+  }
 }
 
 export function devOtpMatches(code: string): boolean {
-  const expected = process.env.ADMIN_DEV_OTP ?? '';
-  return expected.length > 0 && code === expected;
+  const expected = Buffer.from(process.env.ADMIN_DEV_OTP ?? '');
+  const provided = Buffer.from(code);
+  return (
+    expected.length > 0 &&
+    expected.length === provided.length &&
+    timingSafeEqual(provided, expected)
+  );
 }
 
 /** Deterministic, phone-derived UUID that stands in for `auth.users.id`. */
@@ -41,6 +71,7 @@ export function signDevSession(accountId: string, phone: string): string {
   return `${body}.${sig}`;
 }
 
+/** Verify signature AND server-side expiry from the embedded issuedAt. */
 export function readDevSession(value: string | undefined): DevSession | null {
   if (!value) return null;
   const parts = value.split('.');
@@ -52,9 +83,26 @@ export function readDevSession(value: string | undefined): DevSession | null {
   );
   const provided = Buffer.from(sig);
   if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) return null;
+  const issuedAt = Number(iat);
+  if (!Number.isFinite(issuedAt)) return null;
+  if (Date.now() - issuedAt > DEV_SESSION_MAX_AGE_SECONDS * 1000) return null;
+  return { accountId, phone: Buffer.from(phoneB64, 'base64url').toString('utf8'), issuedAt };
+}
+
+export function devCookieOptions(request: Request): {
+  httpOnly: true;
+  sameSite: 'lax';
+  secure: boolean;
+  path: string;
+  maxAge: number;
+} {
+  const proto =
+    request.headers.get('x-forwarded-proto') ?? new URL(request.url).protocol.replace(':', '');
   return {
-    accountId,
-    phone: Buffer.from(phoneB64, 'base64url').toString('utf8'),
-    issuedAt: Number(iat),
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: proto === 'https',
+    path: '/',
+    maxAge: DEV_SESSION_MAX_AGE_SECONDS,
   };
 }

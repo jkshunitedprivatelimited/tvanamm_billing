@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
+import { InsecureAuthBanner } from '@/components/InsecureAuthBanner';
 
 export const metadata: Metadata = {
   title: 'JKSH Admin',
@@ -10,7 +11,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <InsecureAuthBanner />
+        {children}
+      </body>
     </html>
   );
 }

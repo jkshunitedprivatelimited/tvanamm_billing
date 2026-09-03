@@ -23,7 +23,9 @@ export default function LoginPage() {
         body: JSON.stringify({ phone }),
       });
       if (!res.ok) {
-        setError(((await res.json()) as { message?: string }).message ?? 'Could not send the code.');
+        setError(
+          ((await res.json()) as { message?: string }).message ?? 'Could not send the code.',
+        );
         return;
       }
       setStep('code');
