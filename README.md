@@ -37,10 +37,15 @@ npm run db:migrate             # apply database/migrations/*.sql (uses DIRECT_UR
 npm run db:seed                # reference data + demo outlet + optional BOOTSTRAP_* accounts
 ```
 
-Admin login is Supabase Auth phone OTP. Enable the **Phone** provider in the
-Supabase dashboard and wire the **Send SMS** auth hook to an endpoint that calls
-MSG91 with `MSG91_AUTHKEY` / `MSG91_SMS_TEMPLATE_ID`. Until then, use Supabase's
-test OTP for a fixed number.
+Admin login is **Supabase Auth phone OTP**; MSG91 is only the SMS carrier, wired
+as Supabase's **Send SMS** auth hook (`MSG91_AUTHKEY` / `MSG91_SMS_TEMPLATE_ID`).
+MSG91 is **not integrated yet** by explicit product decision.
+
+For local development only, a fixed-code bypass is available. It requires **all
+three** of `NODE_ENV=development`, `ALLOW_INSECURE_DEV_AUTH=true`, and a non-empty
+`ADMIN_DEV_OTP`, refuses to run on a non-loopback URL, and shows a red
+non-production banner. Any seeded account's mobile plus `ADMIN_DEV_OTP` signs in
+with no SMS and no Supabase Auth. Leave the flags blank in shared config.
 
 Never put `SUPABASE_SECRET_KEY`, `DATABASE_URL`, `MSG91_AUTHKEY`, or
 `IDENTITY_TOKEN_SECRET` into a `NEXT_PUBLIC_*` variable.
@@ -75,7 +80,12 @@ Foundation and Identity, re-aligned to `docs/plans/billing-data-api-plan.md`:
   lifecycle; suspending revokes the terminal. One active terminal per outlet with
   replace-on-register. Store Employee four-digit PIN operator login with
   throttle + lockout.
-- Append-only `audit.events` written in each action's transaction.
-- 75 automated tests (unit + Postgres integration, verified against both a local
-  Postgres and the dev Supabase project), lint, typecheck, and both Next.js
-  builds pass.
+- Append-only `audit.events` written in each action's transaction; denied
+  sensitive commands are audited out of band.
+- Audit remediation applied (`docs/plans/stage-1-remediation-status.md`):
+  terminal-wide PIN throttling, contained dev OTP, real fresh-auth timestamps,
+  franchise/invitation onboarding, operator RLS reads + tenant-ID constraints,
+  CSP/security headers, cross-site mutation guards, and Next.js 16.
+- 78 automated tests (unit + Postgres integration, verified against both a local
+  Postgres and the dev Supabase project); `format:check`, lint, typecheck, both
+  Next.js builds, and `npm audit --omit=dev --audit-level=high` pass.

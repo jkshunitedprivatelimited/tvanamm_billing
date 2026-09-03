@@ -105,3 +105,36 @@ lifts out behind one later if needed.
 | Employee disable / reactivate | `setEmployeeStatus` |
 | Logout / logout-all / session revocation | Supabase `signOut` + `auth.admin.signOut`; operator session end |
 | Audit events | `audit.events`, append-only, written in the action's transaction |
+
+## D8. Audit remediation (post-`26ebe07`)
+
+Applied per `docs/plans/stage-1-audit-remediation.md`; see
+`docs/plans/stage-1-remediation-status.md` for the item-by-item state.
+
+- **Store PIN brute force** — `identity.terminal_pin_attempts` (migration 0008)
+  is a terminal-wide counter checked before any employee lookup, so a stolen
+  terminal credential cannot enumerate the PIN space. Every failure (no match,
+  inactive, wrong PIN) increments both the terminal and, where known, the
+  employee counter; `verifyDummyPin` equalizes timing; the response is a single
+  generic `invalid` except for `terminal_revoked` / `outlet_inactive`.
+- **Dev OTP** — the fixed-code admin bypass now requires
+  `NODE_ENV=development` + `ALLOW_INSECURE_DEV_AUTH=true` + `ADMIN_DEV_OTP`, is
+  refused on a non-loopback base URL, throttled, constant-time, server-expired,
+  and shown behind a non-production banner. It is not a production code path.
+- **Fresh authentication** — `identity.account_profiles.last_otp_at` (0011) is
+  set only on interactive OTP verification and drives `secondsSinceAuth`; token
+  refresh never moves it. Enforced for outlet lifecycle, terminal
+  enroll/revoke, PIN reset, and account status.
+- **Franchise onboarding** — `billing.franchise.manage` (0010); Central creates
+  franchises and issues single-use, expiring, mobile-bound invitations that
+  supersede prior ones and reject internal accounts; `/accept-invitation`
+  consumes them after OTP.
+- **DB boundary** — operator RLS read policies + composite `(<fk>,
+  organization_id)` foreign keys (0009); an ESLint rule blocks raw pool queries
+  in app pages/handlers; the POS page reads through `getOperatorSummary`.
+- **Transport** — CSP + security headers and `/api` `no-store` via
+  `next.config.mjs`; middleware rejects cross-site cookie mutations by `Origin`;
+  Zod failures return `400 validation`; denied sensitive commands are audited
+  out of band so the record survives rollback.
+- **Dependencies** — both apps on **Next.js 16**; `npm audit --omit=dev
+  --audit-level=high` is clean and gated in CI alongside `format:check`.
