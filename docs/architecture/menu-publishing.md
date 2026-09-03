@@ -25,6 +25,15 @@
 
 There is no automatic mass update merely because Central saved an item.
 
+Franchise Owner edits follow the same safe pattern within one selected outlet:
+
+1. Save outlet menu or price changes as a draft.
+2. Preview the affected fields and selected outlet.
+3. Explicitly publish a new immutable outlet menu version.
+
+Saving an owner draft never changes the live POS menu, and a publication never
+changes prices in an already open cart.
+
 ## Safe Default Merge Rules
 
 - Master item fields may be published to outlets using the item.

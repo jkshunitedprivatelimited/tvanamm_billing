@@ -167,11 +167,19 @@ Tracks employee/operator start, end, outlet, terminal, status, and force-close
 metadata. Multiple shifts per employee per business date are allowed; only one
 open shift per employee at a time.
 
+Business date is the outlet-local calendar date and changes at midnight. Open
+shifts and Cash sessions cannot cross that boundary; the terminal requires them
+to be closed before new-day billing begins.
+
 ### `billing.cash_sessions`
 
 Tracks the one shared outlet Cash drawer: outlet, opening/closing actor and time,
 opening Cash, expected Cash, counted Cash, optional denomination JSON, variance,
 and mandatory variance reason when non-zero.
+
+Any PIN-authenticated Store Employee may close it. Closed sessions are immutable:
+the Franchise Owner may view them but cannot reopen or edit them. Corrections use
+separate append-only Accountant adjustments.
 
 Employee shifts and outlet Cash sessions are intentionally separate.
 
@@ -181,7 +189,7 @@ Employee shifts and outlet Cash sessions are intentionally separate.
 
 Key fields: bill ID, outlet/terminal/employee/shift/cash-session IDs, receipt
 number, business date, menu version, customer optional fields, subtotal,
-discount, pre-round total, round adjustment, final total, payment method,
+discount, pre-round total, round adjustment, final total, nullable payment method,
 terminal occurrence time, server commit time, offline indicator, idempotency key.
 
 Constraints:
@@ -189,6 +197,8 @@ Constraints:
 - receipt number unique;
 - idempotency key unique within command scope;
 - final total non-negative;
+- payment method is null only when final total is zero and bill classification is
+  `complimentary`;
 - UPI round adjustment equals zero;
 - Cash final total is whole-rupee;
 - update/delete denied after insert except controlled archival metadata.
@@ -205,12 +215,15 @@ and optional Stock recipe ID/version.
 
 ### `billing.payments`
 
-Immutable Cash/UPI payment record. UPI sale reference is optional.
+Immutable Cash/UPI payment record for positive-total bills. Complimentary bills
+have no payment record. UPI sale reference is optional.
 
 ### `billing.discounts`
 
-Stores bill/line allocation, mandatory internal reason, employee, terminal, and
-timestamp. Discount reasons do not appear on customer receipts.
+Stores bill-level or line-level scope, fixed/percentage input, allocated monetary
+value, mandatory internal reason, employee, terminal, and timestamp. Bill-level
+discounts are deterministically allocated across lines/add-ons for refunds and
+reporting. Discount reasons do not appear on customer receipts.
 
 ## 8. Refund and Adjustment Schema
 
@@ -219,6 +232,9 @@ timestamp. Discount reasons do not appear on customer receipts.
 Immutable refund header: original bill, kind, payout method, mandatory reason,
 mandatory UPI reference for UPI payout, employee/owner actor, outlet, amount,
 business timestamp, and idempotency key.
+
+Payout method is independently selected as Cash or UPI and is not constrained to
+match the original sale payment method.
 
 ### `billing.refund_lines`
 

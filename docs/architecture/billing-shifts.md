@@ -58,6 +58,10 @@ The Cash drawer is tracked independently from employees:
 8. A non-zero variance requires a reason.
 9. Closing the Cash session is separate from ending an employee shift or logging
    out.
+10. Any logged-in Store Employee may close the shared Cash session using their
+    own PIN-authenticated operator context.
+11. Once closed, the Cash session cannot be reopened or edited. The Franchise
+    Owner may view it; any valid correction is a separate audited adjustment.
 
 The MVP permits one open Cash session per outlet at a time. This avoids assigning
 the same physical money to several employee shifts.
@@ -66,6 +70,9 @@ the same physical money to several employee shifts.
 
 - Server time and the outlet timezone determine shift timestamps and business
   date; browser time is not trusted.
+- The business date is the outlet-local calendar date and ends at midnight.
+- An open employee shift or Cash session cannot continue into the next business
+  date. The POS requires closure before billing resumes on the new date.
 - Only one open shift per employee is permitted at a time.
 - Multiple closed shifts per employee per business date are permitted.
 - Multiple employees may have open shifts simultaneously.
@@ -86,5 +93,9 @@ the same physical money to several employee shifts.
   close their shift.
 - Closing Cash is entered as one total; denomination details are optional.
 - A non-zero Cash variance requires a reason.
+- Any logged-in Store Employee may close the shared Cash session; the closing
+  employee is permanently recorded.
+- A closed Cash session is immutable and cannot be reopened by the Franchise
+  Owner.
 - Forgotten shifts are force-closed by the Franchise Owner with a reason; there
   is no silent automatic close in the MVP.

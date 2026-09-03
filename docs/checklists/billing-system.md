@@ -21,17 +21,25 @@ and documentation are complete.
 - [x] Confirm Franchise Owners manage employees for their own outlets.
 - [x] Confirm Central master-menu edits require an explicit reviewed `Publish to
       outlets` action and are never pushed automatically.
+- [x] Confirm Franchise Owner price/menu edits use Draft, Preview, and explicit
+      Publish for the selected outlet and never alter an open cart.
 - [x] Confirm each Store Employee is assigned to exactly one outlet and does not
       select or enter codes for other outlets.
 - [x] Confirm Central Admin may view/manage outlets but cannot create bills.
 - [x] Confirm Store Employees cannot manually change catalog prices while billing.
 - [x] Confirm Store Employees may discount up to the remaining bill value.
+- [x] Confirm item-level and whole-bill discounts using fixed amounts or
+      percentages.
+- [x] Confirm a 100% discounted sale is stored as a complimentary bill without a
+      Cash/UPI payment.
 - [x] Confirm completed-bill refund access: Store Employees may refund.
 - [x] Confirm that a non-empty refund reason is mandatory.
 - [x] Confirm Store Employee refund policy: immediate, no approval, and only for
       bills generated on the same store-local business date.
 - [x] Confirm complete-bill and partial item/quantity refunds are permitted.
 - [x] Confirm initial refund payout choices: Cash or UPI.
+- [x] Confirm refund payout method may differ from the original sale payment
+      method.
 - [x] Confirm UPI sale reference optional and UPI refund reference mandatory.
 - [x] Confirm Franchise Owner historical refunds are limited to 60-day active
       records.
@@ -40,10 +48,16 @@ and documentation are complete.
 - [x] Confirm customer payment modes: Cash and UPI only.
 - [x] Confirm standard prices are GST-inclusive and receipts do not show a GST
       breakdown.
+- [x] Confirm refunds affect reports on the refund date and never rewrite the
+      original sale-day totals.
 - [x] Confirm Cash rounds to the nearest rupee and UPI retains the exact amount.
 - [x] Confirm receipt number `YYYYMMDD-T01-000001`, resetting daily per terminal.
 - [x] Confirm receipt header uses centrally configured outlet name, address, and
       available details; outlet name is not embedded in the receipt number.
+- [x] Confirm outlet-local business day ends at midnight and open shifts/Cash
+      sessions cannot continue into the next business date.
+- [x] Confirm any logged-in Store Employee may close the shared Cash session;
+      closed sessions are immutable and the Franchise Owner has view-only access.
 - [x] Confirm active history retention: 60 days, followed by verified Excel and
       archive processing with notifications.
 - [x] Confirm offline billing is required for the first release.

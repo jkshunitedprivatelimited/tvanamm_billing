@@ -31,11 +31,14 @@
 - A paid/completed bill is never edited, voided, or hard-deleted.
 - Corrections happen only through a linked full or partial refund.
 - Store Employees can refund current-day outlet bills online.
-- Franchise Owners can refund older bills for owned outlets while the bill is
-  available under the active/archive policy and the operation is supported.
+- Franchise Owners can refund older bills for owned outlets only during the
+  60-day active operational period. Archived bills are read-only and cannot be
+  refunded.
 - The system calculates refundable lines, quantities, discounts, rounding, and
   totals from the original snapshot and prior refunds.
 - Refund reason and Cash/UPI payout choice are mandatory.
+- The selected refund payout method may differ from the original sale payment
+  method. A UPI refund still requires its own reference.
 
 ## Bill Status
 
@@ -67,4 +70,3 @@ ambiguous field.
 - Current-day updates invalidate only the affected receipt/list entry.
 - Reprints use stored structured snapshots and cached printer assets.
 - Refundability is calculated server-side and returned with bill detail.
-

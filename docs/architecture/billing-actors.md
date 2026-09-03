@@ -216,6 +216,8 @@ Both complete-bill and partial item/quantity refunds are included in the MVP.
 ## Confirmed Refund Payout Choice
 
 - A refund operator chooses either `cash` or `upi` as the refund payout method.
+- The refund payout method does not have to match the original sale payment
+  method.
 - The selected payout method, employee, outlet, amount, reason, and timestamp are
   recorded.
 - A UPI sale reference is optional.

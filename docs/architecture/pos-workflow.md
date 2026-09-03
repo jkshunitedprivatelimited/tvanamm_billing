@@ -17,6 +17,10 @@
 - Store Employees cannot override product prices.
 - Store Employees may apply discounts up to the payable value with a mandatory
   reason.
+- Discounts may target an individual item or the entire bill and may be entered
+  as either a fixed amount or percentage.
+- A discount may reduce the payable total to zero. Such a sale is committed as a
+  `complimentary` bill and does not require Cash or UPI payment.
 
 ## Add-On Model
 
@@ -44,14 +48,22 @@
 5. If configured, POS opens its add-on selector and validates selection rules.
 6. Employee optionally enters a short product note, adds the configured line to
    cart, and changes quantity as needed.
-7. Employee optionally applies a discount and enters the mandatory reason.
+7. Employee optionally applies item-level and/or bill-level fixed or percentage
+   discounts and enters the mandatory reason for each application.
 8. POS displays the GST-inclusive subtotal, discount, payment total, and Cash
    round-off where relevant.
-9. Employee selects Cash or UPI and confirms payment received externally.
+9. For a positive total, the employee selects Cash or UPI and confirms payment
+   received externally. A zero-total bill is confirmed as complimentary without
+   a payment method.
 10. Online mode submits an idempotent `CreateBill`; offline mode commits it to
     IndexedDB and the synchronization outbox.
 11. Receipt prints and the cart clears only after durable commit.
 12. Billing publishes `SaleCompleted` only after server synchronization/commit.
+
+The cart holds the menu version and price snapshots captured when items were
+added. A newly published menu never changes an open cart. Checkout revalidates
+availability and accepts the still-valid snapshot according to the menu-version
+policy; it never silently recalculates the cart using new prices.
 
 ## Optimization Rules
 

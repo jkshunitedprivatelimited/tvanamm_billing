@@ -21,6 +21,16 @@
 Custom dates use each outlet's business timezone. Combined reports normalize
 date boundaries per outlet before aggregation.
 
+## Confirmed Financial Date Treatment
+
+- A completed bill remains reported on its original business date.
+- A refund is reported as a negative financial movement on the refund business
+  date.
+- Creating a later refund never rewrites the original sale-day totals.
+- Net sales for a selected period equal sales recognized in that period minus
+  refunds performed in that period.
+- Bill detail links the original sale and every later refund for reconciliation.
+
 ## Confirmed Monthly Report
 
 - Generate the previous calendar month's report automatically after month close.
