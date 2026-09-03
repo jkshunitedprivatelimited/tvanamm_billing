@@ -4,6 +4,7 @@ export * from './capabilities.js';
 export * from './employee.js';
 export * from './events.js';
 export * from './identity.js';
+export * from './outlet.js';
 export * from './role-capabilities.js';
 export * from './session.js';
 export * from './terminal.js';

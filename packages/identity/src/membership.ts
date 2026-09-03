@@ -1,9 +1,12 @@
-import type { Membership, Role, WorkspaceCard } from '@jksh/contracts';
+import type { MembershipRole, WorkspaceCard } from '@jksh/contracts';
 
-const ADMIN_ROLES: readonly Role[] = ['central_admin', 'accountant', 'franchise_owner'];
-
-export function isAdminRole(role: Role): boolean {
-  return ADMIN_ROLES.includes(role);
+export interface MembershipRow {
+  id: string;
+  role: MembershipRole;
+  status: 'active' | 'suspended' | 'revoked';
+  organizationId: string;
+  brandId: string | null;
+  franchiseId: string | null;
 }
 
 export type AdminRouting =
@@ -11,73 +14,37 @@ export type AdminRouting =
   | { outcome: 'select_workspace'; membershipIds: string[] }
   | { outcome: 'no_admin_access' };
 
-function redirectFor(role: Role): string {
-  switch (role) {
-    case 'accountant':
-      return '/reports';
-    case 'central_admin':
-    case 'franchise_owner':
-      return '/';
-    case 'store_employee':
-      return '/';
-  }
+function redirectFor(role: MembershipRole): string {
+  return role === 'accountant' ? '/reports' : '/';
 }
 
-/**
- * Decide where an admin login lands. Store-employee-only users cannot use the
- * admin surface. A single admin membership routes straight through; more than
- * one shows the workspace selector (`docs/checklists/billing-system.md` s1).
- */
-export function resolveAdminRouting(memberships: readonly Membership[]): AdminRouting {
-  const usable = memberships.filter(
-    (m) => m.status === 'active' && isAdminRole(m.role),
-  );
+/** Where an admin login lands. Single active membership routes straight through;
+ *  more than one shows the workspace selector. */
+export function resolveAdminRouting(memberships: readonly MembershipRow[]): AdminRouting {
+  const usable = memberships.filter((m) => m.status === 'active');
   const only = usable[0];
   if (!only) return { outcome: 'no_admin_access' };
   if (usable.length === 1) {
-    return {
-      outcome: 'single_workspace',
-      membershipId: only.id,
-      redirectTo: redirectFor(only.role),
-    };
+    return { outcome: 'single_workspace', membershipId: only.id, redirectTo: redirectFor(only.role) };
   }
-  return {
-    outcome: 'select_workspace',
-    membershipIds: usable.map((m) => m.id),
-  };
-}
-
-/** The single active store-employee membership for a resolved employee. */
-export function resolveStoreMembership(
-  memberships: readonly Membership[],
-  outletId: string,
-): Membership | null {
-  return (
-    memberships.find(
-      (m) =>
-        m.status === 'active' &&
-        m.role === 'store_employee' &&
-        m.scope.outletId === outletId,
-    ) ?? null
-  );
+  return { outcome: 'select_workspace', membershipIds: usable.map((m) => m.id) };
 }
 
 export function sortWorkspaceCards(cards: WorkspaceCard[]): WorkspaceCard[] {
-  const rank: Record<Role, number> = {
+  const rank: Record<MembershipRole, number> = {
     central_admin: 0,
     accountant: 1,
     franchise_owner: 2,
-    store_employee: 3,
   };
   return [...cards].sort((a, b) => {
     if (rank[a.role] !== rank[b.role]) return rank[a.role] - rank[b.role];
-    return (a.outletName ?? a.franchiseName ?? '').localeCompare(
-      b.outletName ?? b.franchiseName ?? '',
+    return (a.franchiseName ?? a.organizationName).localeCompare(
+      b.franchiseName ?? b.organizationName,
     );
   });
 }
 
-// --- Store-local business date --------------------------------------------
+// --- Store-local business date -----------------------------------------
 
 export interface BusinessDate {
   year: number;
@@ -86,7 +53,7 @@ export interface BusinessDate {
 }
 
 /** The store-local calendar date for an instant, using the outlet IANA zone.
- *  Server-only; the browser clock is never trusted for eligibility windows. */
+ *  Server-only; never the browser clock. */
 export function businessDate(now: Date, timeZone: string): BusinessDate {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone,

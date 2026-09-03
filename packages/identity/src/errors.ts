@@ -1,7 +1,7 @@
-/** Stable error codes returned to the UI. Messages are safe to surface. */
 export type IdentityErrorCode =
   | 'unauthenticated'
   | 'forbidden'
+  | 'fresh_auth_required'
   | 'account_disabled'
   | 'account_locked'
   | 'session_expired'
@@ -12,12 +12,15 @@ export type IdentityErrorCode =
   | 'pin_not_unique'
   | 'terminal_not_found'
   | 'terminal_revoked'
-  | 'terminal_already_registered'
   | 'activation_code_invalid'
   | 'activation_code_expired'
   | 'activation_code_consumed'
+  | 'outlet_not_active'
   | 'outlet_capacity'
   | 'employee_exists'
+  | 'employee_inactive'
+  | 'invitation_invalid'
+  | 'invitation_expired'
   | 'not_found'
   | 'conflict'
   | 'validation';
@@ -47,18 +50,21 @@ function defaultStatus(code: IdentityErrorCode): number {
     case 'session_not_found':
       return 401;
     case 'forbidden':
+    case 'fresh_auth_required':
     case 'account_disabled':
     case 'account_locked':
     case 'terminal_revoked':
+    case 'employee_inactive':
+    case 'outlet_not_active':
       return 403;
     case 'not_found':
     case 'terminal_not_found':
       return 404;
     case 'conflict':
     case 'employee_exists':
-    case 'terminal_already_registered':
     case 'activation_code_consumed':
     case 'pin_not_unique':
+    case 'outlet_capacity':
       return 409;
     case 'pin_locked':
       return 429;

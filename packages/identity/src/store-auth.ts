@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { serverEnvironment } from '@jksh/config';
-import { withTransaction, type Pool, type PoolClient } from '@jksh/db';
-import type { PinLoginCommand, PinLoginResult } from '@jksh/contracts';
+import { identityTokenSecret } from '@jksh/config';
+import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
+import type { ActorContext, PinLoginCommand, PinLoginResult } from '@jksh/contracts';
+import { systemContext } from './db-context.js';
 import {
   attemptGate,
   pinLookup,
@@ -10,188 +11,90 @@ import {
   verifyPinHash,
   type AttemptState,
 } from './pin.js';
-import { parseTerminalCredential, mintSessionToken } from './tokens.js';
-import { createSession } from './session-context.js';
+import {
+  mintOperatorToken,
+  nonceHashMatches,
+  parseOperatorToken,
+  parseTerminalCredential,
+} from './tokens.js';
 import { recordAudit } from './audit.js';
 import type { RequestMeta } from './admin-auth.js';
 
 export interface PinLoginOutput {
   result: PinLoginResult;
-  sessionToken?: string;
+  operatorToken?: string;
 }
 
-const EMPTY: AttemptState = { failedCount: 0, lastFailedAt: null, lockedUntil: null };
+const OPERATOR_SESSION_HOURS = 16;
 
-async function loadUserAttempt(
-  client: PoolClient,
-  userId: string,
-): Promise<AttemptState> {
-  const { rows } = await client.query<{
-    failed_count: number;
-    last_failed_at: Date | null;
-    locked_until: Date | null;
-  }>(
-    `select failed_count, last_failed_at, locked_until
-       from identity.pin_attempts where user_id = $1`,
-    [userId],
-  );
-  const row = rows[0];
-  return row
-    ? {
-        failedCount: row.failed_count,
-        lastFailedAt: row.last_failed_at,
-        lockedUntil: row.locked_until,
-      }
-    : { ...EMPTY };
-}
+type RejectReason = 'invalid' | 'locked' | 'terminal_revoked' | 'employee_inactive' | 'outlet_inactive';
 
-async function saveUserAttempt(
-  client: PoolClient,
-  userId: string,
-  outletId: string,
-  state: AttemptState,
-): Promise<void> {
-  await client.query(
-    `insert into identity.pin_attempts (user_id, outlet_id, failed_count, last_failed_at, locked_until)
-     values ($1,$2,$3,$4,$5)
-     on conflict (user_id) do update
-       set failed_count = excluded.failed_count,
-           last_failed_at = excluded.last_failed_at,
-           locked_until = excluded.locked_until`,
-    [userId, outletId, state.failedCount, state.lastFailedAt, state.lockedUntil],
-  );
-}
-
-async function loadTerminalAttempt(
-  client: PoolClient,
-  terminalId: string,
-): Promise<AttemptState> {
-  const { rows } = await client.query<{
-    failed_count: number;
-    last_failed_at: Date | null;
-    locked_until: Date | null;
-  }>(
-    `select failed_count, last_failed_at, locked_until
-       from identity.terminal_pin_attempts where terminal_id = $1`,
-    [terminalId],
-  );
-  const row = rows[0];
-  return row
-    ? {
-        failedCount: row.failed_count,
-        lastFailedAt: row.last_failed_at,
-        lockedUntil: row.locked_until,
-      }
-    : { ...EMPTY };
-}
-
-async function saveTerminalAttempt(
-  client: PoolClient,
-  terminalId: string,
-  state: AttemptState,
-): Promise<void> {
-  await client.query(
-    `insert into identity.terminal_pin_attempts
-       (terminal_id, failed_count, last_failed_at, locked_until, window_started_at)
-     values ($1,$2,$3,$4, now())
-     on conflict (terminal_id) do update
-       set failed_count = excluded.failed_count,
-           last_failed_at = excluded.last_failed_at,
-           locked_until = excluded.locked_until`,
-    [terminalId, state.failedCount, state.lastFailedAt, state.lockedUntil],
-  );
-}
-
-function reject(
-  reason: 'invalid' | 'locked' | 'terminal_revoked' | 'offline_expired',
-  retryAfterSeconds?: number,
-): PinLoginOutput {
+function reject(reason: RejectReason, retryAfterSeconds?: number): PinLoginOutput {
   return {
-    result: {
-      outcome: 'rejected',
-      reason,
-      ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
-    },
+    result: { outcome: 'rejected', reason, ...(retryAfterSeconds ? { retryAfterSeconds } : {}) },
   };
 }
 
-/**
- * Four-digit PIN login on a registered terminal. A PIN never authenticates
- * without a valid terminal credential. Failures throttle both the employee and
- * the terminal; repeated failures hard-lock.
- */
 export async function pinLogin(
   pool: Pool,
   cmd: PinLoginCommand,
   meta: RequestMeta = {},
 ): Promise<PinLoginOutput> {
-  const secret = serverEnvironment().identityTokenSecret;
+  const secret = identityTokenSecret();
   const correlationId = meta.correlationId ?? randomUUID();
   const now = new Date();
 
   const parsed = parseTerminalCredential(secret, cmd.terminalCredential);
   if (!parsed) return reject('invalid');
 
-  return withTransaction(pool, async (client) => {
+  return withActorContext(pool, systemContext(), async (client) => {
     const { rows: termRows } = await client.query<{
       id: string;
       outlet_id: string;
       organization_id: string;
-      franchise_id: string;
-      state: string;
+      franchise_id: string | null;
+      status: string;
     }>(
-      `select id, outlet_id, organization_id, franchise_id, state
+      `select id, outlet_id, organization_id, franchise_id, status
          from identity.terminals where id = $1 for update`,
       [parsed.terminalId],
     );
     const term = termRows[0];
     if (!term) return reject('invalid');
 
-    const { rows: credRows } = await client.query<{ id: string }>(
-      `select id from identity.terminal_credentials
-        where terminal_id = $1 and nonce_hash = $2 and state = 'active'`,
+    const cred = await client.query(
+      `select 1 from identity.terminal_credentials
+        where terminal_id = $1 and nonce_hash = $2 and status = 'active'`,
       [term.id, parsed.nonceHash],
     );
-    if (!credRows[0]) return reject('terminal_revoked');
-    if (term.state === 'revoked') return reject('terminal_revoked');
-    if (term.state !== 'active') return reject('terminal_revoked');
+    if (!cred.rowCount || term.status !== 'active') return reject('terminal_revoked');
 
-    // Terminal-level throttle first.
-    const termAttempt = await loadTerminalAttempt(client, term.id);
-    const termGate = attemptGate(termAttempt, now);
-    if (termGate.blocked) {
-      await recordAudit(client, {
-        action: 'pin.locked',
-        result: 'denied',
-        organizationId: term.organization_id,
-        franchiseId: term.franchise_id,
-        outletId: term.outlet_id,
-        terminalId: term.id,
-        correlationId,
-        metadata: { scope: 'terminal' },
-      });
-      return reject('locked', termGate.retryAfterSeconds);
-    }
+    const outlet = await client.query<{ status: string; display_name: string }>(
+      `select status, display_name from billing.outlets where id = $1`,
+      [term.outlet_id],
+    );
+    if (outlet.rows[0]?.status !== 'active') return reject('outlet_inactive');
 
     const lookup = pinLookup(secret, term.outlet_id, cmd.pin);
-    const { rows: pinRows } = await client.query<{
-      user_id: string;
-      pin_hash: string;
+    const { rows: empRows } = await client.query<{
+      id: string;
+      full_name: string;
+      employee_code: string;
+      status: string;
+      pin_hash: string | null;
+      failed_attempts: number;
+      last_failed_at: Date | null;
+      lock_time: Date | null;
     }>(
-      `select user_id, pin_hash from identity.employee_pins
-        where outlet_id = $1 and pin_lookup = $2`,
+      `select id, full_name, employee_code, status, pin_hash, failed_attempts,
+              last_failed_at, lock_time
+         from identity.store_employees
+        where outlet_id = $1 and pin_lookup = $2 for update`,
       [term.outlet_id, lookup],
     );
-    const pinRow = pinRows[0];
+    const emp = empRows[0];
 
-    const failTerminal = async (): Promise<AttemptState> => {
-      const next = registerFailure(termAttempt, now);
-      await saveTerminalAttempt(client, term.id, next);
-      return next;
-    };
-
-    if (!pinRow) {
-      const next = await failTerminal();
+    if (!emp?.pin_hash) {
       await recordAudit(client, {
         action: 'pin.login_failed',
         result: 'failure',
@@ -202,218 +105,230 @@ export async function pinLogin(
         correlationId,
         metadata: { reason: 'no_match' },
       });
-      return reject('invalid', attemptGate(next, now).retryAfterSeconds || undefined);
-    }
-
-    const userAttempt = await loadUserAttempt(client, pinRow.user_id);
-    const userGate = attemptGate(userAttempt, now);
-    if (userGate.blocked) {
-      return reject('locked', userGate.retryAfterSeconds);
-    }
-
-    const ok = await verifyPinHash(pinRow.pin_hash, cmd.pin);
-    if (!ok) {
-      const nextUser = registerFailure(userAttempt, now);
-      await saveUserAttempt(client, pinRow.user_id, term.outlet_id, nextUser);
-      await failTerminal();
-      const hardLocked = (nextUser.lockedUntil?.getTime() ?? 0) > now.getTime();
-      await recordAudit(client, {
-        action: hardLocked ? 'pin.locked' : 'pin.login_failed',
-        result: hardLocked ? 'denied' : 'failure',
-        subjectUserId: pinRow.user_id,
-        organizationId: term.organization_id,
-        franchiseId: term.franchise_id,
-        outletId: term.outlet_id,
-        terminalId: term.id,
-        correlationId,
-        metadata: { failedCount: nextUser.failedCount },
-      });
-      return reject(
-        'invalid',
-        attemptGate(nextUser, now).retryAfterSeconds || undefined,
-      );
-    }
-
-    // Success.
-    await saveUserAttempt(client, pinRow.user_id, term.outlet_id, registerSuccess());
-    await saveTerminalAttempt(client, term.id, registerSuccess());
-
-    const { rows: empRows } = await client.query<{
-      full_name: string;
-      employee_code: string;
-      account_state: string;
-      membership_id: string | null;
-      membership_status: string | null;
-      outlet_name: string;
-    }>(
-      `select se.full_name,
-              se.employee_code,
-              u.account_state,
-              m.id      as membership_id,
-              m.status  as membership_status,
-              o.name    as outlet_name
-         from identity.store_employees se
-         join identity.users u on u.id = se.user_id
-         join identity.outlets o on o.id = se.outlet_id
-         left join identity.memberships m
-                on m.user_id = se.user_id
-               and m.role = 'store_employee'
-               and m.outlet_id = se.outlet_id
-        where se.user_id = $1`,
-      [pinRow.user_id],
-    );
-    const emp = empRows[0];
-    if (
-      emp?.account_state !== 'active' ||
-      !emp.membership_id ||
-      emp.membership_status !== 'active'
-    ) {
-      await recordAudit(client, {
-        action: 'login.failed',
-        result: 'denied',
-        subjectUserId: pinRow.user_id,
-        organizationId: term.organization_id,
-        franchiseId: term.franchise_id,
-        outletId: term.outlet_id,
-        terminalId: term.id,
-        correlationId,
-        metadata: { surface: 'store', reason: 'membership_unavailable' },
-      });
       return reject('invalid');
     }
 
+    const state: AttemptState = {
+      failedCount: emp.failed_attempts,
+      lastFailedAt: emp.last_failed_at,
+      lockedUntil: emp.lock_time,
+    };
+    const gate = attemptGate(state, now);
+    if (gate.blocked) return reject('locked', gate.retryAfterSeconds);
+
+    if (emp.status !== 'active') return reject('employee_inactive');
+
+    const ok = await verifyPinHash(emp.pin_hash, cmd.pin);
+    if (!ok) {
+      const next = registerFailure(state, now);
+      await client.query(
+        `update identity.store_employees
+           set failed_attempts = $2, last_failed_at = $3, lock_time = $4 where id = $1`,
+        [emp.id, next.failedCount, next.lastFailedAt, next.lockedUntil],
+      );
+      const hardLocked = (next.lockedUntil?.getTime() ?? 0) > now.getTime();
+      await recordAudit(client, {
+        action: hardLocked ? 'pin.locked' : 'pin.login_failed',
+        result: hardLocked ? 'denied' : 'failure',
+        actorEmployeeId: emp.id,
+        organizationId: term.organization_id,
+        franchiseId: term.franchise_id,
+        outletId: term.outlet_id,
+        terminalId: term.id,
+        correlationId,
+        metadata: { failedCount: next.failedCount },
+      });
+      return reject('invalid', attemptGate(next, now).retryAfterSeconds || undefined);
+    }
+
+    // Success.
+    const reset = registerSuccess();
+    await client.query(
+      `update identity.store_employees
+         set failed_attempts = $2, last_failed_at = $3, lock_time = $4 where id = $1`,
+      [emp.id, reset.failedCount, reset.lastFailedAt, reset.lockedUntil],
+    );
     // Switching operator ends any prior open context on this terminal.
     await client.query(
-      `update identity.workstation_sessions
-         set state = 'ended', ended_at = now()
-       where terminal_id = $1 and state in ('active','locked')`,
+      `update identity.operator_sessions
+         set status = 'ended', ended_at = now(), revoked_reason = 'operator_switch'
+       where terminal_id = $1 and status in ('active','locked')`,
       [term.id],
     );
 
-    const session = await createSession(client, {
-      userId: pinRow.user_id,
-      kind: 'store_pin',
-      membershipId: emp.membership_id,
-      device: meta.deviceLabel ? { label: meta.deviceLabel } : {},
-    });
-    const minted = mintSessionToken(session.id);
+    const operatorSessionId = randomUUID();
+    const minted = mintOperatorToken(operatorSessionId);
     await client.query(
-      `update identity.sessions set refresh_token_hash = $2 where id = $1`,
-      [session.id, minted.tokenHash],
+      `insert into identity.operator_sessions
+         (id, employee_id, terminal_id, outlet_id, status, token_hash, device, expires_at)
+       values ($1,$2,$3,$4,'active',$5,$6,$7)`,
+      [
+        operatorSessionId,
+        emp.id,
+        term.id,
+        term.outlet_id,
+        minted.tokenHash,
+        JSON.stringify(meta.deviceLabel ? { label: meta.deviceLabel } : {}),
+        new Date(now.getTime() + OPERATOR_SESSION_HOURS * 3_600_000),
+      ],
     );
-
-    const workstationId = randomUUID();
-    await client.query(
-      `insert into identity.workstation_sessions
-         (id, session_id, terminal_id, outlet_id, operator_user_id, state)
-       values ($1,$2,$3,$4,$5,'active')`,
-      [workstationId, session.id, term.id, term.outlet_id, pinRow.user_id],
-    );
-    await client.query(
-      `update identity.terminals set last_seen_at = now() where id = $1`,
-      [term.id],
-    );
+    await client.query(`update identity.terminals set last_validated_at = now() where id = $1`, [term.id]);
 
     await recordAudit(client, {
       action: 'login.succeeded',
       result: 'success',
-      actorUserId: pinRow.user_id,
-      sessionId: session.id,
+      actorEmployeeId: emp.id,
       organizationId: term.organization_id,
       franchiseId: term.franchise_id,
       outletId: term.outlet_id,
       terminalId: term.id,
+      sessionId: operatorSessionId,
       correlationId,
       metadata: { surface: 'store' },
-    });
-    await recordAudit(client, {
-      action: 'workspace.selected',
-      result: 'success',
-      actorUserId: pinRow.user_id,
-      sessionId: session.id,
-      organizationId: term.organization_id,
-      franchiseId: term.franchise_id,
-      outletId: term.outlet_id,
-      terminalId: term.id,
-      correlationId,
-      metadata: { membershipId: emp.membership_id, auto: true },
     });
 
     return {
       result: {
         outcome: 'resolved',
-        sessionId: session.id,
-        workstationSessionId: workstationId,
+        operatorSessionId,
         employeeId: emp.employee_code,
         employeeName: emp.full_name,
         outletId: term.outlet_id,
-        outletName: emp.outlet_name,
+        outletName: outlet.rows[0].display_name,
       },
-      sessionToken: minted.token,
+      operatorToken: minted.token,
     };
   });
 }
 
-export async function lockWorkstation(
+async function loadOperatorSession(
+  client: PoolClient,
+  token: string,
+): Promise<{
+  id: string;
+  employee_id: string;
+  terminal_id: string;
+  outlet_id: string;
+  status: string;
+  token_hash: string;
+  expires_at: Date;
+} | null> {
+  const parsed = parseOperatorToken(token);
+  if (!parsed) return null;
+  const { rows } = await client.query<{
+    id: string;
+    employee_id: string;
+    terminal_id: string;
+    outlet_id: string;
+    status: string;
+    token_hash: string;
+    expires_at: Date;
+  }>(
+    `select id, employee_id, terminal_id, outlet_id, status, token_hash, expires_at
+       from identity.operator_sessions where id = $1`,
+    [parsed.operatorSessionId],
+  );
+  const row = rows[0];
+  if (!row || !nonceHashMatches(parsed.nonceHash, row.token_hash)) return null;
+  return row;
+}
+
+export async function loadOperatorContext(
   pool: Pool,
-  sessionId: string,
-  meta: RequestMeta = {},
-): Promise<void> {
-  await withTransaction(pool, async (client) => {
+  token: string | undefined | null,
+  now = new Date(),
+): Promise<ActorContext | null> {
+  if (!token) return null;
+  return withActorContext(pool, systemContext(), async (client) => {
+    const session = await loadOperatorSession(client, token);
+    if (!session) return null;
+    if (session.status === 'ended' || session.expires_at.getTime() <= now.getTime()) return null;
     const { rows } = await client.query<{
-      id: string;
-      terminal_id: string;
-      outlet_id: string;
-      operator_user_id: string;
+      organization_id: string;
+      franchise_id: string | null;
+      emp_status: string;
+      outlet_status: string;
+      issued_at: Date;
     }>(
-      `update identity.workstation_sessions
-         set state = 'locked', locked_at = now()
-       where session_id = $1 and state = 'active'
-       returning id, terminal_id, outlet_id, operator_user_id`,
-      [sessionId],
+      `select t.organization_id, t.franchise_id, se.status as emp_status,
+              o.status as outlet_status, os.issued_at
+         from identity.operator_sessions os
+         join identity.terminals t on t.id = os.terminal_id
+         join identity.store_employees se on se.id = os.employee_id
+         join billing.outlets o on o.id = os.outlet_id
+        where os.id = $1`,
+      [session.id],
     );
     const row = rows[0];
-    if (row) {
-      await recordAudit(client, {
-        action: 'terminal.locked',
-        result: 'success',
-        actorUserId: row.operator_user_id,
-        sessionId,
-        outletId: row.outlet_id,
-        terminalId: row.terminal_id,
-        correlationId: meta.correlationId ?? randomUUID(),
-      });
-    }
+    if (!row) return null;
+    if (row.emp_status !== 'active' || row.outlet_status !== 'active') return null;
+
+    await client.query(`update identity.operator_sessions set last_seen_at = now() where id = $1`, [
+      session.id,
+    ]);
+
+    return {
+      kind: 'operator',
+      employeeId: session.employee_id,
+      role: 'store_employee',
+      scope: {
+        organizationId: row.organization_id,
+        ...(row.franchise_id ? { franchiseId: row.franchise_id } : {}),
+        outletId: session.outlet_id,
+      },
+      sessionActive: session.status === 'active',
+      terminalId: session.terminal_id,
+      outletId: session.outlet_id,
+      secondsSinceAuth: Math.max(0, Math.floor((now.getTime() - row.issued_at.getTime()) / 1000)),
+    };
   });
 }
 
-export async function storeLogout(
+export async function lockOperator(
   pool: Pool,
-  sessionId: string,
+  token: string,
   meta: RequestMeta = {},
 ): Promise<void> {
-  await withTransaction(pool, async (client) => {
-    const { rows } = await client.query<{ user_id: string }>(
-      `select user_id from identity.sessions where id = $1`,
-      [sessionId],
-    );
+  await withActorContext(pool, systemContext(), async (client) => {
+    const session = await loadOperatorSession(client, token);
+    if (session?.status !== 'active') return;
     await client.query(
-      `update identity.workstation_sessions
-         set state = 'ended', ended_at = now()
-       where session_id = $1 and state in ('active','locked')`,
-      [sessionId],
-    );
-    await client.query(
-      `update identity.sessions
-         set state = 'revoked', revoked_at = now(), revoked_reason = 'logout'
-       where id = $1 and state <> 'revoked'`,
-      [sessionId],
+      `update identity.operator_sessions set status = 'locked', locked_at = now() where id = $1`,
+      [session.id],
     );
     await recordAudit(client, {
-      action: 'logout',
+      action: 'operator.locked',
       result: 'success',
-      actorUserId: rows[0]?.user_id ?? null,
-      sessionId,
+      actorEmployeeId: session.employee_id,
+      outletId: session.outlet_id,
+      terminalId: session.terminal_id,
+      sessionId: session.id,
+      correlationId: meta.correlationId ?? randomUUID(),
+    });
+  });
+}
+
+export async function endOperatorSession(
+  pool: Pool,
+  token: string,
+  meta: RequestMeta = {},
+): Promise<void> {
+  await withActorContext(pool, systemContext(), async (client) => {
+    const session = await loadOperatorSession(client, token);
+    if (!session) return;
+    await client.query(
+      `update identity.operator_sessions
+         set status = 'ended', ended_at = now(), revoked_reason = 'logout'
+       where id = $1 and status <> 'ended'`,
+      [session.id],
+    );
+    await recordAudit(client, {
+      action: 'operator.logout',
+      result: 'success',
+      actorEmployeeId: session.employee_id,
+      outletId: session.outlet_id,
+      terminalId: session.terminal_id,
+      sessionId: session.id,
       correlationId: meta.correlationId ?? randomUUID(),
     });
   });

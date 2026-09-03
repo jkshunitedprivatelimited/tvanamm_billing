@@ -90,6 +90,21 @@ export function serverEnvironment(): ServerEnvironment {
   return cached;
 }
 
+/**
+ * The one secret `@jksh/identity` needs (terminal credentials, operator tokens,
+ * PIN lookup pepper, invitation tokens) without pulling in the full Supabase
+ * environment.
+ */
+export function identityTokenSecret(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const value = env.IDENTITY_TOKEN_SECRET;
+  if (!value || value.length < 32) {
+    throw new Error('IDENTITY_TOKEN_SECRET must be set and at least 32 characters');
+  }
+  return value;
+}
+
 /** Connection string for migrations / tests: prefer direct, fall back to runtime. */
 export function migrationConnectionString(
   env: Record<string, string | undefined> = process.env,

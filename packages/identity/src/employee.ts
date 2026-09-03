@@ -1,13 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { serverEnvironment } from '@jksh/config';
-import { withTransaction, type Pool, type PoolClient } from '@jksh/db';
+import { identityTokenSecret } from '@jksh/config';
+import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
 import type {
   ActorContext,
   CreateEmployeeCommand,
   EmployeeCreated,
+  EmployeeStatus,
   EmployeeSummary,
+  SetEmployeeStatusCommand,
+  UpdateEmployeeCommand,
 } from '@jksh/contracts';
-import { authorize, FRESH_AUTH_SECONDS } from './authorize.js';
+import { contextForActor } from './db-context.js';
+import { ensureAllowed } from './authz.js';
+import { FRESH_AUTH_SECONDS } from './authorize.js';
 import { generateEmployeeCode } from './ids.js';
 import { hashPin, isValidPinFormat, isWeakPin, pinLookup } from './pin.js';
 import { recordAudit } from './audit.js';
@@ -16,70 +21,42 @@ import type { RequestMeta } from './admin-auth.js';
 
 interface OutletScope {
   organization_id: string;
-  franchise_id: string;
-  brand_id: string;
-  timezone: string;
+  franchise_id: string | null;
 }
 
-async function outletScope(pool: Pool, outletId: string): Promise<OutletScope> {
-  const { rows } = await pool.query<OutletScope>(
-    `select o.organization_id, o.franchise_id, f.brand_id, o.timezone
-       from identity.outlets o
-       join identity.franchises f on f.id = o.franchise_id
-      where o.id = $1 and o.status = 'active'`,
+async function outletScope(client: PoolClient, outletId: string): Promise<OutletScope> {
+  const { rows } = await client.query<OutletScope & { status: string }>(
+    `select organization_id, franchise_id, status from billing.outlets where id = $1`,
     [outletId],
   );
   if (!rows[0]) throw new IdentityError('not_found', 'Outlet not found');
-  return rows[0];
-}
-
-async function assertPinUnique(
-  client: PoolClient,
-  outletId: string,
-  lookup: Buffer,
-  exceptUserId: string,
-): Promise<void> {
-  const { rows } = await client.query<{ user_id: string }>(
-    `select user_id from identity.employee_pins
-      where outlet_id = $1 and pin_lookup = $2 and user_id <> $3`,
-    [outletId, lookup, exceptUserId],
-  );
-  if (rows[0]) {
-    throw new IdentityError('pin_not_unique', 'That PIN is already in use at this outlet');
-  }
+  return { organization_id: rows[0].organization_id, franchise_id: rows[0].franchise_id };
 }
 
 async function writePin(
   client: PoolClient,
-  params: { userId: string; outletId: string; pin: string; setBy: string | null },
+  params: { employeeId: string; outletId: string; pin: string; setBy: string | null },
 ): Promise<void> {
-  if (!isValidPinFormat(params.pin)) {
-    throw new IdentityError('invalid_pin', 'PIN must be four digits');
-  }
-  if (isWeakPin(params.pin)) {
-    throw new IdentityError('invalid_pin', 'Choose a less predictable PIN');
-  }
-  const secret = serverEnvironment().identityTokenSecret;
+  if (!isValidPinFormat(params.pin)) throw new IdentityError('invalid_pin', 'PIN must be four digits');
+  if (isWeakPin(params.pin)) throw new IdentityError('invalid_pin', 'Choose a less predictable PIN');
+  const secret = identityTokenSecret();
   const lookup = pinLookup(secret, params.outletId, params.pin);
-  await assertPinUnique(client, params.outletId, lookup, params.userId);
+
+  const clash = await client.query(
+    `select 1 from identity.store_employees
+      where outlet_id = $1 and pin_lookup = $2 and id <> $3`,
+    [params.outletId, lookup, params.employeeId],
+  );
+  if (clash.rowCount) throw new IdentityError('pin_not_unique', 'That PIN is already used at this outlet');
+
   const hash = await hashPin(params.pin);
   await client.query(
-    `insert into identity.employee_pins
-       (user_id, outlet_id, pin_hash, pin_lookup, set_by, set_at, updated_at)
-     values ($1,$2,$3,$4,$5, now(), now())
-     on conflict (user_id) do update
-       set pin_hash = excluded.pin_hash,
-           pin_lookup = excluded.pin_lookup,
-           set_by = excluded.set_by,
-           updated_at = now()`,
-    [params.userId, params.outletId, hash, lookup, params.setBy],
-  );
-  await client.query(
-    `insert into identity.pin_attempts (user_id, outlet_id, failed_count)
-     values ($1,$2,0)
-     on conflict (user_id) do update
-       set failed_count = 0, last_failed_at = null, locked_until = null`,
-    [params.userId, params.outletId],
+    `update identity.store_employees
+       set pin_hash = $2, pin_lookup = $3, pin_version = pin_version + 1,
+           pin_set_at = now(), pin_set_by = $4,
+           failed_attempts = 0, last_failed_at = null, lock_time = null
+     where id = $1`,
+    [params.employeeId, hash, lookup, params.setBy],
   );
 }
 
@@ -89,139 +66,188 @@ export async function createEmployee(
   cmd: CreateEmployeeCommand,
   meta: RequestMeta = {},
 ): Promise<EmployeeCreated> {
-  const scope = await outletScope(pool, cmd.outletId);
-  const decision = authorize(actor, 'identity.employee.manage', {
-    organizationId: scope.organization_id,
-    franchiseId: scope.franchise_id,
-    outletId: cmd.outletId,
-  });
-  if (!decision.allowed) {
-    throw new IdentityError('forbidden', `Denied: ${decision.reason}`);
-  }
+  return withActorContext(pool, contextForActor(actor), async (client) => {
+    const scope = await outletScope(client, cmd.outletId);
+    ensureAllowed(actor, 'identity.employee.manage', {
+      organizationId: scope.organization_id,
+      ...(scope.franchise_id ? { franchiseId: scope.franchise_id } : {}),
+      outletId: cmd.outletId,
+    });
 
-  return withTransaction(pool, async (client) => {
-    const userId = randomUUID();
-    await client.query(
-      `insert into identity.users (id, full_name, phone, account_state, is_internal, has_auth_login)
-       values ($1,$2,$3,'active',false,false)`,
-      [userId, cmd.fullName, cmd.phone],
-    );
-
+    const id = randomUUID();
     let employeeCode = generateEmployeeCode();
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const clash = await client.query(
-        `select 1 from identity.store_employees where employee_code = $1`,
-        [employeeCode],
-      );
-      if (clash.rowCount === 0) break;
+    for (let i = 0; i < 5; i += 1) {
+      const c = await client.query(`select 1 from identity.store_employees where employee_code = $1`, [
+        employeeCode,
+      ]);
+      if (c.rowCount === 0) break;
       employeeCode = generateEmployeeCode();
     }
 
     await client.query(
       `insert into identity.store_employees
-         (user_id, outlet_id, franchise_id, employee_code, full_name, phone, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7)`,
-      [userId, cmd.outletId, scope.franchise_id, employeeCode, cmd.fullName, cmd.phone, actor.userId],
+         (id, outlet_id, organization_id, franchise_id, employee_code, full_name, mobile, status, created_by)
+       values ($1,$2,$3,$4,$5,$6,$7,'active',$8)`,
+      [id, cmd.outletId, scope.organization_id, scope.franchise_id, employeeCode, cmd.fullName, cmd.mobile, actor.accountId ?? null],
     );
-
-    await client.query(
-      `insert into identity.memberships
-         (user_id, role, organization_id, brand_id, franchise_id, outlet_id, created_by)
-       values ($1,'store_employee',$2,$3,$4,$5,$6)`,
-      [userId, scope.organization_id, scope.brand_id, scope.franchise_id, cmd.outletId, actor.userId],
-    );
-
-    let pinSet = false;
-    if (cmd.initialPin) {
-      await writePin(client, {
-        userId,
-        outletId: cmd.outletId,
-        pin: cmd.initialPin,
-        setBy: actor.userId,
-      });
-      pinSet = true;
-    }
+    await writePin(client, { employeeId: id, outletId: cmd.outletId, pin: cmd.initialPin, setBy: actor.accountId ?? null });
 
     await recordAudit(client, {
       action: 'employee.created',
       result: 'success',
-      actorUserId: actor.userId,
-      subjectUserId: userId,
-      sessionId: actor.sessionId,
+      actorAccountId: actor.accountId,
+      subjectId: id,
       organizationId: scope.organization_id,
       franchiseId: scope.franchise_id,
       outletId: cmd.outletId,
       correlationId: meta.correlationId ?? randomUUID(),
-      metadata: { employeeCode, pinSet },
+      metadata: { employeeCode },
     });
-    if (pinSet) {
-      await recordAudit(client, {
-        action: 'pin.set',
-        result: 'success',
-        actorUserId: actor.userId,
-        subjectUserId: userId,
-        sessionId: actor.sessionId,
-        organizationId: scope.organization_id,
-        franchiseId: scope.franchise_id,
-        outletId: cmd.outletId,
-        correlationId: meta.correlationId ?? randomUUID(),
-      });
-    }
+    await recordAudit(client, {
+      action: 'pin.set',
+      result: 'success',
+      actorAccountId: actor.accountId,
+      subjectId: id,
+      organizationId: scope.organization_id,
+      franchiseId: scope.franchise_id,
+      outletId: cmd.outletId,
+      correlationId: meta.correlationId ?? randomUUID(),
+    });
 
-    return { employeeId: employeeCode, userId, outletId: cmd.outletId, fullName: cmd.fullName, pinSet };
+    return { employeeId: id, employeeCode, outletId: cmd.outletId, fullName: cmd.fullName };
+  });
+}
+
+async function loadEmployee(
+  client: PoolClient,
+  employeeId: string,
+): Promise<{ outlet_id: string; organization_id: string; franchise_id: string | null }> {
+  const { rows } = await client.query<{
+    outlet_id: string;
+    organization_id: string;
+    franchise_id: string | null;
+  }>(
+    `select outlet_id, organization_id, franchise_id from identity.store_employees where id = $1 for update`,
+    [employeeId],
+  );
+  if (!rows[0]) throw new IdentityError('not_found', 'Employee not found');
+  return rows[0];
+}
+
+export async function updateEmployee(
+  pool: Pool,
+  actor: ActorContext,
+  employeeId: string,
+  cmd: UpdateEmployeeCommand,
+  meta: RequestMeta = {},
+): Promise<void> {
+  await withActorContext(pool, contextForActor(actor), async (client) => {
+    const emp = await loadEmployee(client, employeeId);
+    ensureAllowed(actor, 'identity.employee.manage', {
+      organizationId: emp.organization_id,
+      ...(emp.franchise_id ? { franchiseId: emp.franchise_id } : {}),
+      outletId: emp.outlet_id,
+    });
+    const sets: string[] = [];
+    const values: unknown[] = [employeeId];
+    if (cmd.fullName !== undefined) {
+      values.push(cmd.fullName);
+      sets.push(`full_name = $${String(values.length)}`);
+    }
+    if (cmd.mobile !== undefined) {
+      values.push(cmd.mobile);
+      sets.push(`mobile = $${String(values.length)}`);
+    }
+    if (sets.length === 0) return;
+    await client.query(`update identity.store_employees set ${sets.join(', ')} where id = $1`, values);
+    await recordAudit(client, {
+      action: 'employee.updated',
+      result: 'success',
+      actorAccountId: actor.accountId,
+      subjectId: employeeId,
+      organizationId: emp.organization_id,
+      franchiseId: emp.franchise_id,
+      outletId: emp.outlet_id,
+      correlationId: meta.correlationId ?? randomUUID(),
+      metadata: { fields: Object.keys(cmd) },
+    });
+  });
+}
+
+export async function setEmployeeStatus(
+  pool: Pool,
+  actor: ActorContext,
+  employeeId: string,
+  cmd: SetEmployeeStatusCommand,
+  meta: RequestMeta = {},
+): Promise<void> {
+  await withActorContext(pool, contextForActor(actor), async (client) => {
+    const emp = await loadEmployee(client, employeeId);
+    ensureAllowed(actor, 'identity.employee.manage', {
+      organizationId: emp.organization_id,
+      ...(emp.franchise_id ? { franchiseId: emp.franchise_id } : {}),
+      outletId: emp.outlet_id,
+    });
+    await client.query(`update identity.store_employees set status = $2 where id = $1`, [
+      employeeId,
+      cmd.status,
+    ]);
+    // Disabling or suspending ends the employee's live operator sessions.
+    if (cmd.status !== 'active') {
+      await client.query(
+        `update identity.operator_sessions
+           set status = 'ended', ended_at = now(), revoked_reason = 'employee_' || $2
+         where employee_id = $1 and status in ('active','locked')`,
+        [employeeId, cmd.status],
+      );
+    }
+    await recordAudit(client, {
+      action: 'employee.status_changed',
+      result: 'success',
+      actorAccountId: actor.accountId,
+      subjectId: employeeId,
+      organizationId: emp.organization_id,
+      franchiseId: emp.franchise_id,
+      outletId: emp.outlet_id,
+      correlationId: meta.correlationId ?? randomUUID(),
+      metadata: { status: cmd.status, ...(cmd.reason ? { reason: cmd.reason } : {}) },
+    });
   });
 }
 
 export async function resetEmployeePin(
   pool: Pool,
   actor: ActorContext,
-  input: { userId: string; newPin: string },
+  employeeId: string,
+  newPin: string,
   meta: RequestMeta = {},
 ): Promise<void> {
-  await withTransaction(pool, async (client) => {
-    const { rows } = await client.query<{
-      outlet_id: string;
-      franchise_id: string;
-    }>(
-      `select outlet_id, franchise_id from identity.store_employees where user_id = $1`,
-      [input.userId],
-    );
-    const row = rows[0];
-    if (!row) throw new IdentityError('not_found', 'Employee not found');
-
-    const scope = await outletScope(pool, row.outlet_id);
-    // PIN reset is a sensitive action: require a fresh OTP session.
-    const decision = authorize(
+  await withActorContext(pool, contextForActor(actor), async (client) => {
+    const emp = await loadEmployee(client, employeeId);
+    ensureAllowed(
       actor,
       'identity.employee.manage',
       {
-        organizationId: scope.organization_id,
-        franchiseId: scope.franchise_id,
-        outletId: row.outlet_id,
+        organizationId: emp.organization_id,
+        ...(emp.franchise_id ? { franchiseId: emp.franchise_id } : {}),
+        outletId: emp.outlet_id,
       },
-      { requireStepUpWithinSeconds: FRESH_AUTH_SECONDS },
+      { requireFreshAuthWithinSeconds: FRESH_AUTH_SECONDS },
     );
-    if (!decision.allowed) {
-      throw new IdentityError('forbidden', `Denied: ${decision.reason}`, {
-        details: { reason: decision.reason },
-      });
-    }
-
     await writePin(client, {
-      userId: input.userId,
-      outletId: row.outlet_id,
-      pin: input.newPin,
-      setBy: actor.userId,
+      employeeId,
+      outletId: emp.outlet_id,
+      pin: newPin,
+      setBy: actor.accountId ?? null,
     });
     await recordAudit(client, {
       action: 'pin.reset',
       result: 'success',
-      actorUserId: actor.userId,
-      subjectUserId: input.userId,
-      sessionId: actor.sessionId,
-      organizationId: scope.organization_id,
-      franchiseId: scope.franchise_id,
-      outletId: row.outlet_id,
+      actorAccountId: actor.accountId,
+      subjectId: employeeId,
+      organizationId: emp.organization_id,
+      franchiseId: emp.franchise_id,
+      outletId: emp.outlet_id,
       correlationId: meta.correlationId ?? randomUUID(),
     });
   });
@@ -232,48 +258,35 @@ export async function listEmployees(
   actor: ActorContext,
   outletId: string,
 ): Promise<EmployeeSummary[]> {
-  const scope = await outletScope(pool, outletId);
-  const decision = authorize(actor, 'identity.employee.manage', {
-    organizationId: scope.organization_id,
-    franchiseId: scope.franchise_id,
-    outletId,
+  return withActorContext(pool, contextForActor(actor), async (client) => {
+    const scope = await outletScope(client, outletId);
+    ensureAllowed(actor, 'identity.employee.manage', {
+      organizationId: scope.organization_id,
+      ...(scope.franchise_id ? { franchiseId: scope.franchise_id } : {}),
+      outletId,
+    });
+    const { rows } = await client.query<{
+      id: string;
+      employee_code: string;
+      full_name: string;
+      mobile: string;
+      status: EmployeeStatus;
+      pin_hash: string | null;
+      lock_time: Date | null;
+    }>(
+      `select id, employee_code, full_name, mobile, status, pin_hash, lock_time
+         from identity.store_employees where outlet_id = $1 order by full_name`,
+      [outletId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      employeeCode: r.employee_code,
+      fullName: r.full_name,
+      mobile: r.mobile,
+      outletId,
+      status: r.status,
+      pinSet: r.pin_hash !== null,
+      ...(r.lock_time ? { lockedUntil: r.lock_time.toISOString() } : {}),
+    }));
   });
-  if (!decision.allowed) {
-    throw new IdentityError('forbidden', `Denied: ${decision.reason}`);
-  }
-
-  const { rows } = await pool.query<{
-    user_id: string;
-    employee_code: string;
-    full_name: string;
-    phone: string;
-    account_state: EmployeeSummary['accountState'];
-    pin_set: boolean;
-    locked_until: Date | null;
-  }>(
-    `select se.user_id,
-            se.employee_code,
-            se.full_name,
-            se.phone,
-            u.account_state,
-            (ep.user_id is not null) as pin_set,
-            pa.locked_until
-       from identity.store_employees se
-       join identity.users u on u.id = se.user_id
-       left join identity.employee_pins ep on ep.user_id = se.user_id
-       left join identity.pin_attempts pa on pa.user_id = se.user_id
-      where se.outlet_id = $1
-      order by se.full_name`,
-    [outletId],
-  );
-  return rows.map((row) => ({
-    userId: row.user_id,
-    employeeId: row.employee_code,
-    fullName: row.full_name,
-    phone: row.phone,
-    outletId,
-    accountState: row.account_state,
-    pinSet: row.pin_set,
-    ...(row.locked_until ? { lockedUntil: row.locked_until.toISOString() } : {}),
-  }));
 }

@@ -2,13 +2,17 @@ export type {
   ActorContext,
   AccessScope,
   Membership,
+  MembershipRole,
   Role,
   Capability,
   WorkspaceCard,
-  AccountState,
+  AccountStatus,
+  EmployeeStatus,
 } from '@jksh/contracts';
+
 export * from './errors.js';
 export * from './authorize.js';
+export { ensureAllowed } from './authz.js';
 export * from './membership.js';
 export {
   isValidPinFormat,
@@ -28,56 +32,6 @@ export {
   type AttemptGate,
   type LockoutPolicy,
 } from './pin.js';
-export * from './ids.js';
-export {
-  mintTerminalCredential,
-  parseTerminalCredential,
-  hashActivationCode,
-  activationCodeMatches,
-  mintSessionToken,
-  parseSessionToken,
-  sessionNonceMatches,
-  sha256Hex,
-  type MintedCredential,
-  type ParsedCredential,
-  type MintedSession,
-  type ParsedSession,
-} from './tokens.js';
-export { recordAudit, type AuditInput } from './audit.js';
-export {
-  createSession,
-  loadSessionRow,
-  assertLiveSession,
-  touchSession,
-  authenticateSessionToken,
-  loadActorContext,
-  revokeSession,
-  revokeAllUserSessions,
-  listUserSessions,
-  type SessionRow,
-  type CreateSessionParams,
-} from './session-context.js';
-export {
-  startAdminOtp,
-  verifyAdminOtp,
-  listWorkspaceCards,
-  selectWorkspace,
-  adminLogout,
-  disableUser,
-  type RequestMeta,
-  type AdminLoginOutput,
-} from './admin-auth.js';
-export {
-  getOtpProvider,
-  setOtpProvider,
-  Msg91OtpProvider,
-  FakeOtpProvider,
-  toMsg91Mobile,
-  type OtpProvider,
-  type OtpSendResult,
-  type OtpVerifyResult,
-  type Msg91Config,
-} from './otp-provider.js';
 export {
   otpSendGate,
   otpVerifyGate,
@@ -91,19 +45,79 @@ export {
   type OtpGate,
 } from './otp.js';
 export {
+  checkAndRecordOtpSend,
+  checkOtpVerify,
+  recordOtpVerifyFailure,
+  resetOtpAttempts,
+  type OtpGateResult,
+} from './otp-attempts.js';
+export * from './ids.js';
+export {
+  mintTerminalCredential,
+  parseTerminalCredential,
+  mintOperatorToken,
+  parseOperatorToken,
+  nonceHashMatches,
+  hashActivationCode,
+  activationCodeMatches,
+  mintInvitationToken,
+  hashInvitationToken,
+  sha256Hex,
+  type MintedCredential,
+  type ParsedCredential,
+  type MintedOperatorToken,
+  type ParsedOperatorToken,
+} from './tokens.js';
+export { recordAudit, type AuditInput } from './audit.js';
+export {
+  getSmsSender,
+  setSmsSender,
+  Msg91SmsSender,
+  LogSmsSender,
+  toMsg91Mobile,
+  type SmsSender,
+  type SmsSendResult,
+  type Msg91Config,
+} from './sms-sender.js';
+export { systemContext, contextForActor } from './db-context.js';
+export {
+  resolveAdminAfterVerify,
+  listWorkspaceCards,
+  selectWorkspace,
+  buildAdminActor,
+  recordAdminLogout,
+  type RequestMeta,
+  type ResolvedWorkspace,
+  type AdminActorInput,
+} from './admin-auth.js';
+export { setAccountStatus } from './account.js';
+export {
+  createFranchiseOwnerInvitation,
+  acceptInvitation,
+} from './invitations.js';
+export {
+  createOutlet,
+  outletLifecycle,
+  updateOutletConfig,
+  listOutlets,
+} from './outlet.js';
+export {
+  createEmployee,
+  updateEmployee,
+  setEmployeeStatus,
+  resetEmployeePin,
+  listEmployees,
+} from './employee.js';
+export {
   issueActivationCode,
   registerTerminal,
   listTerminals,
   revokeTerminal,
 } from './terminal.js';
 export {
-  createEmployee,
-  resetEmployeePin,
-  listEmployees,
-} from './employee.js';
-export {
   pinLogin,
-  lockWorkstation,
-  storeLogout,
+  loadOperatorContext,
+  lockOperator,
+  endOperatorSession,
   type PinLoginOutput,
 } from './store-auth.js';
