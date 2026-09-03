@@ -26,13 +26,16 @@ export interface Msg91Config {
   senderId?: string;
   otpVarName?: string;
   baseUrl?: string;
+  timeoutMs?: number;
 }
 
 export class Msg91SmsSender implements SmsSender {
   readonly name = 'msg91';
   private readonly base: string;
+  private readonly timeoutMs: number;
   constructor(private readonly cfg: Msg91Config) {
     this.base = cfg.baseUrl ?? 'https://control.msg91.com/api/v5';
+    this.timeoutMs = cfg.timeoutMs ?? 8000;
   }
 
   async sendOtp(phone: string, code: string): Promise<SmsSendResult> {
@@ -43,28 +46,36 @@ export class Msg91SmsSender implements SmsSender {
     };
     if (this.cfg.senderId) body.sender = this.cfg.senderId;
 
-    const res = await fetch(`${this.base}/flow/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', authkey: this.cfg.authKey },
-      body: JSON.stringify(body),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${this.base}/flow/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', authkey: this.cfg.authKey },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (err) {
+      // Redacted: never surface the request body / authkey / phone / code.
+      const kind = err instanceof Error && err.name === 'TimeoutError' ? 'timeout' : 'network';
+      return { ok: false, error: kind };
+    }
+
     const json = (await res.json().catch(() => ({}))) as {
       type?: string;
       request_id?: string;
-      message?: string;
     };
     const ok = res.ok && json.type !== 'error';
     return ok
       ? { ok: true, ...(json.request_id ? { providerRef: json.request_id } : {}) }
-      : { ok: false, error: json.message ?? `http_${String(res.status)}` };
+      : { ok: false, error: res.ok ? 'provider_error' : `http_${String(res.status)}` };
   }
 }
 
-/** No-op sender for local development and CI. Logs instead of sending. */
+/** No-op sender for local development and CI. Never logs the code or number. */
 export class LogSmsSender implements SmsSender {
   readonly name = 'log';
-  sendOtp(phone: string, code: string): Promise<SmsSendResult> {
-    console.info(`[sms-sender:log] OTP for ${phone}: ${code}`);
+  sendOtp(_phone: string, _code: string): Promise<SmsSendResult> {
+    console.info('[sms-sender:log] OTP send requested (no SMS provider configured)');
     return Promise.resolve({ ok: true, providerRef: 'log' });
   }
 }

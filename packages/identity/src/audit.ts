@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { PoolClient } from '@jksh/db';
+import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
 import type { AuditAction, AuditResult } from '@jksh/contracts';
+import { systemContext } from './db-context';
 
 type Ref = string | null | undefined;
 
@@ -48,4 +49,13 @@ export async function recordAudit(client: PoolClient, input: AuditInput): Promis
     ],
   );
   return id;
+}
+
+/**
+ * Record a denied/failed sensitive command in its OWN transaction, so the
+ * denial audit survives even when the business transaction rolls back
+ * (`docs/plans/stage-1-audit-remediation.md` P2 Audit Completeness).
+ */
+export async function auditOutOfBand(pool: Pool, input: AuditInput): Promise<void> {
+  await withActorContext(pool, systemContext(), (client) => recordAudit(client, input));
 }

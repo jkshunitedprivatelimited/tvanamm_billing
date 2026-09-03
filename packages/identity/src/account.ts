@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { withActorContext, type Pool } from '@jksh/db';
 import type { AccountStatus, ActorContext } from '@jksh/contracts';
 import { contextForActor } from './db-context';
-import { ensureAllowed } from './authz';
+import { ensureAllowedAudited } from './authz';
 import { FRESH_AUTH_SECONDS } from './authorize';
 import { recordAudit } from './audit';
 import { IdentityError } from './errors';
@@ -28,7 +28,9 @@ export async function setAccountStatus(
   reason: string | undefined,
   meta: RequestMeta = {},
 ): Promise<{ authUserId: string | null }> {
-  ensureAllowed(
+  await ensureAllowedAudited(
+    pool,
+    'account.status_changed',
     actor,
     'identity.account.manage',
     { organizationId: actor.scope.organizationId },

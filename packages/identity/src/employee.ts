@@ -11,7 +11,7 @@ import type {
   UpdateEmployeeCommand,
 } from '@jksh/contracts';
 import { contextForActor } from './db-context';
-import { ensureAllowed } from './authz';
+import { ensureAllowed, ensureAllowedAudited } from './authz';
 import { FRESH_AUTH_SECONDS } from './authorize';
 import { generateEmployeeCode } from './ids';
 import { hashPin, isValidPinFormat, isWeakPin, pinLookup } from './pin';
@@ -245,7 +245,9 @@ export async function resetEmployeePin(
 ): Promise<void> {
   await withActorContext(pool, contextForActor(actor), async (client) => {
     const emp = await loadEmployee(client, employeeId);
-    ensureAllowed(
+    await ensureAllowedAudited(
+      pool,
+      'pin.reset',
       actor,
       'identity.employee.manage',
       {

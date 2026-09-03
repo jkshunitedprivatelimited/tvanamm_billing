@@ -8,7 +8,7 @@ import type {
   UpdateOutletConfigCommand,
 } from '@jksh/contracts';
 import { contextForActor } from './db-context';
-import { ensureAllowed } from './authz';
+import { ensureAllowed, ensureAllowedAudited } from './authz';
 import { FRESH_AUTH_SECONDS } from './authorize';
 import { recordAudit } from './audit';
 import { IdentityError } from './errors';
@@ -45,7 +45,9 @@ export async function createOutlet(
   cmd: CreateOutletCommand,
   meta: RequestMeta = {},
 ): Promise<{ id: string }> {
-  ensureAllowed(actor, 'billing.outlet.create', { organizationId: actor.scope.organizationId });
+  await ensureAllowedAudited(pool, 'outlet.created', actor, 'billing.outlet.create', {
+    organizationId: actor.scope.organizationId,
+  });
 
   return withActorContext(pool, contextForActor(actor), async (client) => {
     const { organizationId } = await loadBrandOrg(client, cmd.brandId);
@@ -124,13 +126,15 @@ export async function outletLifecycle(
   cmd: OutletLifecycleCommand,
   meta: RequestMeta = {},
 ): Promise<void> {
-  ensureAllowed(
+  const rule = LIFECYCLE[cmd.action];
+  await ensureAllowedAudited(
+    pool,
+    rule.audit,
     actor,
     'billing.outlet.lifecycle',
     { organizationId: actor.scope.organizationId },
     { requireFreshAuthWithinSeconds: FRESH_AUTH_SECONDS },
   );
-  const rule = LIFECYCLE[cmd.action];
 
   await withActorContext(pool, contextForActor(actor), async (client) => {
     const { rows } = await client.query<{
@@ -147,6 +151,8 @@ export async function outletLifecycle(
       throw new IdentityError('conflict', `Cannot ${cmd.action} an outlet that is ${row.status}`);
     }
 
+    // Activation / reactivation turns billing on; suspend / close turns it off.
+    const billingOn = cmd.action === 'activate' || cmd.action === 'reactivate';
     const stamp =
       cmd.action === 'suspend'
         ? ', suspended_at = now()'
@@ -156,8 +162,10 @@ export async function outletLifecycle(
             ? ', suspended_at = null'
             : '';
     await client.query(
-      `update billing.outlets set status = $2::billing.outlet_status ${stamp} where id = $1`,
-      [outletId, rule.to],
+      `update billing.outlets
+         set status = $2::billing.outlet_status, billing_enabled = $3 ${stamp}
+       where id = $1`,
+      [outletId, rule.to, billingOn],
     );
 
     // Suspending or closing immediately revokes the outlet's terminal authorization.

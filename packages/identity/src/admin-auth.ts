@@ -99,6 +99,11 @@ export async function resolveAdminAfterVerify(
       );
     }
 
+    // Record the interactive OTP verification for fresh-auth checks.
+    await client.query(`update identity.account_profiles set last_otp_at = now() where id = $1`, [
+      profile.id,
+    ]);
+
     const memberships = await loadMembershipRows(client, profile.id);
     const routing = resolveAdminRouting(memberships);
     if (routing.outcome === 'no_admin_access') {
@@ -143,6 +148,25 @@ export async function resolveAdminAfterVerify(
     }
 
     return { result: { outcome: 'select_workspace' }, accountId: profile.id };
+  });
+}
+
+/**
+ * Is this mobile attached to an account that may receive an OTP? Callers still
+ * return the same generic response for eligible and unknown numbers — this only
+ * avoids dispatching an SMS (and a provider cost) for a stranger's number.
+ * Public self-registration is disabled, so an unknown number is never eligible.
+ */
+export async function eligibleForOtp(pool: Pool, phone: string): Promise<boolean> {
+  return withActorContext(pool, systemContext(), async (client) => {
+    const { rows } = await client.query<{ ok: boolean }>(
+      `select exists (
+         select 1 from identity.account_profiles
+          where mobile = $1 and status in ('invited','active')
+       ) as ok`,
+      [phone],
+    );
+    return rows[0]?.ok ?? false;
   });
 }
 
@@ -236,19 +260,24 @@ export async function selectWorkspace(
 export interface AdminActorInput {
   authUserId: string;
   membershipId: string | null;
-  /** Seconds since the Supabase session was issued (fresh-auth checks). */
-  secondsSinceAuth?: number;
+  now?: Date;
 }
 
-/** Build the authorization context for an authenticated admin request. */
+/**
+ * Build the authorization context for an authenticated admin request.
+ * `secondsSinceAuth` is derived from `account_profiles.last_otp_at` — the moment
+ * of the latest interactive OTP verification, which token refresh never moves.
+ */
 export async function buildAdminActor(
   pool: Pool,
   input: AdminActorInput,
 ): Promise<ActorContext | null> {
+  const now = input.now ?? new Date();
   return withActorContext(pool, systemContext(), async (client) => {
     const { rows } = await client.query<{
       account_id: string;
       account_status: AccountStatus;
+      last_otp_at: Date | null;
       membership_id: string | null;
       role_key: MembershipRole | null;
       membership_status: string | null;
@@ -258,6 +287,7 @@ export async function buildAdminActor(
     }>(
       `select ap.id                 as account_id,
               ap.status             as account_status,
+              ap.last_otp_at        as last_otp_at,
               m.id                  as membership_id,
               m.role_key            as role_key,
               m.status              as membership_status,
@@ -284,6 +314,9 @@ export async function buildAdminActor(
     ) {
       return null; // needs (re-)selecting a workspace
     }
+    const secondsSinceAuth = row.last_otp_at
+      ? Math.max(0, Math.floor((now.getTime() - row.last_otp_at.getTime()) / 1000))
+      : undefined;
     return {
       kind: 'admin',
       accountId: row.account_id,
@@ -295,7 +328,7 @@ export async function buildAdminActor(
         ...(row.franchise_id ? { franchiseId: row.franchise_id } : {}),
       },
       sessionActive: true,
-      ...(input.secondsSinceAuth !== undefined ? { secondsSinceAuth: input.secondsSinceAuth } : {}),
+      ...(secondsSinceAuth !== undefined ? { secondsSinceAuth } : {}),
     };
   });
 }

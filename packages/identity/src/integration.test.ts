@@ -52,7 +52,6 @@ async function actorFor(phone: string): Promise<ActorContext> {
   const actor = await buildAdminActor(pool, {
     authUserId,
     membershipId: resolved.result.membershipId,
-    secondsSinceAuth: 5,
   });
   if (!actor) throw new Error('no actor');
   return actor;
@@ -249,6 +248,35 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
 
     await outletLifecycle(pool, admin, runOutletId, { action: 'reactivate' });
   }, 30_000);
+
+  it('requires fresh OTP for a sensitive command when last_otp_at is stale', async () => {
+    const admin = await actorFor(adminPhone);
+    // Push the interactive-auth timestamp 20 minutes into the past.
+    await pool.query(
+      `update identity.account_profiles set last_otp_at = now() - interval '20 minutes' where id = $1`,
+      [admin.accountId],
+    );
+    const stale = await buildAdminActor(pool, {
+      authUserId: admin.accountId
+        ? (
+            await pool.query<{ auth_user_id: string }>(
+              `select auth_user_id from identity.account_profiles where id = $1`,
+              [admin.accountId],
+            )
+          ).rows[0]!.auth_user_id
+        : '',
+      membershipId: (
+        await pool.query<{ id: string }>(
+          `select id from identity.memberships where account_id = $1`,
+          [admin.accountId],
+        )
+      ).rows[0]!.id,
+    });
+    if (!stale) throw new Error('no stale actor');
+    await expect(outletLifecycle(pool, stale, runOutletId, { action: 'suspend' })).rejects.toThrow(
+      /fresh|Denied/,
+    );
+  });
 
   it('scopes outlet listing by tenant', async () => {
     const admin = await actorFor(adminPhone);

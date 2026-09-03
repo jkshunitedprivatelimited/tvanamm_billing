@@ -10,7 +10,7 @@ import type {
   TerminalSummary,
 } from '@jksh/contracts';
 import { contextForActor, systemContext } from './db-context';
-import { ensureAllowed } from './authz';
+import { ensureAllowed, ensureAllowedAudited } from './authz';
 import { FRESH_AUTH_SECONDS } from './authorize';
 import { generateActivationCode, nextReceiptPrefix } from './ids';
 import { activationCodeMatches, hashActivationCode, mintTerminalCredential } from './tokens';
@@ -23,16 +23,32 @@ interface OutletRow {
   franchise_id: string | null;
   display_name: string;
   status: string;
+  billing_enabled: boolean;
+  brand_billing_enabled: boolean;
 }
 
 async function loadOutlet(client: PoolClient, outletId: string): Promise<OutletRow> {
   const { rows } = await client.query<OutletRow>(
-    `select organization_id, franchise_id, display_name, status
-       from billing.outlets where id = $1`,
+    `select o.organization_id, o.franchise_id, o.display_name, o.status,
+            o.billing_enabled, b.is_billing_enabled as brand_billing_enabled
+       from billing.outlets o
+       join billing.brands b on b.id = o.brand_id
+      where o.id = $1`,
     [outletId],
   );
   if (!rows[0]) throw new IdentityError('not_found', 'Outlet not found');
   return rows[0];
+}
+
+/** An outlet is billable only when active AND both its own and its brand's
+ *  billing flags are on. */
+function assertBillable(outlet: OutletRow): void {
+  if (outlet.status !== 'active') {
+    throw new IdentityError('outlet_not_active', 'Outlet must be active to enroll a terminal');
+  }
+  if (!outlet.billing_enabled || !outlet.brand_billing_enabled) {
+    throw new IdentityError('outlet_not_active', 'Billing is not enabled for this outlet or brand');
+  }
 }
 
 export async function issueActivationCode(
@@ -48,7 +64,9 @@ export async function issueActivationCode(
 
   await withActorContext(pool, contextForActor(actor), async (client) => {
     const outlet = await loadOutlet(client, cmd.outletId);
-    ensureAllowed(
+    await ensureAllowedAudited(
+      pool,
+      'terminal.activation_code_issued',
       actor,
       'identity.terminal.enroll',
       {
@@ -58,9 +76,7 @@ export async function issueActivationCode(
       },
       { requireFreshAuthWithinSeconds: FRESH_AUTH_SECONDS },
     );
-    if (outlet.status !== 'active') {
-      throw new IdentityError('outlet_not_active', 'Outlet must be active to enroll a terminal');
-    }
+    assertBillable(outlet);
     await client.query(
       `insert into identity.terminal_activation_codes
          (id, outlet_id, organization_id, franchise_id, label, code_hash, expires_at, created_by)
@@ -125,9 +141,7 @@ export async function registerTerminal(
     }
 
     const outlet = await loadOutlet(client, codeRow.outlet_id);
-    if (outlet.status !== 'active') {
-      throw new IdentityError('outlet_not_active', 'Outlet is not active');
-    }
+    assertBillable(outlet);
 
     await client.query(`select id from billing.outlets where id = $1 for update`, [
       codeRow.outlet_id,
@@ -271,7 +285,9 @@ export async function revokeTerminal(
     );
     const row = rows[0];
     if (!row) throw new IdentityError('terminal_not_found', 'Terminal not found');
-    ensureAllowed(
+    await ensureAllowedAudited(
+      pool,
+      'terminal.revoked',
       actor,
       'identity.terminal.revoke',
       {

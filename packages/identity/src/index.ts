@@ -84,6 +84,7 @@ export {
 export { systemContext, contextForActor } from './db-context';
 export {
   resolveAdminAfterVerify,
+  eligibleForOtp,
   listWorkspaceCards,
   selectWorkspace,
   buildAdminActor,

@@ -67,6 +67,13 @@ export function otpSendGate(
       return { allowed: false, retryAfterSeconds: secondsUntil(nextAllowed, now) };
     }
   }
+  // Cap at exactly `maxSendsPerWindow` sends within the current rolling window.
+  const windowActive =
+    now.getTime() - state.windowStartedAt.getTime() <= policy.sendWindowSeconds * 1000;
+  if (windowActive && state.sentCount >= policy.maxSendsPerWindow) {
+    const windowEnds = new Date(state.windowStartedAt.getTime() + policy.sendWindowSeconds * 1000);
+    return { allowed: false, retryAfterSeconds: secondsUntil(windowEnds, now) };
+  }
   return { allowed: true, retryAfterSeconds: 0 };
 }
 
