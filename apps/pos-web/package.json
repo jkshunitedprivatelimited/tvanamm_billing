@@ -1,0 +1,27 @@
+{
+  "name": "@jksh/pos-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "dotenv -e ../../.env -- next dev -p 3001",
+    "build": "next build",
+    "start": "dotenv -e ../../.env -- next start -p 3001",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@jksh/config": "*",
+    "@jksh/contracts": "*",
+    "@jksh/db": "*",
+    "@jksh/identity": "*",
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "typescript": "^5.9.3",
+    "dotenv-cli": "^8.0.0"
+  }
+}

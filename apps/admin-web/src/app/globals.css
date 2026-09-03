@@ -1,0 +1,63 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --border: #e3e6ea;
+  --text: #1a1d21;
+  --muted: #6b7280;
+  --accent: #1f6feb;
+  --danger: #b42318;
+  --ok: #067647;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --panel: #171a20;
+    --border: #262a31;
+    --text: #e7e9ec;
+    --muted: #9aa1ab;
+    --accent: #4c8dff;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+a { color: var(--accent); }
+main { max-width: 960px; margin: 0 auto; padding: 24px 20px 64px; }
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+}
+.topbar strong { font-size: 14px; }
+.topbar nav a { margin-left: 16px; font-size: 14px; }
+.card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 20px; margin: 16px 0;
+}
+.card h2 { margin: 0 0 12px; font-size: 16px; }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+input, select {
+  width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); color: var(--text); font: inherit; margin-bottom: 12px;
+}
+button {
+  padding: 9px 16px; border: 1px solid var(--accent); background: var(--accent);
+  color: #fff; border-radius: 8px; font: inherit; cursor: pointer;
+}
+button.secondary { background: transparent; color: var(--accent); }
+button:disabled { opacity: 0.5; cursor: default; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; }
+.pill { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+.error { color: var(--danger); font-size: 14px; margin: 8px 0; }
+.ok { color: var(--ok); font-size: 14px; margin: 8px 0; }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.center { min-height: 70vh; display: grid; place-items: center; }
+.center .card { width: 360px; }
