@@ -8,7 +8,7 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Reject cross-site cookie-authenticated mutations before any route runs.
   if (request.nextUrl.pathname.startsWith('/api/') && MUTATING.has(request.method)) {
     const origin = request.headers.get('origin');

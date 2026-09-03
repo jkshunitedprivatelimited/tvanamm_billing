@@ -12,3 +12,5 @@ next-env.d.ts
 !.env.example
 supabase/.temp/
 
+AGENTS.md
+CLAUDE.md
