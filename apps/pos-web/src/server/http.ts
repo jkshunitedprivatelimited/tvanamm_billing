@@ -9,7 +9,7 @@ export function jsonError(error: unknown): NextResponse {
       { status: error.httpStatus },
     );
   }
-  console.error('[pos-web] unhandled route error', error);
+  console.error('[pos-web] route error', error);
   return NextResponse.json({ error: 'internal', message: 'Unexpected error' }, { status: 500 });
 }
 

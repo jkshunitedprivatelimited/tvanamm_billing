@@ -8,7 +8,6 @@ const ROLE_LABEL: Record<string, string> = {
   central_admin: 'Central Admin',
   accountant: 'Accountant',
   franchise_owner: 'Franchise Owner',
-  store_employee: 'Store Employee',
 };
 
 export function WorkspacePicker({ cards }: { cards: WorkspaceCard[] }) {
@@ -20,7 +19,7 @@ export function WorkspacePicker({ cards }: { cards: WorkspaceCard[] }) {
     setBusy(membershipId);
     setError(null);
     try {
-      const res = await fetch('/api/auth/select-workspace', {
+      const res = await fetch('/api/v1/me/workspaces', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ membershipId }),
@@ -44,16 +43,18 @@ export function WorkspacePicker({ cards }: { cards: WorkspaceCard[] }) {
           <button
             key={card.membershipId}
             className="card"
-            style={{ textAlign: 'left', color: 'inherit', borderColor: 'var(--border)', background: 'var(--panel)' }}
+            style={{ textAlign: 'left', color: 'inherit', background: 'var(--panel)' }}
             disabled={busy !== null}
-            onClick={() => void choose(card.membershipId)}
+            onClick={() => {
+              void choose(card.membershipId);
+            }}
           >
             <span className="pill">{ROLE_LABEL[card.role] ?? card.role}</span>
             <div style={{ marginTop: 8, fontWeight: 600 }}>
-              {card.outletName ?? card.franchiseName ?? card.organizationName}
+              {card.franchiseName ?? card.organizationName}
             </div>
             <div className="muted" style={{ fontSize: 13 }}>
-              {card.outletAddress ?? card.franchiseName ?? card.organizationName}
+              {card.brandName ?? card.organizationName}
             </div>
           </button>
         ))}

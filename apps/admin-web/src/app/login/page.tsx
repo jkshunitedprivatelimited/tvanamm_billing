@@ -3,30 +3,27 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-type Step = 'phone' | 'code';
-
 export default function LoginPage() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>('phone');
+  const [step, setStep] = useState<'phone' | 'code'>('phone');
   const [phone, setPhone] = useState('+91');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  async function start(event: React.FormEvent) {
-    event.preventDefault();
+  async function start(e: React.SyntheticEvent) {
+    e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch('/api/auth/otp/start', {
+      const res = await fetch('/api/v1/auth/otp/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone }),
       });
       if (!res.ok) {
-        const body = (await res.json()) as { message?: string };
-        setError(body.message ?? 'Could not send the code.');
+        setError(((await res.json()) as { message?: string }).message ?? 'Could not send the code.');
         return;
       }
       setStep('code');
@@ -36,12 +33,12 @@ export default function LoginPage() {
     }
   }
 
-  async function verify(event: React.FormEvent) {
-    event.preventDefault();
+  async function verify(e: React.SyntheticEvent) {
+    e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch('/api/auth/otp/verify', {
+      const res = await fetch('/api/v1/auth/otp/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, code }),
@@ -51,7 +48,6 @@ export default function LoginPage() {
         | { outcome: 'select_workspace' }
         | { outcome: 'rejected'; retryAfterSeconds?: number }
         | { message?: string };
-
       if (!res.ok || !('outcome' in body)) {
         setError(('message' in body && body.message) || 'Verification failed.');
         return;

@@ -1,15 +1,15 @@
 import { redirect } from 'next/navigation';
 import { listWorkspaceCards } from '@jksh/identity';
 import { db } from '@/server/pool';
-import { readSession } from '@/server/auth';
+import { getAdminActor } from '@/server/auth';
 import { WorkspacePicker } from './picker';
 
 export default async function SelectWorkspacePage() {
-  const session = await readSession();
-  if (!session) redirect('/login');
-  if (session.actor) redirect('/');
+  const { user, actor } = await getAdminActor();
+  if (!user) redirect('/login');
+  if (actor) redirect('/');
 
-  const cards = await listWorkspaceCards(db(), session.userId);
+  const cards = await listWorkspaceCards(db(), user.id);
   return (
     <main>
       <h1>Choose a workspace</h1>

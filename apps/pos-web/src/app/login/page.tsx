@@ -6,14 +6,12 @@ import { useRouter } from 'next/navigation';
 const CREDENTIAL_KEY = 'jksh_terminal_credential';
 const OUTLET_KEY = 'jksh_terminal_outlet';
 
-type Phase = 'pin' | 'confirm';
-
 export default function StoreLoginPage() {
   const router = useRouter();
   const [credential, setCredential] = useState<string | null>(null);
   const [outletName, setOutletName] = useState('');
   const [pin, setPin] = useState('');
-  const [phase, setPhase] = useState<Phase>('pin');
+  const [phase, setPhase] = useState<'pin' | 'confirm'>('pin');
   const [confirmName, setConfirmName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +36,7 @@ export default function StoreLoginPage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch('/api/pin/login', {
+      const res = await fetch('/api/v1/operator-sessions/pin-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ terminalCredential: credential, pin: nextPin }),
@@ -58,7 +56,11 @@ export default function StoreLoginPage() {
             ? `Locked. Try again in ${String(body.retryAfterSeconds ?? 60)}s.`
             : body.reason === 'terminal_revoked'
               ? 'This terminal is no longer active. Re-register it.'
-              : 'Incorrect PIN.',
+              : body.reason === 'outlet_inactive'
+                ? 'This outlet is not active.'
+                : body.reason === 'employee_inactive'
+                  ? 'This account is not active.'
+                  : 'Incorrect PIN.',
         );
         return;
       }

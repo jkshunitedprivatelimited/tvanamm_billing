@@ -1,16 +1,16 @@
-import { requireStoreSession } from '@/server/auth';
+import { requireOperator } from '@/server/auth';
 import { db } from '@/server/pool';
 import { SessionControls } from './session-controls';
 
 export default async function Home() {
-  const { actor } = await requireStoreSession();
+  const actor = await requireOperator();
 
-  const { rows } = await db().query<{ full_name: string; employee_code: string; outlet_name: string }>(
-    `select se.full_name, se.employee_code, o.name as outlet_name
+  const { rows } = await db().query<{ full_name: string; employee_code: string; display_name: string }>(
+    `select se.full_name, se.employee_code, o.display_name
        from identity.store_employees se
-       join identity.outlets o on o.id = se.outlet_id
-      where se.user_id = $1`,
-    [actor.userId],
+       join billing.outlets o on o.id = se.outlet_id
+      where se.id = $1`,
+    [actor.employeeId],
   );
   const me = rows[0];
 
@@ -18,15 +18,15 @@ export default async function Home() {
     <>
       <div className="statusbar">
         <span>
-          <strong>{me?.outlet_name ?? 'Outlet'}</strong> · Online
+          <strong>{me?.display_name ?? 'Outlet'}</strong> · Online
         </span>
         <span className="muted">{me?.employee_code}</span>
       </div>
       <main className="pos">
         <h1>Signed in as {me?.full_name ?? 'operator'}</h1>
         <p className="muted">
-          The billing workspace (cart, checkout, receipts) is built in Stage 3. For now this
-          confirms the terminal, employee, and session are wired end to end.
+          The billing workspace (cart, checkout, receipts) is built in Stage 3. This confirms the
+          terminal, employee, and operator session are wired end to end.
         </p>
         <SessionControls />
       </main>

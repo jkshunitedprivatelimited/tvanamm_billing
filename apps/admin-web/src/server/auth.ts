@@ -1,69 +1,58 @@
 import 'server-only';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { withTransaction } from '@jksh/db';
 import type { ActorContext } from '@jksh/contracts';
-import { authenticateSessionToken, loadActorContext, IdentityError } from '@jksh/identity';
+import { buildAdminActor, IdentityError } from '@jksh/identity';
 import { db } from './pool';
+import { supabaseServer } from './supabase';
+import { WS_COOKIE, readWorkspace } from './ws-cookie';
 
-export const SESSION_COOKIE = 'jksh_sid';
-
-export const sessionCookieOptions = {
-  httpOnly: true,
-  sameSite: 'lax' as const,
-  secure: process.env.NODE_ENV === 'production',
-  path: '/',
-  maxAge: 60 * 60 * 12,
-};
-
-export interface SessionState {
-  sessionId: string;
-  userId: string;
-  hasWorkspace: boolean;
-  actor: ActorContext | null;
+export interface AuthUser {
+  id: string;
+  phone: string | null;
+  /** Seconds since the current Supabase session issued its access token. */
+  secondsSinceAuth: number;
 }
 
-/** Resolve the session cookie into a validated state, or null when absent/invalid. */
-export async function readSession(): Promise<SessionState | null> {
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token) return null;
+export async function getAuthUser(): Promise<AuthUser | null> {
+  const supabase = await supabaseServer();
+  const { data } = await supabase.auth.getUser();
+  if (!data.user) return null;
+  const { data: sessionData } = await supabase.auth.getSession();
+  const session = sessionData.session;
+  const issuedAt = session?.expires_at
+    ? session.expires_at * 1000 - session.expires_in * 1000
+    : Date.now();
+  return {
+    id: data.user.id,
+    phone: data.user.phone ? `+${data.user.phone}` : null,
+    secondsSinceAuth: Math.max(0, Math.floor((Date.now() - issuedAt) / 1000)),
+  };
+}
+
+export async function getAdminActor(): Promise<{
+  user: AuthUser | null;
+  actor: ActorContext | null;
+}> {
+  const user = await getAuthUser();
+  if (!user) return { user: null, actor: null };
+  const membershipId = readWorkspace((await cookies()).get(WS_COOKIE)?.value);
   try {
-    return await withTransaction(db(), async (client) => {
-      const session = await authenticateSessionToken(client, token);
-      const actor = session.membership_id
-        ? await loadActorContext(client, session.id)
-        : null;
-      return {
-        sessionId: session.id,
-        userId: session.user_id,
-        hasWorkspace: Boolean(session.membership_id),
-        actor,
-      };
+    const actor = await buildAdminActor(db(), {
+      authUserId: user.id,
+      membershipId,
+      secondsSinceAuth: user.secondsSinceAuth,
     });
+    return { user, actor };
   } catch (error) {
-    if (error instanceof IdentityError) return null;
+    if (error instanceof IdentityError) return { user, actor: null };
     throw error;
   }
 }
 
-/** For pages: bounce to /login when unauthenticated, /select-workspace when unresolved. */
-export async function requireActor(): Promise<ActorContext> {
-  const state = await readSession();
-  if (!state) redirect('/login');
-  if (!state.actor) redirect('/select-workspace');
-  return state.actor;
-}
-
-export async function requireSession(): Promise<SessionState> {
-  const state = await readSession();
-  if (!state) redirect('/login');
-  return state;
-}
-
-/** For Route Handlers: throw a typed 401/403 instead of redirecting. */
-export async function requireActorRoute(): Promise<ActorContext> {
-  const state = await readSession();
-  if (!state) throw new IdentityError('unauthenticated', 'Sign in required');
-  if (!state.actor) throw new IdentityError('forbidden', 'Select a workspace first');
-  return state.actor;
+export async function requireAdminActor(): Promise<ActorContext> {
+  const { user, actor } = await getAdminActor();
+  if (!user) redirect('/login');
+  if (!actor) redirect('/select-workspace');
+  return actor;
 }

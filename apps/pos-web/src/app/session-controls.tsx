@@ -7,23 +7,20 @@ export function SessionControls() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
 
-  async function call(path: string) {
+  function call(path: string) {
     setBusy(true);
-    try {
-      await fetch(path, { method: 'POST' });
+    void fetch(path, { method: 'POST' }).then(() => {
       router.replace('/login');
       router.refresh();
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   return (
     <div style={{ display: 'flex', gap: 12, marginTop: 24, maxWidth: 380 }}>
-      <button className="ghost" disabled={busy} onClick={() => void call('/api/session/lock')}>
+      <button className="ghost" disabled={busy} onClick={() => call('/api/v1/operator-sessions/lock')}>
         Lock terminal
       </button>
-      <button disabled={busy} onClick={() => void call('/api/session/logout')}>
+      <button disabled={busy} onClick={() => call('/api/v1/operator-sessions/logout')}>
         Sign out
       </button>
     </div>

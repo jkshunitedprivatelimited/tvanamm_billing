@@ -1,6 +1,8 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
 import { IdentityError } from '@jksh/identity';
+import type { ActorContext } from '@jksh/contracts';
+import { getAdminActor } from './auth';
 
 export function jsonError(error: unknown): NextResponse {
   if (error instanceof IdentityError) {
@@ -9,7 +11,7 @@ export function jsonError(error: unknown): NextResponse {
       { status: error.httpStatus },
     );
   }
-  console.error('[admin-web] unhandled route error', error);
+  console.error('[admin-web] route error', error);
   return NextResponse.json({ error: 'internal', message: 'Unexpected error' }, { status: 500 });
 }
 
@@ -28,4 +30,12 @@ export function requestMeta(request: Request): {
     ...(userAgent ? { userAgent } : {}),
     ...(ip ? { ip } : {}),
   };
+}
+
+/** Resolve the admin actor for a Route Handler or throw a typed 401/403. */
+export async function actorOrThrow(): Promise<ActorContext> {
+  const { user, actor } = await getAdminActor();
+  if (!user) throw new IdentityError('unauthenticated', 'Sign in required');
+  if (!actor) throw new IdentityError('forbidden', 'Select a workspace first');
+  return actor;
 }
