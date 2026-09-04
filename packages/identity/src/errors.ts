@@ -15,6 +15,7 @@ export type IdentityErrorCode =
   | 'activation_code_invalid'
   | 'activation_code_expired'
   | 'activation_code_consumed'
+  | 'activation_throttled'
   | 'outlet_not_active'
   | 'outlet_capacity'
   | 'employee_exists'
@@ -67,6 +68,7 @@ function defaultStatus(code: IdentityErrorCode): number {
     case 'outlet_capacity':
       return 409;
     case 'pin_locked':
+    case 'activation_throttled':
       return 429;
     default:
       return 400;

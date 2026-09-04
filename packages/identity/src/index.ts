@@ -53,6 +53,13 @@ export {
   resetOtpAttempts,
   type OtpGateResult,
 } from './otp-attempts';
+export {
+  activationClientKey,
+  checkActivationGate,
+  recordActivationFailure,
+  resetActivationAttempts,
+  ACTIVATION_LOCKOUT_POLICY,
+} from './activation-attempts';
 export * from './ids';
 export {
   mintTerminalCredential,

@@ -247,6 +247,37 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
     expect(lockedAt).toBeLessThanOrEqual(12);
   }, 30_000);
 
+  it('throttles repeated bad activation-code registration attempts', async () => {
+    const ip = `198.51.100.${SUFFIX.slice(-2).replace(/\D/g, '') || '1'}`;
+    const attempt = (): Promise<unknown> =>
+      registerTerminal(
+        pool,
+        {
+          code: `BADCODE${SUFFIX.slice(-4).toUpperCase()}`,
+          deviceLabel: 'Rogue',
+          paperWidthMm: 80,
+        },
+        { ip },
+      );
+
+    // The first few bad codes are just "invalid"; the soft threshold then trips
+    // the throttle and the endpoint stops looking at the code at all.
+    let throttledAt = 0;
+    for (let i = 1; i <= 8 && throttledAt === 0; i += 1) {
+      try {
+        await attempt();
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === 'activation_throttled') throttledAt = i;
+        else expect(code).toBe('activation_code_invalid');
+      }
+    }
+    expect(throttledAt).toBeGreaterThan(0);
+    expect(throttledAt).toBeLessThanOrEqual(6);
+
+    await pool.query(`delete from identity.activation_attempts where client_key like 'ip:%'`);
+  }, 30_000);
+
   it('suspending an outlet revokes its terminal', async () => {
     const admin = await actorFor(adminPhone);
     const owner = await actorFor(ownerPhone);

@@ -10,6 +10,12 @@ import type {
   TerminalSummary,
 } from '@jksh/contracts';
 import { contextForActor, systemContext } from './db-context';
+import {
+  activationClientKey,
+  checkActivationGate,
+  recordActivationFailure,
+  resetActivationAttempts,
+} from './activation-attempts';
 import { ensureAllowed, ensureAllowedAudited } from './authz';
 import { FRESH_AUTH_SECONDS } from './authorize';
 import { generateActivationCode, nextReceiptPrefix } from './ids';
@@ -115,7 +121,35 @@ export async function registerTerminal(
 ): Promise<TerminalRegistered> {
   const secret = identityTokenSecret();
   const codeHash = hashActivationCode(secret, cmd.code);
+  const clientKey = activationClientKey(meta.ip);
 
+  // Throttle brute force against the code space before touching the table.
+  const gate = await checkActivationGate(pool, clientKey);
+  if (gate.blocked) {
+    throw new IdentityError('activation_throttled', 'Too many attempts. Try again later.', {
+      details: { retryAfterSeconds: gate.retryAfterSeconds },
+    });
+  }
+
+  try {
+    const result = await registerTerminalTxn(pool, cmd, meta, secret, codeHash);
+    await resetActivationAttempts(pool, clientKey);
+    return result;
+  } catch (err) {
+    if (err instanceof IdentityError && err.code === 'activation_code_invalid') {
+      await recordActivationFailure(pool, clientKey);
+    }
+    throw err;
+  }
+}
+
+async function registerTerminalTxn(
+  pool: Pool,
+  cmd: RegisterTerminalCommand,
+  meta: RequestMeta,
+  secret: string,
+  codeHash: string,
+): Promise<TerminalRegistered> {
   return withActorContext(pool, systemContext(), async (client) => {
     const { rows: codeRows } = await client.query<{
       id: string;
