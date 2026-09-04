@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   attemptGate,
   DEFAULT_LOCKOUT_POLICY,
+  DUMMY_HASH,
   EMPTY_ATTEMPT_STATE,
   hashPin,
   isValidPinFormat,
@@ -10,8 +11,10 @@ import {
   pinLookupEquals,
   registerFailure,
   registerSuccess,
+  verifyDummyPin,
   verifyPinHash,
 } from './pin';
+import { verify as argonVerify } from '@node-rs/argon2';
 
 describe('PIN format', () => {
   it('accepts exactly four digits', () => {
@@ -38,6 +41,36 @@ describe('PIN hashing', () => {
 
   it('never returns the same argon2 hash twice', async () => {
     expect(await hashPin('0417')).not.toBe(await hashPin('0417'));
+  });
+});
+
+describe('timing-equalization dummy hash', () => {
+  it('is a well-formed argon2id encoding that decodes without throwing', async () => {
+    expect(DUMMY_HASH).toMatch(/^\$argon2id\$v=19\$m=19456,t=2,p=1\$/);
+    // A malformed value would throw here; `verifyPinHash` would then swallow it
+    // and return early, re-opening the timing side channel.
+    await expect(argonVerify(DUMMY_HASH, '9999')).resolves.toBe(false);
+  });
+
+  it('spends real argon2 work — comparable to a genuine verification', async () => {
+    const realHash = await hashPin('0417');
+
+    const timeOf = async (fn: () => Promise<unknown>): Promise<number> => {
+      const started = performance.now();
+      await fn();
+      return performance.now() - started;
+    };
+
+    // Warm up the native addon so the first call does not skew the numbers.
+    await verifyDummyPin('1357');
+    await verifyPinHash(realHash, '2468');
+
+    const dummyMs = await timeOf(() => verifyDummyPin('1357'));
+    const realMs = await timeOf(() => verifyPinHash(realHash, '2468'));
+
+    // The dummy path used to short-circuit in <1ms because the hash could not
+    // decode. It must now cost within ~3x of a real verification.
+    expect(dummyMs).toBeGreaterThan(realMs / 3);
   });
 });
 

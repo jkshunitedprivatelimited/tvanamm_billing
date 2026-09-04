@@ -61,13 +61,19 @@ export async function verifyPinHash(hashValue: string, pin: string): Promise<boo
   }
 }
 
-// A fixed argon2id hash used to spend comparable CPU when no employee matches,
-// so a caller cannot distinguish "unknown PIN" from "wrong PIN" by timing.
-// (hash of a random string; never equal to any real PIN hash.)
-const DUMMY_HASH =
-  '$argon2id$v=19$m=19456,t=2,p=1$ZGV2LW9ubHktZHVtbXktc2FsdA$mBEZ8G0h3q1n2c4v6b8n0m2k4h6j8l0p2r4t6v8x0z2';
+// A real argon2id hash (of a fixed non-PIN string, generated with ARGON_OPTS)
+// used to spend the same CPU as a genuine verification when no employee
+// matches, so a caller cannot distinguish "unknown PIN" from "wrong PIN" by
+// timing. It MUST decode and execute — a malformed value would make
+// `argonVerify` throw and return early, re-opening the side channel — so
+// `pin.test.ts` asserts `verifyDummyPin` actually runs argon2. Never equal to
+// any real PIN hash (the input is not four digits).
+export const DUMMY_HASH =
+  '$argon2id$v=19$m=19456,t=2,p=1$FDJfDPYEWWPtZoo9gXYM5Q$u4n/FFfwjAZf3FuYZvLMXTS7XPjqpPtHmccOKPEFiqg';
 
-/** Constant-ish-time no-op verification for the "no matching employee" path. */
+/** Constant-ish-time no-op verification for the "no matching employee" path.
+ *  Only the CPU time spent matters; the boolean result (always false) is
+ *  discarded by callers. */
 export async function verifyDummyPin(pin: string): Promise<void> {
   await verifyPinHash(DUMMY_HASH, pin);
 }

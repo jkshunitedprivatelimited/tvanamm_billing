@@ -20,11 +20,13 @@ secret key reaches a browser bundle (server-only imports). A literal search for
 the fake CI value `sb_secret_ci`; review matches for an actual secret value
 rather than expecting zero textual matches.
 
-## Independent re-verification — resolved 2026-09-04
+## Independent re-verification — resolved 2026-09-04 (round 2)
 
 The 2026-09-03 independent review confirmed formatting, lint, typecheck, and
-both production builds, but found the gaps below. All are now fixed and
-re-tested (see the Verification block at the end).
+both production builds, but found the gaps below. A second independent review
+on 2026-09-04 accepted the CSP and unified dev-auth changes, but reopened the
+PIN timing and tenant-integrity items. Both are now fixed and re-tested (see
+the verification block below).
 
 - [x] **P0/P1 — Make the production CSP compatible with Next.js.** Both proxies
       (`apps/admin-web/src/proxy.ts`, `apps/pos-web/src/proxy.ts`) now mint a
@@ -40,29 +42,42 @@ re-tested (see the Verification block at the end).
       `/register`: pages hydrate, client `fetch` to `/api/v1/auth/otp/request`
       returns 200, and the browser reports **zero CSP violations** and zero page
       errors. Header nonce == HTML nonce confirmed within a single request.
-- [x] **P1 — Fix the already-locked employee PIN path.** `store-auth.pinLogin`
-      now routes a locked employee, an inactive employee, and a wrong PIN all
-      through the shared `fail()` helper: it increments the terminal-wide
-      counter, calls `verifyDummyPin` for timing, emits the safe
-      `pin.login_failed` / `pin.locked` audit (no PIN), and returns the one
-      generic `invalid` response. Only the terminal-level hard lock still
-      discloses `locked`. Regression test: `integration.test` "a disabled
-      employee PIN login returns the generic invalid reason and counts on the
-      terminal" asserts `reason === 'invalid'` and `failed_count` +1.
-- [x] **P1 — Complete database-enforced tenant integrity.** Migration
-      `0012_tenant_integrity.sql` adds composite unique keys
-      `franchises (id, brand_id)` and `outlets (id, franchise_id)` plus
-      MATCH-SIMPLE composite foreign keys: `outlets (franchise_id, brand_id)` →
-      franchises; `store_employees` / `terminals` /
-      `terminal_activation_codes (outlet_id, franchise_id)` → outlets;
-      `memberships (franchise_id, brand_id)` → franchises. The
-      franchise-owner membership insert now carries `brand_id`
-      (`invitations.ts`, `seed.ts`, `integration.test` `seedAccount`) so the FK
-      is enforced rather than skipped on a NULL. Test: `integration.test` "DB
-      constraints reject cross-brand / cross-franchise tenant rows (migration
-      0012)" directly attempts each invalid insert and asserts the named
-      constraint fires. Applied to the dev Supabase project (`db:status` → 12
-      applied; a pre-flight mismatch scan returned 0 rows).
+- [x] **P1 — Fix and test all generic PIN rejection paths.** `store-auth.pinLogin`
+      routes a locked employee, an inactive employee, and a wrong PIN all
+      through the shared `fail()` helper: terminal-wide counter +1,
+      `verifyDummyPin` for timing, safe `pin.login_failed` / `pin.locked` audit
+      (no PIN), one generic `invalid` response. Only a terminal-level hard lock
+      discloses `locked`. **Timing:** `pin.ts` `DUMMY_HASH` is now a real
+      Argon2id hash generated with `ARGON_OPTS` (of a fixed non-PIN string);
+      `pin.test.ts` "timing-equalization dummy hash" asserts it decodes without
+      throwing and that `verifyDummyPin` spends real Argon2 work (within ~3x of
+      a genuine verification — it was <1 ms before). **Coverage:**
+      `integration.test` now has both "a disabled employee PIN login …" and "an
+      already-locked employee PIN login stays generic, audits safely, and
+      counts on the terminal" — the latter seeds `failed_attempts=6` +
+      `lock_time` on an *active* employee, then asserts `reason === 'invalid'`,
+      terminal `failed_count === 1`, exactly one new `audit.events` row whose
+      action is `pin.login_failed`/`pin.locked` with `employee_locked` in
+      metadata and no PIN.
+- [x] **P1 — Complete database-enforced tenant integrity.** Migration `0012`
+      keeps the composite unique + MATCH-SIMPLE foreign keys for the non-NULL
+      mismatch cases. New migration `0013_tenant_integrity_triggers.sql` closes
+      the two remaining holes: (1) a `SECURITY DEFINER` `BEFORE INSERT OR UPDATE`
+      trigger (`identity.assert_outlet_franchise`) on `store_employees`,
+      `terminals`, and `terminal_activation_codes` rejects any row whose
+      `franchise_id` is not *exactly* the parent outlet's `franchise_id` —
+      including `NULL` against a franchise-owned outlet, which `MATCH SIMPLE`
+      would skip; (2) `billing.franchises` gets
+      `franchises_brand_org_fk (brand_id, organization_id) → billing.brands`, so
+      a franchise can no longer name a brand from another organization.
+      `integration.test` "DB constraints reject cross-brand / cross-franchise
+      tenant rows (migrations 0012 + 0013)" directly attempts each case —
+      cross-brand outlet, cross-brand membership, employee NULL-franchise,
+      employee cross-franchise, terminal cross-franchise, activation-code
+      NULL-franchise, cross-org franchise/brand — and a positive control
+      (jksh-owned outlet + NULL-franchise employee inserts fine). Applied to the
+      dev Supabase project (`db:status` → 13 applied, 0 pending; a pre-flight
+      mismatch scan across all four rules returned 0 rows).
 - [x] **P1 — Use one dev-auth feature gate everywhere.**
       `apps/admin-web/src/dev-auth-flags.ts` `insecureDevAuthEnabled(env?)` is
       the single predicate (development + `ALLOW_INSECURE_DEV_AUTH === 'true'` +
@@ -77,9 +92,9 @@ re-tested (see the Verification block at the end).
       `checkAndRecordOtpSend` before returning and echoes
       `resendAvailableInSeconds`; only the SMS dispatch is skipped. Response
       shape is unchanged.
-- [x] **Verification — rerun external checks.** All 12 database-backed
+- [x] **Verification — rerun external checks.** All 13 database-backed
       integration tests run with no skips against both a local Postgres 16
-      cluster and the dev Supabase project (0001–0012). `npm audit --omit=dev
+      cluster and the dev Supabase project (0001–0013). `npm audit --omit=dev
       --audit-level=high` with registry access → **0 vulnerabilities**.
 - [ ] **Billing V1 — implementation has not landed.** The present codebase has
       identity, outlet/terminal foundations, contracts, and the build plan, but
@@ -89,29 +104,31 @@ re-tested (see the Verification block at the end).
       `docs/plans/billing-v1-build-plan.md`; the POS placeholder must be replaced
       only after the end-to-end billing acceptance tests pass.
 
-Required re-verification after these changes — all run 2026-09-04:
+Verification after the round-2 changes (2026-09-04):
 
 1. `npm run format:check`, `npm run lint`, `npm run typecheck` — all pass.
-2. `npm test` with PostgreSQL enabled — 85 pass, 0 skipped (10 files, incl. the
-   12 DB integration tests and the new `admin-web` project). Integration suite
-   also re-run against the dev Supabase project — 12/12.
+2. `npm test` with local PostgreSQL — **88 pass, 0 skipped** (10 files; +2
+   PIN-timing unit tests, +1 already-locked-employee integration test since
+   round 1). The 13 DB integration tests were also re-run against the dev
+   Supabase project (0001–0013) — 13/13. A database-less run still skips the 13
+   DB tests by design (`describe.skipIf(!DATABASE_URL)`).
 3. `npm run build` for both apps — pass (Next 16.3.4, Turbopack).
 4. Production browser smoke test (headless Chromium) with the nonce CSP — Admin
    `/login` + `/`, POS `/login` + `/register`: hydrate, `fetch` works, zero CSP
-   violations.
+   violations. (Unchanged in round 2; no proxy/layout edits.)
 5. `npm audit --omit=dev --audit-level=high` (registry access) — 0
    vulnerabilities.
-6. `npm run db:status` against the dev Supabase project — 12 applied, 0 pending.
+6. `npm run db:status` against the dev Supabase project — 13 applied, 0 pending.
 
-## P1 — all done
+## P1 implementation table — all done
 
 | Item | Status | Where |
 |---|---|---|
-| Store PIN brute-force protection | **done** | `identity.terminal_pin_attempts` (migration 0008); `store-auth.pinLogin` checks the terminal gate first, counts every failure (no-match, inactive, wrong PIN), runs `verifyDummyPin` for timing, keeps the per-employee lock, audits terminal throttles/locks with no PIN, and returns one generic `invalid`. Test: `integration.test` "locks the terminal after repeated nonexistent-PIN guesses". |
+| Store PIN brute-force protection | **done** | Terminal-wide counting, timing equalization, and one generic `invalid` for every employee/PIN failure. `pin.ts` `DUMMY_HASH` is a real Argon2id hash (asserted to decode + spend Argon2 work in `pin.test.ts`); `integration.test` covers both the disabled-employee and the already-locked-employee paths (generic `invalid`, safe audit with `employee_locked` + no PIN, terminal `failed_count` +1). |
 | Dev OTP containment | **done** | `server/dev-session.ts`: requires `NODE_ENV=development` + `ALLOW_INSECURE_DEV_AUTH=true` + non-empty `ADMIN_DEV_OTP`; `assertDevAuthSafe()` refuses a non-loopback base URL; constant-time compare; OTP failure throttle applied to the fixed code; server-side expiry from `issuedAt`; cookie `secure` from the request protocol; nothing logged; red `InsecureAuthBanner`. `.env.example` ships the flags blank. |
 | Accountant routing | **done** | `/reports` guarded placeholder (`(app)/reports/page.tsx`), role-aware topbar nav, read-only copy. |
 | Real franchise onboarding | **done** | `billing.franchise.manage` capability (0010); `createFranchise` / `listFranchises`; `FranchisePanel` UI with a franchise **select** (no raw UUID); `createFranchiseOwnerInvitation` cancels superseded invitations and blocks internal accounts; `POST /api/v1/invitations/{token}/accept` + `/accept-invitation` page bind acceptance to the invited mobile + OTP; replay rejected. Tests cover wrong-phone, replay, supersede, internal-account. |
-| Least-privilege DB boundary | **done** | POS page now uses `getOperatorSummary` under operator RLS context (0009 adds `employee_operator_self` / `opsession_operator_self` policies); ESLint `no-restricted-syntax` blocks raw `.query` in `apps/*/src/app/**`; composite `(<fk>, organization_id)` foreign keys (0009) plus `(<fk>, franchise_id)` / `(franchise_id, brand_id)` foreign keys (0012) make org/franchise/brand IDs on employees, terminals, activation codes, outlets, and memberships mutually consistent. |
+| Least-privilege DB boundary | **done** | Operator RLS + the application query boundary + composite `(fk, organization_id)` FKs (0009) + composite `(fk, franchise_id)` / `(franchise_id, brand_id)` FKs (0012) + `BEFORE` triggers and `franchises_brand_org_fk` (0013) that close the `MATCH SIMPLE` NULL bypass and cross-organization franchise/brand hole. Every case is exercised by `integration.test` "DB constraints reject cross-brand / cross-franchise tenant rows (migrations 0012 + 0013)". |
 | Dependency security | **done** | Upgraded both apps to **Next.js 16.3.4** (resolves the bundled-postcss advisory); `npm audit --omit=dev --audit-level=high` → 0. CI now gates on `high` and runs `format:check`. |
 
 ## P2
@@ -165,15 +182,15 @@ Required re-verification after these changes — all run 2026-09-04:
 | Separate **runtime vs migration DB credentials** | Supabase's pooler exposes one project login; `set local role identity_api` already narrows every request. A dedicated `identity_api` login is added when the deployment platform supports it. | Deployment |
 | Full **Route Handler contract test suite** and **browser smoke tests** | Identity domain + live-Postgres integration + RLS-denial tests cover the logic; a Next Route Handler harness and Playwright suite are their own setup. | Stage 7 hardening |
 
-## Verification (local Postgres 16 + dev Supabase) — 2026-09-04
+## Verification (local Postgres 16 + dev Supabase) — 2026-09-04 (round 2)
 
 ```
 format:check   OK
 lint           OK
 typecheck      0 errors (6 packages)
-test           85 pass, 0 skipped (local Postgres) ; 12/12 integration (Supabase, 0001–0012)
+test           88 pass, 0 skipped (local Postgres) ; 13/13 integration (Supabase, 0001–0013)
 build          both apps (Next 16.3.4, Turbopack)
 smoke          headless Chromium, prod nonce CSP — Admin + POS hydrate, 0 CSP violations
 audit          0 vulnerabilities (--omit=dev --audit-level=high, registry access)
-db:status      Supabase — 12 applied, 0 pending
+db:status      Supabase — 13 applied, 0 pending
 ```
