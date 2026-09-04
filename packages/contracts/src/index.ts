@@ -1,6 +1,7 @@
 export * from './audit';
 export * from './billing';
 export * from './capabilities';
+export * from './catalog';
 export * from './employee';
 export * from './events';
 export * from './franchise';

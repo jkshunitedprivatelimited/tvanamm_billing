@@ -43,6 +43,13 @@ export const auditActionSchema = z.enum([
   'operator.logout',
   'step_up.required',
   'disabled_account.access_attempt',
+  'catalog.item_created',
+  'catalog.item_updated',
+  'catalog.item_override_set',
+  'catalog.item_promoted',
+  'menu.publication_created',
+  'menu.publication_applied',
+  'menu.publication_failed',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 

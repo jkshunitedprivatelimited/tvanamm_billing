@@ -21,7 +21,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           {actor.role === 'accountant' ? (
             <Link href="/reports">Reports</Link>
           ) : (
-            <Link href="/">Outlets</Link>
+            <>
+              <Link href="/">Outlets</Link>
+              {(actor.role === 'central_admin' || actor.role === 'franchise_owner') && (
+                <Link href="/menu">Menu</Link>
+              )}
+            </>
           )}
           <LogoutButton />
         </nav>

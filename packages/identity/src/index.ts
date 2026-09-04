@@ -113,6 +113,25 @@ export {
 } from './employee';
 export { issueActivationCode, registerTerminal, listTerminals, revokeTerminal } from './terminal';
 export {
+  createCategory,
+  createAddonGroup,
+  createCatalogItem,
+  updateCatalogItem,
+  upsertOutletItemOverride,
+  listMasterMenu,
+  type MasterMenuView,
+} from './catalog';
+export {
+  previewPublication,
+  createAndApplyPublication,
+  retryFailedTargets,
+  getPublication,
+  getPublishedMenu,
+  copyOutletItemToMaster,
+  type PublicationPreview,
+  type PublicationResult,
+} from './menu-publish';
+export {
   pinLogin,
   loadOperatorContext,
   lockOperator,
