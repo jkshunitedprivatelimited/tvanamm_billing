@@ -28,13 +28,14 @@ export async function createFranchiseOwnerInvitation(
   const { token, tokenHash } = mintInvitationToken(secret);
 
   return withActorContext(pool, contextForActor(actor), async (client) => {
-    const fr = await client.query<{ organization_id: string }>(
-      `select organization_id from billing.franchises where id = $1`,
+    const fr = await client.query<{ organization_id: string; brand_id: string }>(
+      `select organization_id, brand_id from billing.franchises where id = $1`,
       [cmd.franchiseId],
     );
     if (fr.rows[0]?.organization_id !== actor.scope.organizationId) {
       throw new IdentityError('validation', 'Franchise is outside your organization');
     }
+    const brandId = fr.rows[0].brand_id;
 
     const existing = await client.query<{ id: string; status: string; is_internal: boolean }>(
       `select id, status, is_internal from identity.account_profiles where mobile = $1`,
@@ -60,10 +61,10 @@ export async function createFranchiseOwnerInvitation(
 
     await client.query(
       `insert into identity.memberships
-         (account_id, role_key, organization_id, franchise_id, created_by)
-       values ($1,'franchise_owner',$2,$3,$4)
+         (account_id, role_key, organization_id, brand_id, franchise_id, created_by)
+       values ($1,'franchise_owner',$2,$3,$4,$5)
        on conflict do nothing`,
-      [accountId, actor.scope.organizationId, cmd.franchiseId, actor.accountId ?? null],
+      [accountId, actor.scope.organizationId, brandId, cmd.franchiseId, actor.accountId ?? null],
     );
 
     // Supersede any still-open invitation for this account so only one is valid.

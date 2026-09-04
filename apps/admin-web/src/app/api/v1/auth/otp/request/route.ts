@@ -12,7 +12,12 @@ export async function POST(request: Request) {
 
     if (devOtpEnabled()) {
       assertDevAuthSafe();
-      return apiJson({ sent: true, resendAvailableInSeconds: 0 }, { correlationId });
+      // The fixed-code path is throttled identically — only the SMS is skipped.
+      const devGate = await checkAndRecordOtpSend(db(), phone);
+      return apiJson(
+        { sent: true, resendAvailableInSeconds: devGate.retryAfterSeconds },
+        { correlationId },
+      );
     }
 
     const gate = await checkAndRecordOtpSend(db(), phone);

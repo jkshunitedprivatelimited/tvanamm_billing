@@ -192,14 +192,17 @@ export async function pinLogin(
       lastFailedAt: emp.last_failed_at,
       lockedUntil: emp.lock_time,
     };
-    const empGate = attemptGate(empState, now);
-    if (empGate.blocked) return reject('locked', empGate.retryAfterSeconds);
-
+    // An already-locked employee, an inactive employee, and a wrong PIN all go
+    // through `fail()`: increment the terminal-wide counter, equalize timing,
+    // emit the safe audit event, and return the one generic `invalid` response.
+    if (attemptGate(empState, now).blocked) {
+      await verifyDummyPin(cmd.pin);
+      return fail('employee_locked', { id: emp.id, state: empState });
+    }
     if (emp.status !== 'active') {
       await verifyDummyPin(cmd.pin);
       return fail('employee_inactive', { id: emp.id, state: empState });
     }
-
     const ok = await verifyPinHash(emp.pin_hash, cmd.pin);
     if (!ok) return fail('wrong_pin', { id: emp.id, state: empState });
 

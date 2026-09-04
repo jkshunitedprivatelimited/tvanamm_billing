@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { defineWorkspace } from 'vitest/config';
 
 export default defineWorkspace([
@@ -9,6 +10,18 @@ export default defineWorkspace([
       // real argon2 hashing, so keep a generous ceiling.
       testTimeout: 30_000,
       hookTimeout: 30_000,
+    },
+  },
+  {
+    resolve: {
+      alias: {
+        '@/': `${fileURLToPath(new URL('./apps/admin-web/src/', import.meta.url))}`,
+      },
+    },
+    test: {
+      name: 'admin-web',
+      include: ['apps/admin-web/src/**/*.{test,spec}.ts'],
+      environment: 'node',
     },
   },
 ]);

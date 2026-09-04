@@ -1,6 +1,7 @@
 import 'server-only';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { identityTokenSecret } from '@jksh/config';
+import { insecureDevAuthEnabled } from '@/dev-auth-flags';
 
 export const DEV_COOKIE = 'jksh_dev';
 
@@ -8,17 +9,12 @@ export const DEV_COOKIE = 'jksh_dev';
 export const DEV_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 
 /**
- * TEMPORARY admin login bypass: a fixed OTP, no SMS, no Supabase Auth. Requires
- * ALL of `NODE_ENV=development`, `ALLOW_INSECURE_DEV_AUTH=true`, and a non-empty
- * `ADMIN_DEV_OTP`. Removed entirely once Supabase Phone Auth + MSG91 is accepted
- * (`docs/plans/stage-1-audit-remediation.md` P1).
+ * TEMPORARY admin login bypass: a fixed OTP, no SMS, no Supabase Auth. The gate
+ * is `insecureDevAuthEnabled()` — the same predicate the Edge proxy uses.
+ * Removed entirely once Supabase Phone Auth + MSG91 is accepted.
  */
 export function devOtpEnabled(): boolean {
-  return (
-    process.env.NODE_ENV === 'development' &&
-    process.env.ALLOW_INSECURE_DEV_AUTH === 'true' &&
-    !!process.env.ADMIN_DEV_OTP
-  );
+  return insecureDevAuthEnabled();
 }
 
 /** Throw if the insecure bypass is configured in an unsafe place. */

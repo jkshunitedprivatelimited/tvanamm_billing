@@ -42,6 +42,7 @@ export async function seedDevData(pool: Pool): Promise<{ seeded: boolean }> {
       displayName: 'Bootstrap Central Admin',
       isInternal: true,
       role: 'central_admin',
+      brandId: null,
       franchiseId: null,
     });
   }
@@ -52,6 +53,7 @@ export async function seedDevData(pool: Pool): Promise<{ seeded: boolean }> {
       displayName: 'Bootstrap Franchise Owner',
       isInternal: false,
       role: 'franchise_owner',
+      brandId: TVANAMM_BRAND,
       franchiseId: DEMO_FRANCHISE,
     });
   }
@@ -66,6 +68,7 @@ async function upsertOtpAccount(
     displayName: string;
     isInternal: boolean;
     role: 'central_admin' | 'accountant' | 'franchise_owner';
+    brandId: string | null;
     franchiseId: string | null;
   },
 ): Promise<void> {
@@ -79,8 +82,8 @@ async function upsertOtpAccount(
   const accountId = rows[0]?.id;
   if (!accountId) return;
   await pool.query(
-    `insert into identity.memberships (account_id, role_key, organization_id, franchise_id)
-     values ($1,$2,$3,$4) on conflict do nothing`,
-    [accountId, params.role, JKSH_ORG, params.franchiseId],
+    `insert into identity.memberships (account_id, role_key, organization_id, brand_id, franchise_id)
+     values ($1,$2,$3,$4,$5) on conflict do nothing`,
+    [accountId, params.role, JKSH_ORG, params.brandId, params.franchiseId],
   );
 }

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { insecureDevAuthEnabled } from '@/dev-auth-flags';
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
   .split(',')
@@ -7,6 +8,27 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
   .filter(Boolean);
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const isProd = process.env.NODE_ENV === 'production';
+
+/** Per-request nonce-based CSP so Next.js's inline bootstrap scripts are allowed
+ *  without `'unsafe-inline'` in production. */
+function contentSecurityPolicy(nonce: string): string {
+  const scriptSrc = isProd
+    ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
+    : "script-src 'self' 'unsafe-eval' 'unsafe-inline'";
+  return [
+    "default-src 'self'",
+    scriptSrc,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self'",
+    "connect-src 'self' https://*.supabase.co",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    ...(isProd ? ['upgrade-insecure-requests'] : []),
+  ].join('; ');
+}
 
 export async function proxy(request: NextRequest) {
   // Reject cross-site cookie-authenticated mutations before any route runs.
@@ -20,7 +42,15 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  let response = NextResponse.next({ request });
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  const csp = contentSecurityPolicy(nonce);
+
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('content-security-policy', csp);
+
+  let response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set('content-security-policy', csp);
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
   const key =
@@ -28,9 +58,9 @@ export async function proxy(request: NextRequest) {
     process.env.SUPABASE_PUBLISHABLE_KEY ??
     process.env.SUPABASE_ANON_KEY ??
     '';
-  // Skip Supabase session refresh when using the temporary dev OTP path, or
+  // Skip Supabase session refresh under the (fully gated) dev-auth bypass, or
   // when Supabase is not configured at all.
-  if (!url || !key || (process.env.ADMIN_DEV_OTP && process.env.NODE_ENV === 'development')) {
+  if (!url || !key || insecureDevAuthEnabled()) {
     return response;
   }
 
@@ -39,7 +69,8 @@ export async function proxy(request: NextRequest) {
       getAll: () => request.cookies.getAll(),
       setAll: (list: { name: string; value: string; options?: Record<string, unknown> }[]) => {
         for (const { name, value } of list) request.cookies.set(name, value);
-        response = NextResponse.next({ request });
+        response = NextResponse.next({ request: { headers: requestHeaders } });
+        response.headers.set('content-security-policy', csp);
         for (const { name, value, options } of list) {
           response.cookies.set({ name, value, ...(options ?? {}) });
         }

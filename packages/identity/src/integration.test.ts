@@ -21,7 +21,19 @@ import { authorize } from './authorize';
 const RUN = !!process.env.DATABASE_URL;
 const JKSH_ORG = '01000000-0000-4000-8000-000000000001';
 const TVANAMM_BRAND = '01000000-0000-4000-8000-000000000010';
+const TLEAF_BRAND = '01000000-0000-4000-8000-000000000011';
 const SUFFIX = Date.now().toString(36);
+
+/** Run a statement that must fail on a named check/FK constraint. */
+async function expectConstraint(sql: string, params: unknown[], constraint: string): Promise<void> {
+  try {
+    await pool.query(sql, params);
+    throw new Error(`expected ${constraint} to reject the insert`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    expect(message).toContain(constraint);
+  }
+}
 
 let pool: Pool;
 let adminPhone: string;
@@ -38,10 +50,13 @@ async function seedAccount(phone: string, role: string, franchiseId: string | nu
      returning id`,
     [phone, `Test ${role}`, internal],
   );
+  // A franchise-scoped membership must also carry the franchise's brand so the
+  // composite (brand_id, franchise_id) FK from migration 0012 is satisfied.
+  const brandId = franchiseId ? TVANAMM_BRAND : null;
   await pool.query(
-    `insert into identity.memberships (account_id, role_key, organization_id, franchise_id)
-     values ($1,$2,$3,$4) on conflict do nothing`,
-    [rows[0]!.id, role, JKSH_ORG, franchiseId],
+    `insert into identity.memberships (account_id, role_key, organization_id, brand_id, franchise_id)
+     values ($1,$2,$3,$4,$5) on conflict do nothing`,
+    [rows[0]!.id, role, JKSH_ORG, brandId, franchiseId],
   );
 }
 
@@ -351,6 +366,94 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
     await pool.query(`delete from identity.account_profiles where mobile = $1`, [inviteePhone]);
     await pool.query(`delete from billing.franchises where id = $1`, [fr.id]);
   }, 30_000);
+
+  it('a disabled employee PIN login returns the generic invalid reason and counts on the terminal', async () => {
+    const owner = await actorFor(ownerPhone);
+    const code = await issueActivationCode(pool, owner, {
+      outletId: runOutletId,
+      label: 'Locked-employee test',
+      expiresInMinutes: 60,
+    });
+    const term = await registerTerminal(pool, {
+      code: code.code,
+      deviceLabel: 'iPad D',
+      paperWidthMm: 80,
+    });
+    const pin = String(2000 + (Date.now() % 6000));
+    const emp = await createEmployee(pool, owner, {
+      outletId: runOutletId,
+      fullName: 'Disabled Dan',
+      mobile: `+9182${SUFFIX.slice(-8).padStart(8, '0')}`,
+      initialPin: pin,
+    });
+    await setEmployeeStatus(pool, owner, emp.employeeId, { status: 'disabled' });
+
+    const before = await pool.query<{ failed_count: number }>(
+      `select failed_count from identity.terminal_pin_attempts where terminal_id = $1`,
+      [term.terminalId],
+    );
+    const beforeCount = before.rows[0]?.failed_count ?? 0;
+
+    // Correct PIN, but the employee is disabled: same generic 'invalid' as a
+    // wrong PIN, and it still advances the terminal-wide brute-force counter.
+    const r = await pinLogin(pool, { terminalCredential: term.terminalCredential, pin });
+    expect(r.result.outcome).toBe('rejected');
+    if (r.result.outcome === 'rejected') expect(r.result.reason).toBe('invalid');
+
+    const after = await pool.query<{ failed_count: number }>(
+      `select failed_count from identity.terminal_pin_attempts where terminal_id = $1`,
+      [term.terminalId],
+    );
+    expect(after.rows[0]!.failed_count).toBe(beforeCount + 1);
+  }, 30_000);
+
+  it('DB constraints reject cross-brand / cross-franchise tenant rows (migration 0012)', async () => {
+    const otherFranchiseId = randomUUID();
+    await pool.query(
+      `insert into billing.franchises (id, organization_id, brand_id, name, slug)
+       values ($1,$2,$3,$4,$5)`,
+      [otherFranchiseId, JKSH_ORG, TVANAMM_BRAND, `Other ${SUFFIX}`, `other-${SUFFIX}`],
+    );
+    const throwawayAccount = randomUUID();
+    await pool.query(
+      `insert into identity.account_profiles (id, mobile, display_name, status)
+       values ($1,$2,'Constraint Probe','invited')`,
+      [throwawayAccount, `+9173${SUFFIX.slice(-8).padStart(8, '0')}`],
+    );
+
+    try {
+      // Outlet whose franchise belongs to a different brand.
+      await expectConstraint(
+        `insert into billing.outlets
+           (organization_id, brand_id, franchise_id, ownership_type, status,
+            display_name, slug)
+         values ($1,$2,$3,'franchise_owned','draft',$4,$5)`,
+        [JKSH_ORG, TLEAF_BRAND, runFranchiseId, 'Bad Outlet', `bad-outlet-${SUFFIX}`],
+        'outlets_franchise_brand_fk',
+      );
+
+      // Employee pinned to one outlet but tagged with another outlet's franchise.
+      await expectConstraint(
+        `insert into identity.store_employees
+           (outlet_id, organization_id, franchise_id, employee_code, full_name, mobile)
+         values ($1,$2,$3,$4,'Bad Emp','+910000000000')`,
+        [runOutletId, JKSH_ORG, otherFranchiseId, `EMP-BAD${SUFFIX.slice(-4).toUpperCase()}`],
+        'store_employees_outlet_franchise_fk',
+      );
+
+      // Membership whose franchise belongs to a different brand.
+      await expectConstraint(
+        `insert into identity.memberships
+           (account_id, role_key, organization_id, brand_id, franchise_id)
+         values ($1,'franchise_owner',$2,$3,$4)`,
+        [throwawayAccount, JKSH_ORG, TLEAF_BRAND, runFranchiseId],
+        'memberships_franchise_brand_fk',
+      );
+    } finally {
+      await pool.query(`delete from identity.account_profiles where id = $1`, [throwawayAccount]);
+      await pool.query(`delete from billing.franchises where id = $1`, [otherFranchiseId]);
+    }
+  });
 
   it('writes audit rows for login, outlet, and terminal actions', async () => {
     const { rows } = await pool.query<{ action: string }>(
