@@ -132,6 +132,17 @@ export {
   type PublicationResult,
 } from './menu-publish';
 export {
+  openCashSession,
+  closeCashSession,
+  getOpenCashSession,
+  startShift,
+  endShift,
+  forceCloseShift,
+  getShift,
+  listOpenShifts,
+  outletBillingWindow,
+} from './shifts';
+export {
   pinLogin,
   loadOperatorContext,
   lockOperator,

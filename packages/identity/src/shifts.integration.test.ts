@@ -1,0 +1,262 @@
+/**
+ * Billing V1 Stage 2 - employee shifts + shared outlet cash session.
+ *
+ * Only one operator session is active on a terminal at a time (a new PIN login
+ * ends the previous one), but multiple employee *shifts* may stay open. Tests
+ * therefore re-authenticate whenever they switch employee.
+ */
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createPool, type Pool } from '@jksh/db';
+import { migrate } from '@jksh/db/migrate';
+import type { ActorContext } from '@jksh/contracts';
+import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth';
+import { issueActivationCode, registerTerminal } from './terminal';
+import { createEmployee } from './employee';
+import { pinLogin, loadOperatorContext } from './store-auth';
+import {
+  openCashSession,
+  closeCashSession,
+  getOpenCashSession,
+  startShift,
+  endShift,
+  forceCloseShift,
+  listOpenShifts,
+  outletBillingWindow,
+} from './shifts';
+
+const RUN = !!process.env.DATABASE_URL;
+const JKSH_ORG = '01000000-0000-4000-8000-000000000001';
+const TVANAMM_BRAND = '01000000-0000-4000-8000-000000000010';
+const S = Date.now().toString(36);
+
+let pool: Pool;
+let adminPhone: string;
+let ownerPhone: string;
+let otherOwnerPhone: string;
+let franchiseId: string;
+let otherFranchiseId: string;
+let outletId: string;
+let terminalCredential: string;
+let pinA: string;
+let pinB: string;
+
+async function seedAccount(phone: string, role: string, fId: string | null): Promise<void> {
+  const { rows } = await pool.query<{ id: string }>(
+    `insert into identity.account_profiles (mobile, display_name, status, is_internal, activated_at)
+     values ($1,$2,'active',$3,now())
+     on conflict (mobile) do update set status='active'
+     returning id`,
+    [phone, `Shift ${role}`, role === 'central_admin'],
+  );
+  await pool.query(
+    `insert into identity.memberships (account_id, role_key, organization_id, brand_id, franchise_id)
+     values ($1,$2,$3,$4,$5) on conflict do nothing`,
+    [rows[0]!.id, role, JKSH_ORG, fId ? TVANAMM_BRAND : null, fId],
+  );
+}
+
+async function adminActor(phone: string): Promise<ActorContext> {
+  const authUserId = randomUUID();
+  const r = await resolveAdminAfterVerify(pool, { authUserId, phone });
+  if (r.result.outcome !== 'single_workspace') throw new Error('expected single workspace');
+  const a = await buildAdminActor(pool, { authUserId, membershipId: r.result.membershipId });
+  if (!a) throw new Error('no actor');
+  return a;
+}
+
+/** PIN-login (ends any other operator session on the terminal) and return the
+ *  operator ActorContext. */
+async function loginAs(pin: string): Promise<ActorContext> {
+  const res = await pinLogin(pool, { terminalCredential, pin });
+  if (res.result.outcome !== 'resolved' || !res.operatorToken) throw new Error('pin login failed');
+  const a = await loadOperatorContext(pool, res.operatorToken);
+  if (!a) throw new Error('no operator context');
+  return a;
+}
+
+describe.skipIf(!RUN)('Billing V1 Stage 2 - shifts + cash session', () => {
+  beforeAll(async () => {
+    pool = createPool(process.env.DATABASE_URL);
+    await migrate(pool);
+
+    adminPhone = `+9194${S.slice(-8).padStart(8, '0')}`;
+    ownerPhone = `+9193${S.slice(-8).padStart(8, '0')}`;
+    otherOwnerPhone = `+9192${S.slice(-8).padStart(8, '0')}`;
+    franchiseId = randomUUID();
+    otherFranchiseId = randomUUID();
+    for (const [id, n] of [
+      [franchiseId, `shf-${S}`],
+      [otherFranchiseId, `sho-${S}`],
+    ] as const) {
+      await pool.query(
+        `insert into billing.franchises (id, organization_id, brand_id, name, slug)
+         values ($1,$2,$3,$4,$5)`,
+        [id, JKSH_ORG, TVANAMM_BRAND, n, n],
+      );
+    }
+    await seedAccount(adminPhone, 'central_admin', null);
+    await seedAccount(ownerPhone, 'franchise_owner', franchiseId);
+    await seedAccount(otherOwnerPhone, 'franchise_owner', otherFranchiseId);
+
+    outletId = randomUUID();
+    await pool.query(
+      `insert into billing.outlets
+         (id, organization_id, brand_id, franchise_id, ownership_type, status, display_name, slug,
+          billing_enabled)
+       values ($1,$2,$3,$4,'franchise_owned','active',$5,$6,true)`,
+      [outletId, JKSH_ORG, TVANAMM_BRAND, franchiseId, `ShOut${S.slice(-4)}`, `shout-${S}`],
+    );
+
+    const owner = await adminActor(ownerPhone);
+    const code = await issueActivationCode(pool, owner, {
+      outletId,
+      label: 'Shift test',
+      expiresInMinutes: 60,
+    });
+    const term = await registerTerminal(pool, {
+      code: code.code,
+      deviceLabel: 'Shift iPad',
+      paperWidthMm: 80,
+    });
+    terminalCredential = term.terminalCredential;
+
+    pinA = String(4000 + (Date.now() % 3000));
+    pinB = String(Number(pinA) === 4999 ? 4998 : Number(pinA) + 1);
+    await createEmployee(pool, owner, {
+      outletId,
+      fullName: 'Shift Anita',
+      mobile: `+9184${S.slice(-8).padStart(8, '0')}`,
+      initialPin: pinA,
+    });
+    await createEmployee(pool, owner, {
+      outletId,
+      fullName: 'Shift Bala',
+      mobile: `+9185${S.slice(-8).padStart(8, '0')}`,
+      initialPin: pinB,
+    });
+  }, 60_000);
+
+  afterAll(async () => {
+    try {
+      await pool.query(`delete from billing.cash_sessions where outlet_id = $1`, [outletId]);
+      await pool.query(`delete from billing.employee_shifts where outlet_id = $1`, [outletId]);
+      await pool.query(`delete from identity.operator_sessions where outlet_id = $1`, [outletId]);
+      await pool.query(
+        `delete from identity.terminal_credentials where terminal_id in
+           (select id from identity.terminals where outlet_id = $1)`,
+        [outletId],
+      );
+      await pool.query(`delete from identity.terminal_activation_codes where outlet_id = $1`, [
+        outletId,
+      ]);
+      await pool.query(`delete from identity.terminals where outlet_id = $1`, [outletId]);
+      await pool.query(`delete from identity.store_employees where outlet_id = $1`, [outletId]);
+      await pool.query(`delete from billing.outlets where id = $1`, [outletId]);
+      await pool.query(`delete from identity.memberships where franchise_id = any($1::uuid[])`, [
+        [franchiseId, otherFranchiseId],
+      ]);
+      await pool.query(`delete from billing.franchises where id = any($1::uuid[])`, [
+        [franchiseId, otherFranchiseId],
+      ]);
+      await pool.query(`delete from identity.account_profiles where mobile = any($1::text[])`, [
+        [adminPhone, ownerPhone, otherOwnerPhone],
+      ]);
+    } catch {
+      /* best effort */
+    }
+    await pool.end();
+  });
+
+  it('opens exactly one cash session per outlet', async () => {
+    const a = await loginAs(pinA);
+    const opened = await openCashSession(pool, a, { openingCash: '1000.00' });
+    expect(opened.id).toBeTruthy();
+    const b = await loginAs(pinB);
+    await expect(openCashSession(pool, b, { openingCash: '500.00' })).rejects.toThrow(
+      /already open/,
+    );
+    const cur = await getOpenCashSession(pool, b, outletId);
+    expect(cur?.openingCash).toBe('1000.00');
+  });
+
+  it('allows multiple open employee shifts, resuming rather than duplicating', async () => {
+    const a = await loginAs(pinA);
+    const s1 = await startShift(pool, a, {});
+    const s1again = await startShift(pool, a, {});
+    expect(s1again.id).toBe(s1.id); // resume, not a new shift
+    const b = await loginAs(pinB);
+    const s2 = await startShift(pool, b, {});
+    expect(s2.id).not.toBe(s1.id);
+    const open = await listOpenShifts(pool, b, outletId);
+    expect(open.filter((s) => s.status === 'open')).toHaveLength(2);
+  });
+
+  it('closes the cash session; a non-zero variance needs a reason', async () => {
+    const a = await loginAs(pinA);
+    const cur = await getOpenCashSession(pool, a, outletId);
+    const closed = await closeCashSession(pool, a, cur!.id, { countedCash: '1000.00' });
+    expect(closed.status).toBe('closed');
+    expect(closed.variance).toBe('0.00');
+    expect(closed.closedByName).toBe('Shift Anita');
+
+    const b = await loginAs(pinB);
+    const reopened = await openCashSession(pool, b, { openingCash: '1000.00' });
+    await expect(closeCashSession(pool, b, reopened.id, { countedCash: '900.00' })).rejects.toThrow(
+      /reason is required/,
+    );
+    const ok = await closeCashSession(pool, b, reopened.id, {
+      countedCash: '900.00',
+      varianceReason: 'till short, investigating',
+    });
+    expect(ok.variance).toBe('-100.00');
+    expect(ok.varianceReason).toContain('investigating');
+  });
+
+  it('a settled cash session cannot be modified or reopened', async () => {
+    const a = await loginAs(pinA);
+    expect(await getOpenCashSession(pool, a, outletId)).toBeNull();
+    await expect(
+      pool.query(
+        `update billing.cash_sessions set counted_cash = '1'
+          where outlet_id = $1 and status <> 'open'`,
+        [outletId],
+      ),
+    ).rejects.toThrow(/settled/);
+  });
+
+  it('a Franchise Owner force-closes a forgotten shift with a mandatory reason', async () => {
+    const owner = await adminActor(ownerPhone);
+    const b = await loginAs(pinB);
+    const shift = await startShift(pool, b, {});
+    const forced = await forceCloseShift(pool, owner, shift.id, { reason: 'left without ending' });
+    expect(forced.status).toBe('force_closed');
+    expect(forced.forceCloseReason).toBe('left without ending');
+
+    const a = await loginAs(pinA);
+    const s2 = await startShift(pool, a, {});
+    const otherOwner = await adminActor(otherOwnerPhone);
+    await expect(forceCloseShift(pool, otherOwner, s2.id, { reason: 'nope' })).rejects.toThrow(
+      /Denied|row-level security|not found/,
+    );
+    await endShift(pool, await loginAs(pinA), s2.id);
+  });
+
+  it('blocks billing while a prior business-date shift or cash session is still open', async () => {
+    const a = await loginAs(pinA);
+    let win = await outletBillingWindow(pool, a, outletId);
+    expect(win.blocked).toBe(false);
+
+    await pool.query(
+      `insert into billing.cash_sessions
+         (organization_id, franchise_id, outlet_id, business_date, opened_by_employee_id,
+          opened_by_name, opening_cash)
+       select $1, $2, $3, (current_date - 1), se.id, se.full_name, 0
+         from identity.store_employees se where se.outlet_id = $3 limit 1`,
+      [JKSH_ORG, franchiseId, outletId],
+    );
+    win = await outletBillingWindow(pool, a, outletId);
+    expect(win.blocked).toBe(true);
+    expect(win.reason).toBe('stale_cash_session');
+  });
+});

@@ -50,6 +50,12 @@ export const auditActionSchema = z.enum([
   'menu.publication_created',
   'menu.publication_applied',
   'menu.publication_failed',
+  'shift.started',
+  'shift.ended',
+  'shift.force_closed',
+  'cash_session.opened',
+  'cash_session.closed',
+  'cash_session.force_closed',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 

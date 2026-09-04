@@ -9,4 +9,5 @@ export * from './identity';
 export * from './outlet';
 export * from './role-capabilities';
 export * from './session';
+export * from './shift';
 export * from './terminal';
