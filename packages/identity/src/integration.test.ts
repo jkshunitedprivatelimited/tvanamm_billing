@@ -470,7 +470,7 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
     expect(meta).not.toContain(pin);
   }, 30_000);
 
-  it('DB constraints reject cross-brand / cross-franchise tenant rows (migrations 0012 + 0013)', async () => {
+  it('DB constraints reject cross-brand / cross-franchise tenant rows (migrations 0012 + 0013 + 0014)', async () => {
     const otherFranchiseId = randomUUID();
     await pool.query(
       `insert into billing.franchises (id, organization_id, brand_id, name, slug)
@@ -580,6 +580,47 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
          values ($1,$2,null,$3,'OK Emp','+910000000002')`,
         [jkshOutletId, JKSH_ORG, `EMP-OK${SUFFIX.slice(-5).toUpperCase()}`],
       );
+
+      // --- migration 0014: frozen outlet scope + outlet->brand->org + FO brand
+
+      // The jksh_owned outlet now has a NULL-franchise child row. Flipping it to
+      // franchise_owned would strand that row past the MATCH SIMPLE FK, so the
+      // outlet's tenant scope is immutable after creation.
+      await expectConstraint(
+        `update billing.outlets
+            set ownership_type = 'franchise_owned', franchise_id = $2
+          where id = $1`,
+        [jkshOutletId, runFranchiseId],
+        'outlets_scope_frozen',
+      );
+      // Changing the brand is frozen too.
+      await expectConstraint(
+        `update billing.outlets set brand_id = $2 where id = $1`,
+        [jkshOutletId, TLEAF_BRAND],
+        'outlets_scope_frozen',
+      );
+      // A pure status/config update is still allowed.
+      await pool.query(`update billing.outlets set city = 'Hyderabad' where id = $1`, [
+        jkshOutletId,
+      ]);
+
+      // An outlet cannot name a brand from another organization.
+      await expectConstraint(
+        `insert into billing.outlets
+           (organization_id, brand_id, franchise_id, ownership_type, status, display_name, slug)
+         values ($1,$2,null,'jksh_owned','draft',$3,$4)`,
+        [JKSH_ORG, otherOrgBrandId, 'Cross Org Outlet', `cross-org-outlet-${SUFFIX}`],
+        'outlets_brand_org_fk',
+      );
+
+      // A Franchise Owner membership cannot be inserted without its brand.
+      await expectConstraint(
+        `insert into identity.memberships
+           (account_id, role_key, organization_id, brand_id, franchise_id)
+         values ($1,'franchise_owner',$2,null,$3)`,
+        [throwawayAccount, JKSH_ORG, runFranchiseId],
+        'memberships_scope_shape',
+      );
     } finally {
       await pool.query(`delete from identity.store_employees where outlet_id = $1`, [jkshOutletId]);
       await pool.query(`delete from billing.outlets where id = $1`, [jkshOutletId]);
@@ -588,7 +629,7 @@ describe.skipIf(!RUN)('Stage 1 identity vertical (re-aligned)', () => {
       await pool.query(`delete from identity.account_profiles where id = $1`, [throwawayAccount]);
       await pool.query(`delete from billing.franchises where id = $1`, [otherFranchiseId]);
     }
-  });
+  }, 30_000);
 
   it('writes audit rows for login, outlet, and terminal actions', async () => {
     const { rows } = await pool.query<{ action: string }>(

@@ -20,13 +20,14 @@ secret key reaches a browser bundle (server-only imports). A literal search for
 the fake CI value `sb_secret_ci`; review matches for an actual secret value
 rather than expecting zero textual matches.
 
-## Independent re-verification — resolved 2026-09-04 (round 2)
+## Independent re-verification — resolved 2026-09-04 (round 3)
 
 The 2026-09-03 independent review confirmed formatting, lint, typecheck, and
-both production builds, but found the gaps below. A second independent review
-on 2026-09-04 accepted the CSP and unified dev-auth changes, but reopened the
-PIN timing and tenant-integrity items. Both are now fixed and re-tested (see
-the verification block below).
+both production builds, but found the gaps below. Three review rounds on
+2026-09-04 accepted the CSP, unified dev-auth, OTP throttling, and PIN
+timing/locked-employee changes; the round-3 tenant-integrity follow-ups
+(parent outlet scope transitions, outlet→brand→org chain, NULL-brand Franchise
+Owner memberships) are now closed by migration 0014 and re-tested.
 
 - [x] **P0/P1 — Make the production CSP compatible with Next.js.** Both proxies
       (`apps/admin-web/src/proxy.ts`, `apps/pos-web/src/proxy.ts`) now mint a
@@ -59,25 +60,37 @@ the verification block below).
       terminal `failed_count === 1`, exactly one new `audit.events` row whose
       action is `pin.login_failed`/`pin.locked` with `employee_locked` in
       metadata and no PIN.
-- [x] **P1 — Complete database-enforced tenant integrity.** Migration `0012`
-      keeps the composite unique + MATCH-SIMPLE foreign keys for the non-NULL
-      mismatch cases. New migration `0013_tenant_integrity_triggers.sql` closes
-      the two remaining holes: (1) a `SECURITY DEFINER` `BEFORE INSERT OR UPDATE`
-      trigger (`identity.assert_outlet_franchise`) on `store_employees`,
-      `terminals`, and `terminal_activation_codes` rejects any row whose
-      `franchise_id` is not *exactly* the parent outlet's `franchise_id` —
-      including `NULL` against a franchise-owned outlet, which `MATCH SIMPLE`
-      would skip; (2) `billing.franchises` gets
-      `franchises_brand_org_fk (brand_id, organization_id) → billing.brands`, so
-      a franchise can no longer name a brand from another organization.
-      `integration.test` "DB constraints reject cross-brand / cross-franchise
-      tenant rows (migrations 0012 + 0013)" directly attempts each case —
-      cross-brand outlet, cross-brand membership, employee NULL-franchise,
-      employee cross-franchise, terminal cross-franchise, activation-code
-      NULL-franchise, cross-org franchise/brand — and a positive control
-      (jksh-owned outlet + NULL-franchise employee inserts fine). Applied to the
-      dev Supabase project (`db:status` → 13 applied, 0 pending; a pre-flight
-      mismatch scan across all four rules returned 0 rows).
+- [x] **P1 — Complete database-enforced tenant integrity.** Layered across three
+      migrations:
+  - `0012_tenant_integrity.sql` — composite unique keys + MATCH-SIMPLE composite
+    foreign keys for the non-NULL mismatch cases (`outlets (franchise_id,
+    brand_id)`, `store_employees` / `terminals` / `terminal_activation_codes
+    (outlet_id, franchise_id)`, `memberships (franchise_id, brand_id)`).
+  - `0013_tenant_integrity_triggers.sql` — a `SECURITY DEFINER`
+    `BEFORE INSERT OR UPDATE` trigger (`identity.assert_outlet_franchise`) on
+    `store_employees`, `terminals`, `terminal_activation_codes` rejecting any
+    `franchise_id` not *exactly* the parent outlet's (including `NULL` against a
+    franchise-owned outlet, which `MATCH SIMPLE` skips); plus
+    `franchises_brand_org_fk (brand_id, organization_id) → billing.brands`.
+  - `0014_tenant_integrity_locks.sql` — closes the round-3 direct-SQL paths:
+    (1) `billing.freeze_outlet_scope` trigger makes `organization_id`,
+    `brand_id`, `franchise_id`, and `ownership_type` immutable after creation,
+    so a `jksh_owned` outlet cannot collect NULL-franchise children and *then*
+    flip to `franchise_owned`; (2) `outlets_brand_org_fk (brand_id,
+    organization_id) → billing.brands` completes the outlet→brand→org chain;
+    (3) `memberships_scope_shape` now also requires `brand_id is not null` for a
+    `franchise_owner` (legacy rows backfilled from the franchise first).
+  - `integration.test` "DB constraints reject cross-brand / cross-franchise
+    tenant rows (migrations 0012 + 0013 + 0014)" attempts every case directly —
+    cross-brand outlet, cross-brand membership, employee NULL/cross franchise,
+    terminal cross-franchise, activation-code NULL-franchise, cross-org
+    franchise/brand, frozen outlet ownership/brand transition (with a
+    pre-existing NULL-franchise child row), cross-org outlet brand, NULL-brand
+    Franchise Owner membership — plus positive controls (jksh-owned NULL-franchise
+    employee, pure status/config update, FO membership *with* brand).
+  - Applied to the dev Supabase project (`db:status` → 14 applied, 0 pending;
+    pre-flight scans across every rule returned 0 blocking rows; the one legacy
+    NULL-brand FO membership was backfilled by the migration).
 - [x] **P1 — Use one dev-auth feature gate everywhere.**
       `apps/admin-web/src/dev-auth-flags.ts` `insecureDevAuthEnabled(env?)` is
       the single predicate (development + `ALLOW_INSECURE_DEV_AUTH === 'true'` +
@@ -94,7 +107,7 @@ the verification block below).
       shape is unchanged.
 - [x] **Verification — rerun external checks.** All 13 database-backed
       integration tests run with no skips against both a local Postgres 16
-      cluster and the dev Supabase project (0001–0013). `npm audit --omit=dev
+      cluster and the dev Supabase project (0001–0014). `npm audit --omit=dev
       --audit-level=high` with registry access → **0 vulnerabilities**.
 - [ ] **Billing V1 — implementation has not landed.** The present codebase has
       identity, outlet/terminal foundations, contracts, and the build plan, but
@@ -104,21 +117,20 @@ the verification block below).
       `docs/plans/billing-v1-build-plan.md`; the POS placeholder must be replaced
       only after the end-to-end billing acceptance tests pass.
 
-Verification after the round-2 changes (2026-09-04):
+Verification after the round-3 changes (2026-09-04):
 
 1. `npm run format:check`, `npm run lint`, `npm run typecheck` — all pass.
-2. `npm test` with local PostgreSQL — **88 pass, 0 skipped** (10 files; +2
-   PIN-timing unit tests, +1 already-locked-employee integration test since
-   round 1). The 13 DB integration tests were also re-run against the dev
-   Supabase project (0001–0013) — 13/13. A database-less run still skips the 13
-   DB tests by design (`describe.skipIf(!DATABASE_URL)`).
+2. `npm test` with local PostgreSQL — **88 pass, 0 skipped** (10 files). The 13
+   DB integration tests were also re-run against the dev Supabase project
+   (0001–0014) — 13/13. A database-less run still skips the 13 DB tests by
+   design (`describe.skipIf(!DATABASE_URL)`).
 3. `npm run build` for both apps — pass (Next 16.3.4, Turbopack).
 4. Production browser smoke test (headless Chromium) with the nonce CSP — Admin
    `/login` + `/`, POS `/login` + `/register`: hydrate, `fetch` works, zero CSP
-   violations. (Unchanged in round 2; no proxy/layout edits.)
+   violations. (Unchanged since round 1; no proxy/layout edits in rounds 2–3.)
 5. `npm audit --omit=dev --audit-level=high` (registry access) — 0
-   vulnerabilities.
-6. `npm run db:status` against the dev Supabase project — 13 applied, 0 pending.
+   vulnerabilities (no dependency changes in rounds 2–3).
+6. `npm run db:status` against the dev Supabase project — 14 applied, 0 pending.
 
 ## P1 implementation table — all done
 
@@ -128,7 +140,7 @@ Verification after the round-2 changes (2026-09-04):
 | Dev OTP containment | **done** | `server/dev-session.ts`: requires `NODE_ENV=development` + `ALLOW_INSECURE_DEV_AUTH=true` + non-empty `ADMIN_DEV_OTP`; `assertDevAuthSafe()` refuses a non-loopback base URL; constant-time compare; OTP failure throttle applied to the fixed code; server-side expiry from `issuedAt`; cookie `secure` from the request protocol; nothing logged; red `InsecureAuthBanner`. `.env.example` ships the flags blank. |
 | Accountant routing | **done** | `/reports` guarded placeholder (`(app)/reports/page.tsx`), role-aware topbar nav, read-only copy. |
 | Real franchise onboarding | **done** | `billing.franchise.manage` capability (0010); `createFranchise` / `listFranchises`; `FranchisePanel` UI with a franchise **select** (no raw UUID); `createFranchiseOwnerInvitation` cancels superseded invitations and blocks internal accounts; `POST /api/v1/invitations/{token}/accept` + `/accept-invitation` page bind acceptance to the invited mobile + OTP; replay rejected. Tests cover wrong-phone, replay, supersede, internal-account. |
-| Least-privilege DB boundary | **done** | Operator RLS + the application query boundary + composite `(fk, organization_id)` FKs (0009) + composite `(fk, franchise_id)` / `(franchise_id, brand_id)` FKs (0012) + `BEFORE` triggers and `franchises_brand_org_fk` (0013) that close the `MATCH SIMPLE` NULL bypass and cross-organization franchise/brand hole. Every case is exercised by `integration.test` "DB constraints reject cross-brand / cross-franchise tenant rows (migrations 0012 + 0013)". |
+| Least-privilege DB boundary | **done** | Operator RLS + the application query boundary + migrations 0009 (org-id composite FKs), 0012 (franchise/brand composite FKs), 0013 (child-write triggers + `franchises_brand_org_fk`), and 0014 (frozen outlet scope, `outlets_brand_org_fk`, `brand_id`-required FO membership). Every path is exercised by `integration.test` "DB constraints reject cross-brand / cross-franchise tenant rows (migrations 0012 + 0013 + 0014)". |
 | Dependency security | **done** | Upgraded both apps to **Next.js 16.3.4** (resolves the bundled-postcss advisory); `npm audit --omit=dev --audit-level=high` → 0. CI now gates on `high` and runs `format:check`. |
 
 ## P2
@@ -182,15 +194,15 @@ Verification after the round-2 changes (2026-09-04):
 | Separate **runtime vs migration DB credentials** | Supabase's pooler exposes one project login; `set local role identity_api` already narrows every request. A dedicated `identity_api` login is added when the deployment platform supports it. | Deployment |
 | Full **Route Handler contract test suite** and **browser smoke tests** | Identity domain + live-Postgres integration + RLS-denial tests cover the logic; a Next Route Handler harness and Playwright suite are their own setup. | Stage 7 hardening |
 
-## Verification (local Postgres 16 + dev Supabase) — 2026-09-04 (round 2)
+## Verification (local Postgres 16 + dev Supabase) — 2026-09-04 (round 3)
 
 ```
 format:check   OK
 lint           OK
 typecheck      0 errors (6 packages)
-test           88 pass, 0 skipped (local Postgres) ; 13/13 integration (Supabase, 0001–0013)
+test           88 pass, 0 skipped (local Postgres) ; 13/13 integration (Supabase, 0001–0014)
 build          both apps (Next 16.3.4, Turbopack)
 smoke          headless Chromium, prod nonce CSP — Admin + POS hydrate, 0 CSP violations
 audit          0 vulnerabilities (--omit=dev --audit-level=high, registry access)
-db:status      Supabase — 13 applied, 0 pending
+db:status      Supabase — 14 applied, 0 pending
 ```
