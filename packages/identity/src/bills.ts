@@ -5,8 +5,14 @@ import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 import { recordAudit, recordOutbox } from './audit';
 import { IdentityError } from './errors';
-import { businessDate } from './membership';
+import { businessDateString } from './membership';
 import { calculateBill, type CalcLineInput } from './bill-calc';
+import {
+  parseOfflineAuthBundle,
+  assertOfflineAuthCovers,
+  type DiscountPolicy,
+} from './offline-auth';
+import { identityTokenSecret } from '@jksh/config';
 import type { RequestMeta } from './admin-auth';
 
 function pad(n: number, w = 2): string {
@@ -27,11 +33,6 @@ async function loadOutlet(client: PoolClient, outletId: string): Promise<OutletR
   );
   if (!rows[0]) throw new IdentityError('not_found', 'Outlet not found');
   return rows[0];
-}
-
-function outletBusinessDate(timezone: string, now = new Date()): string {
-  const d = businessDate(now, timezone);
-  return `${String(d.year)}-${pad(d.month)}-${pad(d.day)}`;
 }
 
 interface SnapshotAddon {
@@ -61,15 +62,21 @@ async function loadMenuVersion(
   outletId: string,
   requestedVersion: string,
   offline: boolean,
-): Promise<{ versionId: string; version: string; items: Map<string, SnapshotItem> }> {
-  const cur = await client.query<{ id: string; version: string }>(
-    `select id, version::text from billing.outlet_menu_versions
+): Promise<{
+  versionId: string;
+  version: string;
+  checksum: string;
+  items: Map<string, SnapshotItem>;
+}> {
+  const cur = await client.query<{ id: string; version: string; checksum: string }>(
+    `select id, version::text, checksum from billing.outlet_menu_versions
       where outlet_id = $1 and is_current`,
     [outletId],
   );
   if (!cur.rows[0]) throw new IdentityError('conflict', 'This outlet has no published menu');
   let versionId = cur.rows[0].id;
   let version = cur.rows[0].version;
+  let checksum = cur.rows[0].checksum;
 
   if (requestedVersion !== version) {
     if (!offline) {
@@ -77,13 +84,15 @@ async function loadMenuVersion(
         details: { code: 'menu_version_stale', currentVersion: version },
       });
     }
-    const older = await client.query<{ id: string; version: string }>(
-      `select id, version::text from billing.outlet_menu_versions where outlet_id = $1 and version = $2`,
+    const older = await client.query<{ id: string; version: string; checksum: string }>(
+      `select id, version::text, checksum from billing.outlet_menu_versions
+        where outlet_id = $1 and version = $2`,
       [outletId, requestedVersion],
     );
     if (!older.rows[0]) throw new IdentityError('conflict', 'Unknown menu version');
     versionId = older.rows[0].id;
     version = older.rows[0].version;
+    checksum = older.rows[0].checksum;
   }
 
   const rows = await client.query<{
@@ -114,7 +123,7 @@ async function loadMenuVersion(
       addons: r.addons ?? [],
     });
   }
-  return { versionId, version, items };
+  return { versionId, version, checksum, items };
 }
 
 interface ResolvedLine {
@@ -184,27 +193,74 @@ function resolveLines(cmd: CreateBillCommand, menu: Map<string, SnapshotItem>): 
   });
 }
 
+/** Receipt prefix for a terminal (MVP: one active terminal per outlet, always
+ *  "T01" - kept a lookup rather than a constant so multi-terminal support only
+ *  needs to change `identity.terminals.receipt_prefix`, never this call site). */
+async function terminalPrefix(client: PoolClient, terminalId: string): Promise<string> {
+  const { rows } = await client.query<{ receipt_prefix: string }>(
+    `select receipt_prefix from identity.terminals where id = $1`,
+    [terminalId],
+  );
+  return rows[0]?.receipt_prefix ?? 'T01';
+}
+
+export function formatReceiptNumber(businessDateStr: string, prefix: string, seq: number): string {
+  return `${businessDateStr.replace(/-/g, '')}-${prefix}-${pad(seq, 6)}`;
+}
+
+/**
+ * The counter is keyed by (outlet, PREFIX, business date) rather than by
+ * terminal id: replacing a revoked terminal reissues the same prefix
+ * (`identity.terminals_outlet_prefix_active`), and the sequence must continue
+ * from where the old device left off rather than restart and collide with
+ * numbers it already printed (`docs/architecture/offline-billing.md`
+ * "Reinstall/re-enrollment cannot reuse unconfirmed receipt-number allocations").
+ */
 async function allocateReceiptNumber(
   client: PoolClient,
   outletId: string,
   terminalId: string,
   businessDateStr: string,
 ): Promise<string> {
-  const term = await client.query<{ receipt_prefix: string }>(
-    `select receipt_prefix from identity.terminals where id = $1`,
-    [terminalId],
-  );
-  const prefix = term.rows[0]?.receipt_prefix ?? 'T01';
+  const prefix = await terminalPrefix(client, terminalId);
   const seq = await client.query<{ last_seq: number }>(
-    `insert into billing.receipt_sequences (outlet_id, terminal_id, business_date, prefix, last_seq)
-     values ($1,$2,$3,$4,1)
-     on conflict (outlet_id, terminal_id, business_date)
-       do update set last_seq = billing.receipt_sequences.last_seq + 1
+    `insert into billing.receipt_sequences (outlet_id, prefix, business_date, last_seq, last_terminal_id)
+     values ($1,$2,$3,1,$4)
+     on conflict (outlet_id, prefix, business_date)
+       do update set last_seq = billing.receipt_sequences.last_seq + 1, last_terminal_id = $4
      returning last_seq`,
-    [outletId, terminalId, businessDateStr, prefix],
+    [outletId, prefix, businessDateStr, terminalId],
   );
   const n = seq.rows[0]?.last_seq ?? 1;
-  return `${businessDateStr.replace(/-/g, '')}-${prefix}-${pad(n, 6)}`;
+  return formatReceiptNumber(businessDateStr, prefix, n);
+}
+
+/** An offline device's pre-allocated receipt number must fall inside one of
+ *  this outlet's active receipt reservations - proving the block was really
+ *  reserved server-side rather than a client just formatting a plausible
+ *  string (`offline-billing.md` "insufficient receipt-number allocation
+ *  blocks new offline bills before a collision can occur"). */
+async function assertReceiptNumberReserved(
+  client: PoolClient,
+  outletId: string,
+  receiptNumber: string,
+): Promise<void> {
+  const match = /^(\d{8})-(T\d{2})-(\d{6})$/.exec(receiptNumber);
+  if (!match) throw new IdentityError('validation', 'Malformed receipt number');
+  const [, dateDigits, prefix, seqDigits] = match as unknown as [string, string, string, string];
+  const businessDateStr = `${dateDigits.slice(0, 4)}-${dateDigits.slice(4, 6)}-${dateDigits.slice(6, 8)}`;
+  const seq = Number(seqDigits);
+  const { rowCount } = await client.query(
+    `select 1 from billing.receipt_reservations
+      where outlet_id = $1 and prefix = $2 and business_date = $3
+        and start_seq <= $4 and end_seq >= $4`,
+    [outletId, prefix, businessDateStr, seq],
+  );
+  if (!rowCount) {
+    throw new IdentityError('conflict', 'Receipt number was not reserved for this outlet', {
+      details: { code: 'receipt_not_reserved' },
+    });
+  }
 }
 
 export async function createBill(
@@ -225,6 +281,13 @@ export async function createBill(
     ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
     outletId,
   });
+  if (cmd.billDiscount || cmd.lines.some((l) => l.lineDiscount)) {
+    ensureAllowed(actor, 'billing.discount.apply', {
+      organizationId: actor.scope.organizationId,
+      ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
+      outletId,
+    });
+  }
 
   return withActorContext(pool, contextForActor(actor), async (client) => {
     // 1. Idempotency: a retry returns the original bill untouched.
@@ -238,7 +301,7 @@ export async function createBill(
     if (outlet.status !== 'active') {
       throw new IdentityError('outlet_not_active', 'Outlet is not active');
     }
-    const today = outletBusinessDate(outlet.timezone);
+    const today = businessDateString(new Date(), outlet.timezone);
 
     // 2. Billing window: no open shift / cash session from an earlier day.
     const stale = await client.query(
@@ -279,6 +342,28 @@ export async function createBill(
     const menu = await loadMenuVersion(client, outletId, cmd.menuVersion, cmd.offline ?? false);
     const resolved = resolveLines(cmd, menu.items);
 
+    // 4a. Offline bills must present a valid, matching authorization bundle.
+    let discountCeiling: DiscountPolicy | null = null;
+    if (cmd.offline) {
+      if (!cmd.offlineAuthBundle) {
+        throw new IdentityError('offline_auth_invalid', 'Offline authorization is required');
+      }
+      const bundle = parseOfflineAuthBundle(identityTokenSecret(), cmd.offlineAuthBundle);
+      if (!bundle) {
+        throw new IdentityError('offline_auth_invalid', 'Offline authorization is not valid');
+      }
+      const covers = assertOfflineAuthCovers(bundle, {
+        outletId,
+        terminalId,
+        employeeId,
+        menuVersion: menu.version,
+        menuChecksum: menu.checksum,
+        terminalOccurredAt: cmd.terminalOccurredAt,
+      });
+      if (!covers.ok) throw new IdentityError('offline_auth_invalid', covers.reason);
+      discountCeiling = bundle.discountPolicy;
+    }
+
     const calc = calculateBill({
       paymentMethod: cmd.paymentMethod,
       lines: resolved.map((l) => l.calc),
@@ -291,11 +376,41 @@ export async function createBill(
       throw new IdentityError('validation', 'A payable bill needs a payment method');
     }
 
-    // 5. Receipt number (offline devices supply a pre-allocated one).
-    const receiptNumber =
-      (cmd.offline ?? false) && cmd.terminalReceiptNumber
-        ? cmd.terminalReceiptNumber
-        : await allocateReceiptNumber(client, outletId, terminalId, today);
+    // 4b. Offline discounts are capped by the bundle's policy (no live
+    // oversight is possible while disconnected).
+    if (discountCeiling) {
+      const maxLine = Number(discountCeiling.maxLineDiscountPercent);
+      const maxBill = Number(discountCeiling.maxBillDiscountPercent);
+      for (const l of calc.lines) {
+        if (
+          Number(l.baseTotal) > 0 &&
+          (Number(l.discount) / Number(l.baseTotal)) * 100 > maxLine + 1e-9
+        ) {
+          throw new IdentityError('conflict', 'Line discount exceeds the offline limit', {
+            details: { code: 'discount_ceiling_exceeded', maxLineDiscountPercent: maxLine },
+          });
+        }
+      }
+      if (
+        Number(calc.subtotal) > 0 &&
+        (Number(calc.discountTotal) / Number(calc.subtotal)) * 100 > maxBill + 1e-9
+      ) {
+        throw new IdentityError('conflict', 'Bill discount exceeds the offline limit', {
+          details: { code: 'discount_ceiling_exceeded', maxBillDiscountPercent: maxBill },
+        });
+      }
+    }
+
+    // 5. Receipt number. Offline devices supply one pre-allocated from their
+    // own reserved block; the server confirms it actually falls inside an
+    // active reservation for this outlet before trusting it.
+    let receiptNumber: string;
+    if (cmd.offline && cmd.terminalReceiptNumber) {
+      await assertReceiptNumberReserved(client, outletId, cmd.terminalReceiptNumber);
+      receiptNumber = cmd.terminalReceiptNumber;
+    } else {
+      receiptNumber = await allocateReceiptNumber(client, outletId, terminalId, today);
+    }
 
     // 6. Atomic write.
     const empName = await client.query<{ full_name: string }>(
@@ -485,7 +600,7 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
     id: string;
     outlet_id: string;
     receipt_number: string;
-    business_date: Date;
+    business_date: string;
     menu_version: string;
     employee_name: string;
     customer_name: string | null;
@@ -500,7 +615,12 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
     is_offline: boolean;
     committed_at: Date;
   }>(
-    `select id, outlet_id, receipt_number, business_date, menu_version::text as menu_version,
+    // business_date is cast to text: a `date` column parsed as a JS Date and
+    // then re-serialized with toISOString() shifts a day backward whenever
+    // the server process runs in a timezone ahead of UTC (dates carry no
+    // time-of-day to convert).
+    `select id, outlet_id, receipt_number, business_date::text as business_date,
+            menu_version::text as menu_version,
             employee_name, customer_name, customer_mobile, subtotal, discount_total,
             pre_round_total, round_adjustment, final_total, payment_method, is_complimentary,
             is_offline, committed_at
@@ -547,7 +667,7 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
     id: row.id,
     outletId: row.outlet_id,
     receiptNumber: row.receipt_number,
-    businessDate: row.business_date.toISOString().slice(0, 10),
+    businessDate: row.business_date,
     menuVersion: row.menu_version,
     employeeName: row.employee_name,
     customerName: row.customer_name,
@@ -621,14 +741,14 @@ export async function listBills(
     const { rows } = await client.query<{
       id: string;
       receipt_number: string;
-      business_date: Date;
+      business_date: string;
       final_total: string;
       payment_method: string | null;
       is_complimentary: boolean;
       committed_at: Date;
     }>(
-      `select id, receipt_number, business_date, final_total, payment_method, is_complimentary,
-              committed_at
+      `select id, receipt_number, business_date::text as business_date, final_total,
+              payment_method, is_complimentary, committed_at
          from billing.bills where ${where}
         order by committed_at desc limit $${String(params.length)}`,
       params,
@@ -638,7 +758,7 @@ export async function listBills(
       bills: page.map((r) => ({
         id: r.id,
         receiptNumber: r.receipt_number,
-        businessDate: r.business_date.toISOString().slice(0, 10),
+        businessDate: r.business_date,
         finalTotal: r.final_total,
         paymentMethod: r.payment_method,
         isComplimentary: r.is_complimentary,

@@ -6,6 +6,7 @@ export * from './employee';
 export * from './events';
 export * from './franchise';
 export * from './identity';
+export * from './offline';
 export * from './outlet';
 export * from './role-capabilities';
 export * from './session';

@@ -16,6 +16,8 @@ export type IdentityErrorCode =
   | 'activation_code_expired'
   | 'activation_code_consumed'
   | 'activation_throttled'
+  | 'offline_auth_invalid'
+  | 'sync_rate_limited'
   | 'outlet_not_active'
   | 'outlet_capacity'
   | 'employee_exists'
@@ -57,6 +59,7 @@ function defaultStatus(code: IdentityErrorCode): number {
     case 'terminal_revoked':
     case 'employee_inactive':
     case 'outlet_not_active':
+    case 'offline_auth_invalid':
       return 403;
     case 'not_found':
     case 'terminal_not_found':
@@ -69,6 +72,7 @@ function defaultStatus(code: IdentityErrorCode): number {
       return 409;
     case 'pin_locked':
     case 'activation_throttled':
+    case 'sync_rate_limited':
       return 429;
     default:
       return 400;

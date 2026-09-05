@@ -14,12 +14,8 @@ import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 import { recordAudit } from './audit';
 import { IdentityError } from './errors';
-import { businessDate } from './membership';
+import { businessDateString } from './membership';
 import type { RequestMeta } from './admin-auth';
-
-function pad(n: number): string {
-  return String(n).padStart(2, '0');
-}
 
 async function outletContext(
   client: PoolClient,
@@ -45,11 +41,6 @@ async function outletContext(
     timezone: rows[0].timezone,
     status: rows[0].status,
   };
-}
-
-function outletBusinessDate(timezone: string, now = new Date()): string {
-  const d = businessDate(now, timezone);
-  return `${String(d.year)}-${pad(d.month)}-${pad(d.day)}`;
 }
 
 /** The employee id an operator acts as; admins have none. */
@@ -100,7 +91,7 @@ export async function openCashSession(
       throw new IdentityError('conflict', 'A cash session is already open for this outlet');
     }
     const id = randomUUID();
-    const bday = outletBusinessDate(outlet.timezone);
+    const bday = businessDateString(new Date(), outlet.timezone);
     await client.query(
       `insert into billing.cash_sessions
          (id, organization_id, franchise_id, outlet_id, business_date, opened_by_employee_id,
@@ -222,7 +213,7 @@ async function loadCashSession(
     id: string;
     outlet_id: string;
     status: CashSessionSummary['status'];
-    business_date: Date;
+    business_date: string;
     opened_by_employee_id: string;
     opened_by_name: string;
     opened_at: Date;
@@ -235,9 +226,10 @@ async function loadCashSession(
     variance: string | null;
     variance_reason: string | null;
   }>(
-    `select id, outlet_id, status, business_date, opened_by_employee_id, opened_by_name,
-            opened_at, opening_cash, closed_by_employee_id, closed_by_name, closed_at,
-            counted_cash, expected_cash, variance, variance_reason
+    // business_date is cast to text - see the note in bills.ts loadBill.
+    `select id, outlet_id, status, business_date::text as business_date, opened_by_employee_id,
+            opened_by_name, opened_at, opening_cash, closed_by_employee_id, closed_by_name,
+            closed_at, counted_cash, expected_cash, variance, variance_reason
        from billing.cash_sessions where id = $1`,
     [cashSessionId],
   );
@@ -247,7 +239,7 @@ async function loadCashSession(
     id: r.id,
     outletId: r.outlet_id,
     status: r.status,
-    businessDate: r.business_date.toISOString().slice(0, 10),
+    businessDate: r.business_date,
     openedByEmployeeId: r.opened_by_employee_id,
     openedByName: r.opened_by_name,
     openedAt: r.opened_at.toISOString(),
@@ -303,7 +295,7 @@ export async function startShift(
     if (open.rows[0]) return loadShift(client, open.rows[0].id);
 
     const id = randomUUID();
-    const bday = outletBusinessDate(outlet.timezone);
+    const bday = businessDateString(new Date(), outlet.timezone);
     await client.query(
       `insert into billing.employee_shifts
          (id, organization_id, franchise_id, outlet_id, employee_id, employee_name, terminal_id,
@@ -436,14 +428,15 @@ async function loadShift(client: PoolClient, shiftId: string): Promise<ShiftSumm
     employee_id: string;
     employee_name: string;
     status: ShiftSummary['status'];
-    business_date: Date;
+    business_date: string;
     started_at: Date;
     ended_at: Date | null;
     bill_count: number;
     force_close_reason: string | null;
   }>(
-    `select id, outlet_id, employee_id, employee_name, status, business_date, started_at,
-            ended_at, bill_count, force_close_reason
+    // business_date is cast to text - see the note in bills.ts loadBill.
+    `select id, outlet_id, employee_id, employee_name, status, business_date::text as business_date,
+            started_at, ended_at, bill_count, force_close_reason
        from billing.employee_shifts where id = $1`,
     [shiftId],
   );
@@ -455,7 +448,7 @@ async function loadShift(client: PoolClient, shiftId: string): Promise<ShiftSumm
     employeeId: r.employee_id,
     employeeName: r.employee_name,
     status: r.status,
-    businessDate: r.business_date.toISOString().slice(0, 10),
+    businessDate: r.business_date,
     startedAt: r.started_at.toISOString(),
     endedAt: r.ended_at ? r.ended_at.toISOString() : null,
     billCount: r.bill_count,
@@ -495,7 +488,7 @@ export async function outletBillingWindow(
 ): Promise<BillingWindow> {
   return withActorContext(pool, contextForActor(actor), async (client) => {
     const outlet = await outletContext(client, outletId);
-    const today = outletBusinessDate(outlet.timezone);
+    const today = businessDateString(new Date(), outlet.timezone);
     const staleCash = await client.query(
       `select 1 from billing.cash_sessions
         where outlet_id = $1 and status = 'open' and business_date < $2 limit 1`,

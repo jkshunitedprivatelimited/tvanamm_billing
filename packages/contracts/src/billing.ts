@@ -29,7 +29,7 @@ export const billLineInputSchema = z.object({
 });
 export type BillLineInput = z.infer<typeof billLineInputSchema>;
 
-export const createBillCommandSchema = z.object({
+const createBillCommandShape = z.object({
   idempotencyKey: z.string().min(16).max(200),
   /** the published outlet menu version the cart was priced against */
   menuVersion: z.string().regex(/^\d+$/),
@@ -51,8 +51,15 @@ export const createBillCommandSchema = z.object({
   offline: z.boolean().optional(),
   /** offline only: a receipt number pre-allocated from the device's block */
   terminalReceiptNumber: receiptNumberSchema.optional(),
+  /** offline only: the signed bundle issued while the terminal was last online */
+  offlineAuthBundle: z.string().min(1).optional(),
 });
-export type CreateBillCommand = z.infer<typeof createBillCommandSchema>;
+
+export const createBillCommandSchema = createBillCommandShape.refine(
+  (v) => !v.offline || (!!v.terminalReceiptNumber && !!v.offlineAuthBundle),
+  { message: 'An offline bill needs a pre-allocated receipt number and an offline authorization' },
+);
+export type CreateBillCommand = z.infer<typeof createBillCommandShape>;
 
 export const billLineViewSchema = z.object({
   lineNo: z.int(),

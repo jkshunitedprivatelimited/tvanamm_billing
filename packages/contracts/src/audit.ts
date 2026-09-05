@@ -58,6 +58,10 @@ export const auditActionSchema = z.enum([
   'cash_session.force_closed',
   'sale.created',
   'sale.refunded',
+  'offline_auth.issued',
+  'receipt_block.reserved',
+  'receipt_numbers.voided',
+  'sync.batch_processed',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 

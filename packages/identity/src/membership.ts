@@ -72,3 +72,10 @@ export function businessDate(now: Date, timeZone: string): BusinessDate {
 export function businessDateEquals(a: BusinessDate, b: BusinessDate): boolean {
   return a.year === b.year && a.month === b.month && a.day === b.day;
 }
+
+/** `businessDate` formatted as `YYYY-MM-DD` for a `date` column / API string. */
+export function businessDateString(now: Date, timeZone: string): string {
+  const d = businessDate(now, timeZone);
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${String(d.year)}-${pad(d.month)}-${pad(d.day)}`;
+}

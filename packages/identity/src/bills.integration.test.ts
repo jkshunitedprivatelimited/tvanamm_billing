@@ -226,6 +226,11 @@ describe.skipIf(!RUN)('Billing V1 Stage 3 - bills', () => {
       terminalOccurredAt: new Date().toISOString(),
     });
     expect(bill.receiptNumber).toMatch(/^\d{8}-T\d{2}-\d{6}$/);
+    // businessDate is read back from a `date` column; on a server running
+    // ahead of UTC (e.g. IST) a naive Date->toISOString() reformat shifts it
+    // a day early. It must match the date already embedded in the receipt
+    // number, which was formatted directly from the same IANA-timezone string.
+    expect(bill.businessDate.replace(/-/g, '')).toBe(bill.receiptNumber.slice(0, 8));
     expect(bill.subtotal).toBe('55.50'); // 15*2 + 25.50
     expect(bill.preRoundTotal).toBe('55.50');
     expect(bill.finalTotal).toBe('56.00'); // Cash round up

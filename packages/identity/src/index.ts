@@ -149,8 +149,18 @@ export {
   type CalcLineInput,
   type CalcDiscount,
 } from './bill-calc';
-export { createBill, getBill, listBills, type BillListRow } from './bills';
+export { createBill, getBill, listBills, formatReceiptNumber, type BillListRow } from './bills';
 export { recordOutbox, type OutboxInput } from './audit';
+export {
+  mintOfflineAuthBundle,
+  parseOfflineAuthBundle,
+  assertOfflineAuthCovers,
+  OFFLINE_AUTH_HOURS,
+  DEFAULT_OFFLINE_DISCOUNT_POLICY,
+  type OfflineAuthBundle,
+  type DiscountPolicy,
+} from './offline-auth';
+export { issueOfflineAuth, reserveReceiptBlock, syncOfflineBills } from './offline';
 export {
   pinLogin,
   loadOperatorContext,
