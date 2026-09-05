@@ -123,16 +123,20 @@ export async function openCashSession(
   });
 }
 
-/** Expected cash = opening + Cash sales for the session. Cash refunds
- *  (Stage 5) will subtract here once billing.refunds exists. */
+/** Expected cash = opening + Cash sales for the session - Cash refunds paid
+ *  out of the session. Scalar subqueries (not joins) so summing one table
+ *  never fans out rows from the other. */
 async function expectedCashFor(client: PoolClient, cashSessionId: string): Promise<string> {
   const { rows } = await client.query<{ expected: string }>(
-    `select cs.opening_cash + coalesce(sum(p.amount) filter (where p.method = 'cash'), 0) as expected
+    `select cs.opening_cash
+            + coalesce((select sum(p.amount) from billing.payments p
+                          join billing.bills b on b.id = p.bill_id
+                         where b.cash_session_id = cs.id and p.method = 'cash'), 0)
+            - coalesce((select sum(r.amount) from billing.refunds r
+                         where r.cash_session_id = cs.id and r.payout_method = 'cash'), 0)
+              as expected
        from billing.cash_sessions cs
-       left join billing.bills b on b.cash_session_id = cs.id
-       left join billing.payments p on p.bill_id = b.id
-      where cs.id = $1
-      group by cs.opening_cash`,
+      where cs.id = $1`,
     [cashSessionId],
   );
   return rows[0]?.expected ?? '0.00';

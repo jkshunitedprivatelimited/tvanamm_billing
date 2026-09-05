@@ -72,6 +72,7 @@ export const billLineViewSchema = z.object({
   discount: moneySchema,
   finalTotal: moneySchema,
   note: z.string().nullable(),
+  refundedQuantity: z.int(),
   addons: z.array(
     z.object({
       addonId: z.uuid(),
@@ -82,6 +83,8 @@ export const billLineViewSchema = z.object({
     }),
   ),
 });
+
+export const billStatusSchema = z.enum(['completed', 'partially_refunded', 'fully_refunded']);
 
 export const billViewSchema = z.object({
   id: z.uuid(),
@@ -102,6 +105,8 @@ export const billViewSchema = z.object({
   isComplimentary: z.boolean(),
   isOffline: z.boolean(),
   committedAt: z.string(),
+  status: billStatusSchema,
+  remainingRefundable: moneySchema,
   lines: z.array(billLineViewSchema),
 });
 export type BillView = z.infer<typeof billViewSchema>;
@@ -118,6 +123,60 @@ export const createRefundCommandSchema = z.object({
   payoutMethod: paymentMethodSchema,
   reason: z.string().trim().min(1).max(500),
   payoutReference: z.string().trim().max(200).optional(),
-  lines: z.array(refundLineInputSchema).max(200).default([]),
+  /** required (and only used) when kind = 'partial' */
+  lines: z.array(refundLineInputSchema).max(200).optional(),
 });
 export type CreateRefundCommand = z.infer<typeof createRefundCommandSchema>;
+
+export const refundViewSchema = z.object({
+  id: z.uuid(),
+  billId: z.uuid(),
+  kind: refundKindSchema,
+  amount: moneySchema,
+  payoutMethod: paymentMethodSchema,
+  payoutReference: z.string().nullable(),
+  reason: z.string(),
+  actorName: z.string(),
+  createdAt: z.string(),
+  lines: z.array(z.object({ billLineId: z.uuid(), quantity: z.int(), amount: moneySchema })),
+});
+export type RefundView = z.infer<typeof refundViewSchema>;
+
+export const printAttemptCommandSchema = z.object({
+  result: z.enum(['success', 'failed']),
+  reason: z.string().trim().max(500).optional(),
+});
+export type PrintAttemptCommand = z.infer<typeof printAttemptCommandSchema>;
+
+/** Customer-facing receipt data only - no employee name, no discount/refund
+ *  reasons, no internal ids, no GST rate/CGST/SGST breakout
+ *  (`receipt-printing.md` "Confirmed Customer Receipt Content"). */
+export const receiptSnapshotSchema = z.object({
+  outletName: z.string(),
+  outletAddress: z.string(),
+  outletPhone: z.string().nullable(),
+  gstin: z.string().nullable(),
+  receiptNumber: receiptNumberSchema,
+  businessDate: z.string(),
+  committedAt: z.string(),
+  lines: z.array(
+    z.object({
+      itemName: z.string(),
+      quantity: z.int(),
+      unitPrice: moneySchema,
+      discount: moneySchema,
+      finalTotal: moneySchema,
+      note: z.string().nullable(),
+      addons: z.array(
+        z.object({ addonName: z.string(), quantity: z.int(), unitPrice: moneySchema }),
+      ),
+    }),
+  ),
+  subtotal: moneySchema,
+  discountTotal: moneySchema,
+  roundAdjustment: moneySchema,
+  finalTotal: moneySchema,
+  paymentMethod: paymentMethodSchema.nullable(),
+  isComplimentary: z.boolean(),
+});
+export type ReceiptSnapshot = z.infer<typeof receiptSnapshotSchema>;

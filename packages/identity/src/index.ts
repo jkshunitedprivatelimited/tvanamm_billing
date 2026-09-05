@@ -161,6 +161,8 @@ export {
   type DiscountPolicy,
 } from './offline-auth';
 export { issueOfflineAuth, reserveReceiptBlock, syncOfflineBills } from './offline';
+export { createRefund, listRefunds } from './refunds';
+export { recordPrintAttempt, getReceiptSnapshot } from './receipts';
 export {
   pinLogin,
   loadOperatorContext,

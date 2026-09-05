@@ -663,6 +663,34 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
     `select reference from billing.payments where bill_id = $1`,
     [billId],
   );
+  const refundedByLine = await client.query<{ bill_line_id: string; qty: string }>(
+    `select bl.id as bill_line_id, coalesce(sum(rl.quantity), 0) as qty
+       from billing.bill_lines bl
+       left join billing.refund_lines rl on rl.bill_line_id = bl.id
+      where bl.bill_id = $1
+      group by bl.id`,
+    [billId],
+  );
+  const refundedQtyById = new Map(refundedByLine.rows.map((r) => [r.bill_line_id, Number(r.qty)]));
+  const refundedTotal = await client.query<{ total: string }>(
+    `select coalesce(sum(amount), 0) as total from billing.refunds where bill_id = $1`,
+    [billId],
+  );
+  const refundedSoFar = Number(refundedTotal.rows[0]?.total ?? '0');
+  const remainingRefundablePaise = Math.max(
+    Math.round(Number(row.final_total) * 100) - Math.round(refundedSoFar * 100),
+    0,
+  );
+  const remainingRefundable = `${String(Math.floor(remainingRefundablePaise / 100))}.${String(remainingRefundablePaise % 100).padStart(2, '0')}`;
+  // A zero-total complimentary bill has remainingRefundable = 0 too, but that
+  // is not the same as "fully refunded" - check whether anything was actually
+  // refunded first.
+  const anyRefunded = refundedSoFar > 0;
+  const status: BillView['status'] = !anyRefunded
+    ? 'completed'
+    : remainingRefundablePaise === 0
+      ? 'fully_refunded'
+      : 'partially_refunded';
   return {
     id: row.id,
     outletId: row.outlet_id,
@@ -682,6 +710,8 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
     isComplimentary: row.is_complimentary,
     isOffline: row.is_offline,
     committedAt: row.committed_at.toISOString(),
+    status,
+    remainingRefundable,
     lines: lines.rows.map((l) => ({
       lineNo: l.line_no,
       catalogItemId: l.catalog_item_id,
@@ -693,6 +723,7 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
       discount: l.discount,
       finalTotal: l.final_total,
       note: l.note,
+      refundedQuantity: refundedQtyById.get(l.id) ?? 0,
       addons: addons.rows
         .filter((a) => a.bill_line_id === l.id)
         .map((a) => ({
@@ -729,8 +760,19 @@ export async function listBills(
   return withActorContext(pool, contextForActor(actor), async (client) => {
     const params: unknown[] = [opts.outletId];
     let where = `outlet_id = $1`;
-    if (opts.businessDate) {
-      params.push(opts.businessDate);
+    // A Store Employee's history is always the current outlet-local business
+    // date, regardless of what was requested - never a prior date
+    // (`billing-history-refunds.md` "cannot browse previous business dates").
+    let businessDate = opts.businessDate;
+    if (actor.kind === 'operator') {
+      const outlet = await client.query<{ timezone: string }>(
+        `select timezone from billing.outlets where id = $1`,
+        [opts.outletId],
+      );
+      businessDate = businessDateString(new Date(), outlet.rows[0]?.timezone ?? 'Asia/Kolkata');
+    }
+    if (businessDate) {
+      params.push(businessDate);
       where += ` and business_date = $${String(params.length)}`;
     }
     if (opts.cursor) {

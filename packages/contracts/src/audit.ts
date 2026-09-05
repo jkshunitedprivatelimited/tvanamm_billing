@@ -62,6 +62,7 @@ export const auditActionSchema = z.enum([
   'receipt_block.reserved',
   'receipt_numbers.voided',
   'sync.batch_processed',
+  'bill.print_attempted',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 
