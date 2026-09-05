@@ -11,7 +11,7 @@ import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth';
 import { issueActivationCode, registerTerminal } from './terminal';
 import { createEmployee } from './employee';
 import { pinLogin, loadOperatorContext } from './store-auth';
-import { createCatalogItem } from './catalog';
+import { createCatalogItem, pauseOutletItem } from './catalog';
 import { createAndApplyPublication, getPublishedMenu } from './menu-publish';
 import { openCashSession, closeCashSession, startShift } from './shifts';
 import { createBill, getBill } from './bills';
@@ -369,5 +369,58 @@ describe.skipIf(!RUN)('Billing V1 Stage 3 - bills', () => {
     expect(fetched.lines).toHaveLength(1);
     expect(fetched.lines[0]!.quantity).toBe(3);
     expect(fetched.finalTotal).toBe('76.50');
+  }, 30_000);
+
+  it('a paused item blocks an online sale immediately, without a republish', async () => {
+    const op = await operator();
+    await startShift(pool, op, {});
+
+    // A Store Employee may pause at their own outlet ...
+    await pauseOutletItem(pool, op, {
+      outletId,
+      catalogItemId: itemChaiId,
+      isAvailable: false,
+      availabilityNote: 'Out of milk',
+    });
+    await expect(
+      createBill(pool, op, {
+        idempotencyKey: `idem-paused-${S}-0008`,
+        menuVersion,
+        paymentMethod: 'cash',
+        lines: [{ catalogItemId: itemChaiId, quantity: 1, addons: [] }],
+        terminalOccurredAt: new Date().toISOString(),
+      }),
+    ).rejects.toThrow(/out of stock/i);
+
+    // ... but never for a different outlet, even with a well-formed command.
+    const otherOutlet = randomUUID();
+    await expect(
+      pauseOutletItem(pool, op, {
+        outletId: otherOutlet,
+        catalogItemId: itemChaiId,
+        isAvailable: false,
+      }),
+    ).rejects.toThrow(/own outlet/i);
+
+    // The published snapshot itself never changes - only the live override.
+    const snapshot = await getPublishedMenu(pool, await adminActor(adminPhone), outletId);
+    expect(snapshot?.version).toBe(menuVersion);
+    expect(snapshot?.items.find((i) => i.catalogItemId === itemChaiId)?.isAvailable).toBe(false);
+
+    // Unpausing restores the sale immediately.
+    await pauseOutletItem(pool, op, {
+      outletId,
+      catalogItemId: itemChaiId,
+      isAvailable: true,
+      availabilityNote: null,
+    });
+    const restored = await createBill(pool, op, {
+      idempotencyKey: `idem-unpaused-${S}-0009`,
+      menuVersion,
+      paymentMethod: 'cash',
+      lines: [{ catalogItemId: itemChaiId, quantity: 1, addons: [] }],
+      terminalOccurredAt: new Date().toISOString(),
+    });
+    expect(restored.finalTotal).not.toBe('0.00');
   }, 30_000);
 });

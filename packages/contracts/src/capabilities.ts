@@ -25,6 +25,7 @@ export const capabilitySchema = z.enum([
   'catalog.menu.publish',
   'catalog.menu.manage.franchise',
   'catalog.price.configure.outlet',
+  'catalog.item.pause',
 
   // Billing (Stage 3+)
   'billing.sale.create',

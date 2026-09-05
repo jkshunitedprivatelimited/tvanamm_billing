@@ -23,6 +23,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.outlet.manage',
     'catalog.menu.manage.master',
     'catalog.menu.publish',
+    'catalog.item.pause',
     'billing.sale.read.all_stores',
     'billing.report.store',
     'billing.report.global',
@@ -45,6 +46,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.outlet.manage',
     'catalog.menu.manage.franchise',
     'catalog.price.configure.outlet',
+    'catalog.item.pause',
     'billing.sale.create',
     'billing.sale.read.own_store',
     'billing.discount.apply',
@@ -57,6 +59,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.report.store',
   ],
   store_employee: [
+    'catalog.item.pause',
     'billing.sale.create',
     'billing.sale.read.own_store',
     'billing.discount.apply',

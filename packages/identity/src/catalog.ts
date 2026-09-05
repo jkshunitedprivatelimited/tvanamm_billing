@@ -7,6 +7,7 @@ import type {
   CreateCatalogItemCommand,
   UpdateCatalogItemCommand,
   UpsertOutletItemOverrideCommand,
+  PauseOutletItemCommand,
 } from '@jksh/contracts';
 import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
@@ -344,6 +345,102 @@ export async function upsertOutletItemOverride(
       metadata: { itemId: cmd.catalogItemId, fields: definedKeys(cmd) },
     });
     return { id };
+  });
+}
+
+/**
+ * The one catalog write a Store Employee may make: pause/unpause an item for
+ * sale at their own active outlet, without touching name, price, or GST
+ * (`menu-publishing.md` "Employee active-outlet pause"). A Franchise Owner
+ * pauses within an owned outlet; Central pauses any outlet.
+ */
+export async function pauseOutletItem(
+  pool: Pool,
+  actor: ActorContext,
+  cmd: PauseOutletItemCommand,
+  meta: RequestMeta = {},
+): Promise<void> {
+  if (actor.kind === 'operator' && actor.outletId !== cmd.outletId) {
+    throw new IdentityError(
+      'forbidden',
+      'Store Employees may only pause items at their own outlet',
+    );
+  }
+  ensureAllowed(actor, 'catalog.item.pause', {
+    organizationId: actor.scope.organizationId,
+    ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
+    outletId: cmd.outletId,
+  });
+  return withActorContext(pool, contextForActor(actor), async (client) => {
+    // Plain read: a master item is visible to any actor under
+    // `catalog_items_read`, but the row-security write policy (which a lock
+    // would also gate) is narrower and would hide it from a Store Employee.
+    // No lock is needed here - the branch below only ever writes when
+    // owner_scope = 'outlet', a case the write policy already allows.
+    const item = await client.query<{ owner_scope: string; outlet_id: string | null }>(
+      `select owner_scope, outlet_id from billing.catalog_items where id = $1`,
+      [cmd.catalogItemId],
+    );
+    if (!item.rows[0]) throw new IdentityError('not_found', 'Item not found');
+    const { owner_scope: ownerScope, outlet_id: itemOutletId } = item.rows[0];
+
+    if (ownerScope === 'outlet') {
+      if (itemOutletId !== cmd.outletId) {
+        throw new IdentityError('validation', 'Item belongs to a different outlet');
+      }
+      await client.query(
+        `update billing.catalog_items set is_available = $2, availability_note = $3 where id = $1`,
+        [cmd.catalogItemId, cmd.isAvailable, cmd.availabilityNote ?? null],
+      );
+    } else {
+      const outlet = await client.query(`select 1 from billing.outlets where id = $1`, [
+        cmd.outletId,
+      ]);
+      if (outlet.rowCount === 0) throw new IdentityError('not_found', 'Outlet not found');
+      const existing = await client.query<{ id: string }>(
+        `select id from billing.outlet_item_overrides
+          where outlet_id = $1 and catalog_item_id = $2 for update`,
+        [cmd.outletId, cmd.catalogItemId],
+      );
+      if (existing.rows[0]) {
+        await client.query(
+          `update billing.outlet_item_overrides
+              set is_available = $2, availability_note = $3, updated_by = $4
+            where id = $1`,
+          [
+            existing.rows[0].id,
+            cmd.isAvailable,
+            cmd.availabilityNote ?? null,
+            actor.accountId ?? null,
+          ],
+        );
+      } else {
+        await client.query(
+          `insert into billing.outlet_item_overrides
+             (id, outlet_id, catalog_item_id, is_available, availability_note, updated_by)
+           values ($1,$2,$3,$4,$5,$6)`,
+          [
+            randomUUID(),
+            cmd.outletId,
+            cmd.catalogItemId,
+            cmd.isAvailable,
+            cmd.availabilityNote ?? null,
+            actor.accountId ?? null,
+          ],
+        );
+      }
+    }
+
+    await recordAudit(client, {
+      action: 'catalog.item_paused',
+      result: 'success',
+      actorAccountId: actor.accountId,
+      actorEmployeeId: actor.employeeId,
+      organizationId: actor.scope.organizationId,
+      outletId: cmd.outletId,
+      correlationId: meta.correlationId ?? randomUUID(),
+      metadata: { itemId: cmd.catalogItemId, isAvailable: cmd.isAvailable },
+    });
   });
 }
 

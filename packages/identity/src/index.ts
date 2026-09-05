@@ -61,6 +61,7 @@ export {
   ACTIVATION_LOCKOUT_POLICY,
 } from './activation-attempts';
 export * from './ids';
+export { checkDatabaseHealth } from './health';
 export {
   mintTerminalCredential,
   parseTerminalCredential,
@@ -118,6 +119,7 @@ export {
   createCatalogItem,
   updateCatalogItem,
   upsertOutletItemOverride,
+  pauseOutletItem,
   listMasterMenu,
   type MasterMenuView,
 } from './catalog';

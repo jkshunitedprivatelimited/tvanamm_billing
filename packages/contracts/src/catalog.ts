@@ -86,6 +86,18 @@ export const upsertOutletItemOverrideCommandSchema = z
   );
 export type UpsertOutletItemOverrideCommand = z.infer<typeof upsertOutletItemOverrideCommandSchema>;
 
+/** A narrow "pause/unpause for sale" toggle - the one catalog write a Store
+ *  Employee may make, scoped to their own active outlet
+ *  (`menu-publishing.md` "Employee active-outlet pause"). Never touches name,
+ *  price, or GST. */
+export const pauseOutletItemCommandSchema = z.object({
+  outletId: z.uuid(),
+  catalogItemId: z.uuid(),
+  isAvailable: z.boolean(),
+  availabilityNote: z.string().trim().max(500).nullable().optional(),
+});
+export type PauseOutletItemCommand = z.infer<typeof pauseOutletItemCommandSchema>;
+
 export const OVERRIDABLE_FIELDS = [
   'name',
   'description',

@@ -652,6 +652,29 @@ export async function getPublishedMenu(
         order by category_order, item_name`,
       [v.rows[0].id],
     );
+    // Availability is the one field a pause changes without a republish
+    // (`menu-publishing.md` "Employee active-outlet pause"). Every other
+    // field stays frozen at the published snapshot; only availability is
+    // overlaid from the live row so a pause takes effect immediately.
+    const itemIds = items.rows.map((r) => r.catalog_item_id);
+    const live =
+      itemIds.length === 0
+        ? { rows: [] }
+        : await client.query<{
+            catalog_item_id: string;
+            is_available: boolean;
+            availability_note: string | null;
+          }>(
+            `select ci.id as catalog_item_id,
+                    coalesce(o.is_available, ci.is_available) as is_available,
+                    coalesce(o.availability_note, ci.availability_note) as availability_note
+               from billing.catalog_items ci
+               left join billing.outlet_item_overrides o
+                 on o.catalog_item_id = ci.id and o.outlet_id = $1
+              where ci.id = any($2::uuid[])`,
+            [outletId, itemIds],
+          );
+    const liveByItem = new Map(live.rows.map((r) => [r.catalog_item_id, r]));
     return {
       outletId,
       version: v.rows[0].version,
@@ -667,8 +690,9 @@ export async function getPublishedMenu(
         imageUrl: r.image_url,
         gstRate: r.gst_rate,
         price: r.price,
-        isAvailable: r.is_available,
-        availabilityNote: r.availability_note,
+        isAvailable: liveByItem.get(r.catalog_item_id)?.is_available ?? r.is_available,
+        availabilityNote:
+          liveByItem.get(r.catalog_item_id)?.availability_note ?? r.availability_note,
         offlineSaleAllowed: r.offline_sale_allowed,
         stockRecipeId: r.stock_recipe_id,
         stockRecipeVersion: r.stock_recipe_version,

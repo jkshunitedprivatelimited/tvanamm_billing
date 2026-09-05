@@ -110,6 +110,25 @@ async function loadMenuVersion(
        from billing.outlet_menu_version_items where outlet_menu_version_id = $1`,
     [versionId],
   );
+  // A pause (`catalog.item.pause`) is a live override, never a republish - an
+  // online sale must honor it immediately. An offline sale trusts exactly the
+  // signed snapshot it was authorized against instead
+  // (`offline-billing.md` "Menu changes do not invalidate already-created
+  // offline bills if their signed snapshot was valid").
+  const liveAvailability = offline
+    ? new Map<string, { is_available: boolean }>()
+    : new Map(
+        (
+          await client.query<{ catalog_item_id: string; is_available: boolean }>(
+            `select ci.id as catalog_item_id, coalesce(o.is_available, ci.is_available) as is_available
+               from billing.catalog_items ci
+               left join billing.outlet_item_overrides o
+                 on o.catalog_item_id = ci.id and o.outlet_id = $1
+              where ci.id = any($2::uuid[])`,
+            [outletId, rows.rows.map((r) => r.catalog_item_id)],
+          )
+        ).rows.map((r) => [r.catalog_item_id, r]),
+      );
   const items = new Map<string, SnapshotItem>();
   for (const r of rows.rows) {
     items.set(r.catalog_item_id, {
@@ -117,7 +136,7 @@ async function loadMenuVersion(
       itemName: r.item_name,
       price: r.price,
       gstRate: r.gst_rate,
-      isAvailable: r.is_available,
+      isAvailable: liveAvailability.get(r.catalog_item_id)?.is_available ?? r.is_available,
       stockRecipeId: r.stock_recipe_id,
       stockRecipeVersion: r.stock_recipe_version,
       addons: r.addons ?? [],
