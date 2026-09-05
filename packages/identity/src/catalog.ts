@@ -16,7 +16,7 @@ import { IdentityError } from './errors';
 import type { RequestMeta } from './admin-auth';
 
 /** Central manages master rows; a Franchise Owner manages private outlet rows. */
-function assertCatalogWrite(actor: ActorContext, outletId: string | undefined): void {
+export function assertCatalogWrite(actor: ActorContext, outletId: string | undefined): void {
   if (outletId) {
     ensureAllowed(actor, 'catalog.menu.manage.franchise', {
       organizationId: actor.scope.organizationId,
@@ -30,7 +30,11 @@ function assertCatalogWrite(actor: ActorContext, outletId: string | undefined): 
   }
 }
 
-async function assertBrandInOrg(client: PoolClient, brandId: string, orgId: string): Promise<void> {
+export async function assertBrandInOrg(
+  client: PoolClient,
+  brandId: string,
+  orgId: string,
+): Promise<void> {
   const { rows } = await client.query<{ organization_id: string }>(
     `select organization_id from billing.brands where id = $1`,
     [brandId],

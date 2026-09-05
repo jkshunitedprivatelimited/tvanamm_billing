@@ -25,6 +25,13 @@ export interface CalcLineInput {
   quantity: number;
   addons: CalcAddonInput[];
   lineDiscount?: CalcDiscount;
+  /** A combo component's proportionally-allocated share of the combo's total
+   *  selling price. When set, this is the line's exact base total and
+   *  `unitPrice * quantity` is not recomputed - a proportional allocation
+   *  generally does not divide evenly per unit
+   *  (`menu-publishing.md` "Billing proportionally allocates combo value and
+   *  discounts across component sale lines"). */
+  baseTotalOverride?: string;
 }
 
 export interface CalcInput {
@@ -51,7 +58,7 @@ export interface CalcResult {
 
 const PAISE = 100;
 
-function toPaise(decimal: string): number {
+export function toPaise(decimal: string): number {
   if (!/^-?\d+(\.\d{1,2})?$/.test(decimal.trim())) {
     throw new Error(`invalid money value: ${decimal}`);
   }
@@ -61,7 +68,7 @@ function toPaise(decimal: string): number {
   return neg ? -paise : paise;
 }
 
-function fromPaise(paise: number): string {
+export function fromPaise(paise: number): string {
   const neg = paise < 0;
   const abs = Math.abs(Math.round(paise));
   return `${neg ? '-' : ''}${String(Math.floor(abs / PAISE))}.${String(abs % PAISE).padStart(2, '0')}`;
@@ -80,6 +87,29 @@ function discountPaise(base: number, d: CalcDiscount | undefined): number {
   return Math.min(raw, base);
 }
 
+/** Splits `totalPaise` across `weightsPaise` in proportion to each weight,
+ *  remainder to the last positive-weight entry - the same pattern already
+ *  used for bill-discount allocation across lines. Used to allocate a
+ *  combo's total selling price across its components by their own
+ *  standalone prices. */
+export function allocateProportionally(totalPaise: number, weightsPaise: number[]): number[] {
+  const weightTotal = weightsPaise.reduce((s, w) => s + w, 0);
+  const shares = new Array<number>(weightsPaise.length).fill(0);
+  if (totalPaise === 0 || weightTotal === 0) return shares;
+  let allocated = 0;
+  let lastIdx = -1;
+  for (let i = 0; i < weightsPaise.length; i += 1) {
+    const w = weightsPaise[i] ?? 0;
+    if (w <= 0) continue;
+    const share = Math.floor((totalPaise * w) / weightTotal);
+    shares[i] = share;
+    allocated += share;
+    lastIdx = i;
+  }
+  if (lastIdx >= 0) shares[lastIdx] = (shares[lastIdx] ?? 0) + (totalPaise - allocated);
+  return shares;
+}
+
 export function calculateBill(input: CalcInput): CalcResult {
   if (input.lines.length === 0) throw new Error('a bill needs at least one line');
 
@@ -88,12 +118,17 @@ export function calculateBill(input: CalcInput): CalcResult {
     if (line.quantity <= 0 || !Number.isInteger(line.quantity)) {
       throw new Error('line quantity must be a positive integer');
     }
-    let base = toPaise(line.unitPrice) * line.quantity;
-    for (const a of line.addons) {
-      if (a.quantity <= 0 || !Number.isInteger(a.quantity)) {
-        throw new Error('add-on quantity must be a positive integer');
+    let base: number;
+    if (line.baseTotalOverride !== undefined) {
+      base = toPaise(line.baseTotalOverride);
+    } else {
+      base = toPaise(line.unitPrice) * line.quantity;
+      for (const a of line.addons) {
+        if (a.quantity <= 0 || !Number.isInteger(a.quantity)) {
+          throw new Error('add-on quantity must be a positive integer');
+        }
+        base += toPaise(a.unitPrice) * a.quantity;
       }
-      base += toPaise(a.unitPrice) * a.quantity;
     }
     if (base < 0) throw new Error('line base cannot be negative');
     const lineDisc = discountPaise(base, line.lineDiscount);

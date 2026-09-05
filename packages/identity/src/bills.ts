@@ -1,12 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
-import type { ActorContext, BillView, CreateBillCommand } from '@jksh/contracts';
+import type { ActorContext, BillView, CreateBillCommand, DiscountInput } from '@jksh/contracts';
 import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 import { recordAudit, recordOutbox } from './audit';
 import { IdentityError } from './errors';
 import { businessDateString } from './membership';
-import { calculateBill, type CalcLineInput } from './bill-calc';
+import {
+  calculateBill,
+  allocateProportionally,
+  toPaise,
+  fromPaise,
+  type CalcLineInput,
+} from './bill-calc';
 import {
   parseOfflineAuthBundle,
   assertOfflineAuthCovers,
@@ -56,6 +62,22 @@ interface SnapshotItem {
   stockRecipeVersion: number | null;
   addons: SnapshotAddon[];
 }
+interface SnapshotComboComponent {
+  catalogItemId: string;
+  name: string;
+  unitPrice: string;
+  gstRate: string;
+  quantity: number;
+  stockRecipeId: string | null;
+  stockRecipeVersion: number | null;
+}
+interface SnapshotCombo {
+  comboId: string;
+  comboName: string;
+  price: string;
+  isAvailable: boolean;
+  components: SnapshotComboComponent[];
+}
 
 async function loadMenuVersion(
   client: PoolClient,
@@ -67,6 +89,7 @@ async function loadMenuVersion(
   version: string;
   checksum: string;
   items: Map<string, SnapshotItem>;
+  combos: Map<string, SnapshotCombo>;
 }> {
   const cur = await client.query<{ id: string; version: string; checksum: string }>(
     `select id, version::text, checksum from billing.outlet_menu_versions
@@ -142,7 +165,29 @@ async function loadMenuVersion(
       addons: r.addons ?? [],
     });
   }
-  return { versionId, version, checksum, items };
+
+  const comboRows = await client.query<{
+    combo_id: string;
+    combo_name: string;
+    price: string;
+    is_available: boolean;
+    components: SnapshotComboComponent[] | null;
+  }>(
+    `select combo_id, combo_name, price, is_available, components
+       from billing.outlet_menu_version_combos where outlet_menu_version_id = $1`,
+    [versionId],
+  );
+  const combos = new Map<string, SnapshotCombo>();
+  for (const r of comboRows.rows) {
+    combos.set(r.combo_id, {
+      comboId: r.combo_id,
+      comboName: r.combo_name,
+      price: r.price,
+      isAvailable: r.is_available,
+      components: r.components ?? [],
+    });
+  }
+  return { versionId, version, checksum, items, combos };
 }
 
 interface ResolvedLine {
@@ -152,50 +197,131 @@ interface ResolvedLine {
   note: string | null;
   addons: { snap: SnapshotAddon; quantity: number }[];
   calc: CalcLineInput;
+  /** The full discount to record against this line in billing.bill_discounts
+   *  - looked up once here rather than re-derived from cmd.lines by index,
+   *  since a combo line explodes into several resolved lines and the two
+   *  arrays are no longer 1:1. Always null for a combo component
+   *  (`billLineInputSchema` rejects a lineDiscount on a combo line). */
+  lineDiscount: DiscountInput | null;
+  comboId: string | null;
+  comboName: string | null;
+  comboGroupId: string | null;
 }
 
-function resolveLines(cmd: CreateBillCommand, menu: Map<string, SnapshotItem>): ResolvedLine[] {
-  return cmd.lines.map((line, i) => {
-    const item = menu.get(line.catalogItemId);
-    if (!item) throw new IdentityError('validation', `Item not on the published menu`);
-    if (!item.isAvailable) {
-      throw new IdentityError('conflict', `"${item.itemName}" is out of stock`, {
-        details: { code: 'item_unavailable', catalogItemId: item.catalogItemId },
-      });
-    }
-    const byGroup = new Map<string, number>();
-    const addons = (line.addons ?? []).map((a) => {
-      const snap = item.addons.find((x) => x.addonId === a.addonId);
-      if (!snap) throw new IdentityError('validation', 'Add-on is not offered for this item');
-      if (!snap.isAvailable) throw new IdentityError('conflict', 'Add-on is unavailable');
-      byGroup.set(snap.groupId, (byGroup.get(snap.groupId) ?? 0) + a.quantity);
-      return { snap, quantity: a.quantity };
+function resolveItemLine(
+  line: CreateBillCommand['lines'][number],
+  menu: Map<string, SnapshotItem>,
+): { item: SnapshotItem; addons: { snap: SnapshotAddon; quantity: number }[] } {
+  const item = menu.get(line.catalogItemId ?? '');
+  if (!item) throw new IdentityError('validation', `Item not on the published menu`);
+  if (!item.isAvailable) {
+    throw new IdentityError('conflict', `"${item.itemName}" is out of stock`, {
+      details: { code: 'item_unavailable', catalogItemId: item.catalogItemId },
     });
-    // Enforce each add-on group's min / max selection rules.
-    const groups = new Map(item.addons.map((x) => [x.groupId, x]));
-    for (const g of groups.values()) {
-      const picked = byGroup.get(g.groupId) ?? 0;
-      if (g.isRequired && picked < Math.max(1, g.minSelect)) {
-        throw new IdentityError(
-          'validation',
-          `Choose at least ${String(g.minSelect || 1)} from ${g.groupName}`,
-        );
-      }
-      if (picked < g.minSelect) {
-        throw new IdentityError(
-          'validation',
-          `Choose at least ${String(g.minSelect)} from ${g.groupName}`,
-        );
-      }
-      if (picked > g.maxSelect) {
-        throw new IdentityError(
-          'validation',
-          `Choose at most ${String(g.maxSelect)} from ${g.groupName}`,
-        );
-      }
+  }
+  const byGroup = new Map<string, number>();
+  const addons = (line.addons ?? []).map((a) => {
+    const snap = item.addons.find((x) => x.addonId === a.addonId);
+    if (!snap) throw new IdentityError('validation', 'Add-on is not offered for this item');
+    if (!snap.isAvailable) throw new IdentityError('conflict', 'Add-on is unavailable');
+    byGroup.set(snap.groupId, (byGroup.get(snap.groupId) ?? 0) + a.quantity);
+    return { snap, quantity: a.quantity };
+  });
+  // Enforce each add-on group's min / max selection rules.
+  const groups = new Map(item.addons.map((x) => [x.groupId, x]));
+  for (const g of groups.values()) {
+    const picked = byGroup.get(g.groupId) ?? 0;
+    if (g.isRequired && picked < Math.max(1, g.minSelect)) {
+      throw new IdentityError(
+        'validation',
+        `Choose at least ${String(g.minSelect || 1)} from ${g.groupName}`,
+      );
     }
+    if (picked < g.minSelect) {
+      throw new IdentityError(
+        'validation',
+        `Choose at least ${String(g.minSelect)} from ${g.groupName}`,
+      );
+    }
+    if (picked > g.maxSelect) {
+      throw new IdentityError(
+        'validation',
+        `Choose at most ${String(g.maxSelect)} from ${g.groupName}`,
+      );
+    }
+  }
+  return { item, addons };
+}
+
+/** Explodes one combo cart line into one resolved line per component, each
+ *  carrying a proportionally-allocated share of the combo's total selling
+ *  price for this line (`menu-publishing.md` "Billing proportionally
+ *  allocates combo value ... across component sale lines"). The allocated
+ *  shares always sum to exactly comboPrice * quantity - `allocateProportionally`
+ *  gives the remainder to the last component rather than losing/gaining a
+ *  paisa to independent per-component rounding. */
+function resolveComboLine(
+  line: CreateBillCommand['lines'][number],
+  combos: Map<string, SnapshotCombo>,
+): Omit<ResolvedLine, 'lineNo'>[] {
+  const combo = combos.get(line.comboId ?? '');
+  if (!combo) throw new IdentityError('validation', 'Combo not on the published menu');
+  if (!combo.isAvailable) {
+    throw new IdentityError('conflict', `"${combo.comboName}" is out of stock`, {
+      details: { code: 'item_unavailable', catalogItemId: combo.comboId },
+    });
+  }
+  const comboGroupId = randomUUID();
+  const totalPaise = toPaise(combo.price) * line.quantity;
+  const weights = combo.components.map((c) => toPaise(c.unitPrice) * c.quantity);
+  const shares = allocateProportionally(totalPaise, weights);
+  return combo.components.map((c, i) => {
+    const componentQuantity = c.quantity * line.quantity;
+    const item: SnapshotItem = {
+      catalogItemId: c.catalogItemId,
+      itemName: c.name,
+      price: c.unitPrice,
+      gstRate: c.gstRate,
+      isAvailable: true,
+      stockRecipeId: c.stockRecipeId,
+      stockRecipeVersion: c.stockRecipeVersion,
+      addons: [],
+    };
     return {
-      lineNo: i + 1,
+      item,
+      quantity: componentQuantity,
+      note: line.note ?? null,
+      addons: [],
+      calc: {
+        unitPrice: c.unitPrice,
+        quantity: componentQuantity,
+        addons: [],
+        baseTotalOverride: fromPaise(shares[i] ?? 0),
+      },
+      lineDiscount: null,
+      comboId: combo.comboId,
+      comboName: combo.comboName,
+      comboGroupId,
+    };
+  });
+}
+
+function resolveLines(
+  cmd: CreateBillCommand,
+  menu: Map<string, SnapshotItem>,
+  combos: Map<string, SnapshotCombo>,
+): ResolvedLine[] {
+  const resolved: ResolvedLine[] = [];
+  for (const line of cmd.lines) {
+    if (line.comboId) {
+      for (const r of resolveComboLine(line, combos)) {
+        resolved.push({ ...r, lineNo: resolved.length + 1 });
+      }
+      continue;
+    }
+    const { item, addons } = resolveItemLine(line, menu);
+    resolved.push({
+      lineNo: resolved.length + 1,
       item,
       quantity: line.quantity,
       note: line.note ?? null,
@@ -208,8 +334,13 @@ function resolveLines(cmd: CreateBillCommand, menu: Map<string, SnapshotItem>): 
           ? { lineDiscount: { kind: line.lineDiscount.kind, value: line.lineDiscount.value } }
           : {}),
       },
-    };
-  });
+      lineDiscount: line.lineDiscount ?? null,
+      comboId: null,
+      comboName: null,
+      comboGroupId: null,
+    });
+  }
+  return resolved;
 }
 
 /** Receipt prefix for a terminal (MVP: one active terminal per outlet, always
@@ -359,7 +490,7 @@ export async function createBill(
 
     // 4. Authoritative pricing from the published menu version.
     const menu = await loadMenuVersion(client, outletId, cmd.menuVersion, cmd.offline ?? false);
-    const resolved = resolveLines(cmd, menu.items);
+    const resolved = resolveLines(cmd, menu.items, menu.combos);
 
     // 4a. Offline bills must present a valid, matching authorization bundle.
     let discountCeiling: DiscountPolicy | null = null;
@@ -488,13 +619,13 @@ export async function createBill(
     for (const line of resolved) {
       const lineId = randomUUID();
       const lc = calc.lines[line.lineNo - 1];
-      const cmdLine = cmd.lines[line.lineNo - 1];
       if (!lc) throw new IdentityError('validation', 'calculator/line mismatch');
       await client.query(
         `insert into billing.bill_lines
            (id, bill_id, line_no, catalog_item_id, item_name, quantity, unit_price, gst_rate,
-            base_total, discount, final_total, note, stock_recipe_id, stock_recipe_version)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+            base_total, discount, final_total, note, stock_recipe_id, stock_recipe_version,
+            combo_id, combo_name, combo_group_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
         [
           lineId,
           billId,
@@ -510,6 +641,9 @@ export async function createBill(
           line.note,
           line.item.stockRecipeId,
           line.item.stockRecipeVersion,
+          line.comboId,
+          line.comboName,
+          line.comboGroupId,
         ],
       );
       for (const a of line.addons) {
@@ -521,8 +655,8 @@ export async function createBill(
           [lineId, a.snap.addonId, a.snap.name, a.quantity, a.snap.price, total],
         );
       }
-      if (cmdLine?.lineDiscount && Number(lc.discount) > 0) {
-        const d = cmdLine.lineDiscount;
+      if (line.lineDiscount && Number(lc.discount) > 0) {
+        const d = line.lineDiscount;
         await client.query(
           `insert into billing.bill_discounts
              (bill_id, bill_line_id, scope, kind, input_value, amount, reason)
@@ -660,9 +794,12 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
     discount: string;
     final_total: string;
     note: string | null;
+    combo_id: string | null;
+    combo_name: string | null;
+    combo_group_id: string | null;
   }>(
     `select id, line_no, catalog_item_id, item_name, quantity, unit_price, gst_rate,
-            base_total, discount, final_total, note
+            base_total, discount, final_total, note, combo_id, combo_name, combo_group_id
        from billing.bill_lines where bill_id = $1 order by line_no`,
     [billId],
   );
@@ -743,6 +880,9 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
       discount: l.discount,
       finalTotal: l.final_total,
       note: l.note,
+      comboId: l.combo_id,
+      comboName: l.combo_name,
+      comboGroupId: l.combo_group_id,
       refundedQuantity: refundedQtyById.get(l.id) ?? 0,
       addons: addons.rows
         .filter((a) => a.bill_line_id === l.id)

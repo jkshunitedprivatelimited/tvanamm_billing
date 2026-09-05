@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateBill } from './bill-calc';
+import { calculateBill, allocateProportionally, toPaise, fromPaise } from './bill-calc';
 
 describe('calculateBill - money', () => {
   it('sums lines and add-ons (UPI: exact, zero round adjustment)', () => {
@@ -127,5 +127,39 @@ describe('calculateBill - money', () => {
         lines: [{ unitPrice: '10.00', quantity: 0, addons: [] }],
       }),
     ).toThrow(/positive integer/);
+  });
+
+  it('a baseTotalOverride line skips the unitPrice*quantity computation', () => {
+    const r = calculateBill({
+      paymentMethod: 'upi',
+      lines: [{ unitPrice: '999.00', quantity: 3, addons: [], baseTotalOverride: '60.00' }],
+    });
+    expect(r.subtotal).toBe('60.00');
+    expect(r.finalTotal).toBe('60.00');
+  });
+});
+
+describe('allocateProportionally - combo price allocation', () => {
+  it('splits a total exactly by weight, remainder to the last positive weight', () => {
+    // 100 paise split 1:2 -> 33/67, not 33/66 + a lost paisa.
+    const shares = allocateProportionally(100, [1, 2]);
+    expect(shares).toEqual([33, 67]);
+    expect(shares.reduce((s, x) => s + x, 0)).toBe(100);
+  });
+
+  it('skips zero-weight entries entirely', () => {
+    const shares = allocateProportionally(300, [0, 100, 200]);
+    expect(shares[0]).toBe(0);
+    expect((shares[1] ?? 0) + (shares[2] ?? 0)).toBe(300);
+  });
+
+  it('returns all zeros when the total or every weight is zero', () => {
+    expect(allocateProportionally(0, [10, 20])).toEqual([0, 0]);
+    expect(allocateProportionally(500, [0, 0])).toEqual([0, 0]);
+  });
+
+  it('always sums to exactly the input total regardless of rounding', () => {
+    const shares = allocateProportionally(toPaise('99.99'), [toPaise('33.33'), toPaise('66.66')]);
+    expect(fromPaise(shares.reduce((s, x) => s + x, 0))).toBe('99.99');
   });
 });

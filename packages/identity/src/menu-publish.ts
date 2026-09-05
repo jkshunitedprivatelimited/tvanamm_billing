@@ -167,14 +167,121 @@ async function resolveEffectiveItems(
   return items;
 }
 
-function checksumOf(items: EffectiveItem[]): string {
-  const canonical = [...items]
+interface EffectiveCombo {
+  comboId: string;
+  categoryName: string;
+  categoryOrder: number;
+  name: string;
+  description: string | null;
+  imageUrl: string | null;
+  price: string;
+  isAvailable: boolean;
+  availabilityNote: string | null;
+  offlineSaleAllowed: boolean;
+  components: {
+    catalogItemId: string;
+    name: string;
+    unitPrice: string;
+    gstRate: string;
+    quantity: number;
+    stockRecipeId: string | null;
+    stockRecipeVersion: number | null;
+  }[];
+}
+
+/** A combo's own field-level effective values (owner_scope = 'master' at
+ *  brand level, or 'outlet' at the owning outlet - combos have no
+ *  outlet-override table of their own; a Franchise Owner customizes by
+ *  creating their own outlet-scoped combo instead). Component pricing/GST/
+ *  recipe are read live from billing.catalog_items and frozen into the
+ *  published snapshot, same as a regular item's own fields are. */
+async function resolveEffectiveCombos(
+  client: PoolClient,
+  brandId: string,
+  outletId: string,
+): Promise<EffectiveCombo[]> {
+  const { rows } = await client.query<{
+    id: string;
+    name: string;
+    description: string | null;
+    image_url: string | null;
+    price: string;
+    is_available: boolean;
+    availability_note: string | null;
+    offline_sale_allowed: boolean;
+  }>(
+    `select id, name, description, image_url, price, is_available, availability_note,
+            offline_sale_allowed
+       from billing.combos
+      where status = 'active'
+        and ((owner_scope = 'master' and brand_id = $1) or (owner_scope = 'outlet' and outlet_id = $2))
+      order by name`,
+    [brandId, outletId],
+  );
+  const combos: EffectiveCombo[] = rows.map((r) => ({
+    comboId: r.id,
+    categoryName: 'Combos',
+    categoryOrder: 0,
+    name: r.name,
+    description: r.description,
+    imageUrl: r.image_url,
+    price: r.price,
+    isAvailable: r.is_available,
+    availabilityNote: r.availability_note,
+    offlineSaleAllowed: r.offline_sale_allowed,
+    components: [],
+  }));
+  if (combos.length > 0) {
+    const compRows = await client.query<{
+      combo_id: string;
+      catalog_item_id: string;
+      quantity: number;
+      name: string;
+      price: string;
+      gst_rate: string;
+      stock_recipe_id: string | null;
+      stock_recipe_version: number | null;
+    }>(
+      `select cc.combo_id, cc.catalog_item_id, cc.quantity,
+              ci.name, ci.price, ci.gst_rate, ci.stock_recipe_id, ci.stock_recipe_version
+         from billing.combo_components cc
+         join billing.catalog_items ci on ci.id = cc.catalog_item_id
+        where cc.combo_id = any($1::uuid[])
+        order by cc.display_order`,
+      [combos.map((c) => c.comboId)],
+    );
+    const byCombo = new Map(combos.map((c) => [c.comboId, c]));
+    for (const r of compRows.rows) {
+      byCombo.get(r.combo_id)?.components.push({
+        catalogItemId: r.catalog_item_id,
+        name: r.name,
+        unitPrice: r.price,
+        gstRate: r.gst_rate,
+        quantity: r.quantity,
+        stockRecipeId: r.stock_recipe_id,
+        stockRecipeVersion: r.stock_recipe_version,
+      });
+    }
+  }
+  return combos;
+}
+
+function checksumOf(items: EffectiveItem[], combos: EffectiveCombo[] = []): string {
+  const canonicalItems = [...items]
     .sort((a, b) => a.catalogItemId.localeCompare(b.catalogItemId))
     .map((i) => ({
       ...i,
       addons: [...i.addons].sort((x, y) => x.addonId.localeCompare(y.addonId)),
     }));
-  return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+  const canonicalCombos = [...combos]
+    .sort((a, b) => a.comboId.localeCompare(b.comboId))
+    .map((c) => ({
+      ...c,
+      components: [...c.components].sort((x, y) => x.catalogItemId.localeCompare(y.catalogItemId)),
+    }));
+  return createHash('sha256')
+    .update(JSON.stringify({ items: canonicalItems, combos: canonicalCombos }))
+    .digest('hex');
 }
 
 function authorizePublication(
@@ -246,7 +353,8 @@ export async function previewPublication(
     const targets: PublicationPreview['targets'] = [];
     for (const outletId of outletIds) {
       const items = await resolveEffectiveItems(client, cmd.brandId, outletId);
-      const sum = checksumOf(items);
+      const combos = await resolveEffectiveCombos(client, cmd.brandId, outletId);
+      const sum = checksumOf(items, combos);
       const cur = await client.query<{ version: string; checksum: string }>(
         `select version::text, checksum from billing.outlet_menu_versions
           where outlet_id = $1 and is_current`,
@@ -384,7 +492,8 @@ async function applyOneTarget(
       );
 
       const items = await resolveEffectiveItems(client, brandId, outletId);
-      const checksum = checksumOf(items);
+      const combos = await resolveEffectiveCombos(client, brandId, outletId);
+      const checksum = checksumOf(items, combos);
 
       const cur = await client.query<{ id: string; checksum: string }>(
         `select id, checksum from billing.outlet_menu_versions where outlet_id = $1 and is_current`,
@@ -438,6 +547,29 @@ async function applyOneTarget(
           ],
         );
       }
+      for (const c of combos) {
+        await client.query(
+          `insert into billing.outlet_menu_version_combos
+             (outlet_menu_version_id, combo_id, category_name, category_order, combo_name,
+              description, image_url, price, is_available, availability_note, offline_sale_allowed,
+              components)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
+          [
+            versionId,
+            c.comboId,
+            c.categoryName,
+            c.categoryOrder,
+            c.name,
+            c.description,
+            c.imageUrl,
+            c.price,
+            c.isAvailable,
+            c.availabilityNote,
+            c.offlineSaleAllowed,
+            JSON.stringify(c.components),
+          ],
+        );
+      }
       await client.query(
         `update billing.outlet_menu_versions set is_current = false
           where outlet_id = $1 and is_current`,
@@ -459,7 +591,12 @@ async function applyOneTarget(
         organizationId: actor.scope.organizationId,
         outletId,
         correlationId,
-        metadata: { publicationId, version: nextVersion, itemCount: items.length },
+        metadata: {
+          publicationId,
+          version: nextVersion,
+          itemCount: items.length,
+          comboCount: combos.length,
+        },
       });
     });
   } catch (err) {
@@ -675,6 +812,25 @@ export async function getPublishedMenu(
             [outletId, itemIds],
           );
     const liveByItem = new Map(live.rows.map((r) => [r.catalog_item_id, r]));
+    const combos = await client.query<{
+      combo_id: string;
+      category_name: string;
+      category_order: number;
+      combo_name: string;
+      description: string | null;
+      image_url: string | null;
+      price: string;
+      is_available: boolean;
+      availability_note: string | null;
+      offline_sale_allowed: boolean;
+      components: unknown;
+    }>(
+      `select combo_id, category_name, category_order, combo_name, description, image_url, price,
+              is_available, availability_note, offline_sale_allowed, components
+         from billing.outlet_menu_version_combos where outlet_menu_version_id = $1
+        order by category_order, combo_name`,
+      [v.rows[0].id],
+    );
     return {
       outletId,
       version: v.rows[0].version,
@@ -697,6 +853,19 @@ export async function getPublishedMenu(
         stockRecipeId: r.stock_recipe_id,
         stockRecipeVersion: r.stock_recipe_version,
         addons: (r.addons as PosMenuSnapshot['items'][number]['addons'] | null) ?? [],
+      })),
+      combos: combos.rows.map((r) => ({
+        comboId: r.combo_id,
+        categoryName: r.category_name,
+        categoryOrder: r.category_order,
+        name: r.combo_name,
+        description: r.description,
+        imageUrl: r.image_url,
+        price: r.price,
+        isAvailable: r.is_available,
+        availabilityNote: r.availability_note,
+        offlineSaleAllowed: r.offline_sale_allowed,
+        components: (r.components as PosMenuSnapshot['combos'][number]['components'] | null) ?? [],
       })),
     };
   });

@@ -147,6 +147,37 @@ export const copyOutletItemToMasterCommandSchema = z.object({
 });
 export type CopyOutletItemToMasterCommand = z.infer<typeof copyOutletItemToMasterCommandSchema>;
 
+// ---- Combos ------------------------------------------------------------
+// `menu-publishing.md` "Central and Franchise Owners may create combos
+// within their scope. A combo references existing component items and their
+// recipes instead of owning a duplicate recipe." A combo has its own
+// GST-inclusive selling price but no gst_rate/hsn_code of its own - those
+// live on its components, proportionally allocated at sale time.
+
+export const comboComponentInputSchema = z.object({
+  catalogItemId: z.uuid(),
+  quantity: z.int().positive().max(20),
+});
+export type ComboComponentInput = z.infer<typeof comboComponentInputSchema>;
+
+export const createComboCommandSchema = z.object({
+  brandId: z.uuid(),
+  outletId: z.uuid().optional(), // present => franchise-owned private combo
+  name: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(2000).optional(),
+  imageUrl: z.url().max(2000).optional(),
+  price: moneySchema, // GST-inclusive
+  isAvailable: z.boolean().default(true),
+  offlineSaleAllowed: z.boolean().default(true),
+  components: z.array(comboComponentInputSchema).min(2).max(20),
+});
+export type CreateComboCommand = z.infer<typeof createComboCommandSchema>;
+
+export const updateComboCommandSchema = createComboCommandSchema
+  .partial()
+  .omit({ brandId: true, outletId: true });
+export type UpdateComboCommand = z.infer<typeof updateComboCommandSchema>;
+
 // ---- Read models -----------------------------------------------------------
 
 export const posMenuAddonSchema = z.object({
@@ -179,6 +210,30 @@ export const posMenuItemSchema = z.object({
   addons: z.array(posMenuAddonSchema),
 });
 
+export const posComboComponentSnapshotSchema = z.object({
+  catalogItemId: z.uuid(),
+  name: z.string(),
+  unitPrice: moneySchema,
+  gstRate: gstRateSchema,
+  quantity: z.int(),
+  stockRecipeId: z.uuid().nullable(),
+  stockRecipeVersion: z.int().nullable(),
+});
+
+export const posComboSnapshotSchema = z.object({
+  comboId: z.uuid(),
+  categoryName: z.string(),
+  categoryOrder: z.int(),
+  name: z.string(),
+  description: z.string().nullable(),
+  imageUrl: z.string().nullable(),
+  price: moneySchema,
+  isAvailable: z.boolean(),
+  availabilityNote: z.string().nullable(),
+  offlineSaleAllowed: z.boolean(),
+  components: z.array(posComboComponentSnapshotSchema),
+});
+
 export const posMenuSnapshotSchema = z.object({
   outletId: z.uuid(),
   version: z.string(), // bigint as string
@@ -186,5 +241,6 @@ export const posMenuSnapshotSchema = z.object({
   itemCount: z.int(),
   publishedAt: z.string(),
   items: z.array(posMenuItemSchema),
+  combos: z.array(posComboSnapshotSchema).default([]),
 });
 export type PosMenuSnapshot = z.infer<typeof posMenuSnapshotSchema>;

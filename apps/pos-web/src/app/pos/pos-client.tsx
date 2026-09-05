@@ -13,6 +13,7 @@ import { terminalPaperWidthMm } from '../terminal-prefs';
 
 type MenuItem = PosMenuSnapshot['items'][number];
 type MenuAddon = MenuItem['addons'][number];
+type MenuCombo = PosMenuSnapshot['combos'][number];
 
 interface CartAddon {
   addonId: string;
@@ -23,7 +24,8 @@ interface CartAddon {
 
 interface CartLine {
   clientLineId: string;
-  catalogItemId: string;
+  catalogItemId: string | null;
+  comboId: string | null;
   name: string;
   unitPrice: string;
   quantity: number;
@@ -125,7 +127,7 @@ export function PosClient({
       const existing = prev.find(
         (l) =>
           !l.lineDiscount &&
-          `${l.catalogItemId}|${l.addons
+          `${l.catalogItemId ?? ''}|${l.addons
             .map((a) => `${a.addonId}:${String(a.quantity)}`)
             .sort()
             .join(',')}|${l.note ?? ''}` === key,
@@ -140,6 +142,7 @@ export function PosClient({
         {
           clientLineId: crypto.randomUUID(),
           catalogItemId: item.catalogItemId,
+          comboId: null,
           name: item.name,
           unitPrice: item.price,
           quantity: 1,
@@ -149,6 +152,23 @@ export function PosClient({
         },
       ];
     });
+  }
+
+  function addComboLine(combo: MenuCombo) {
+    setCart((prev) => [
+      ...prev,
+      {
+        clientLineId: crypto.randomUUID(),
+        catalogItemId: null,
+        comboId: combo.comboId,
+        name: combo.name,
+        unitPrice: combo.price,
+        quantity: 1,
+        addons: [],
+        note: null,
+        lineDiscount: null,
+      },
+    ]);
   }
 
   function updateQuantity(clientLineId: string, delta: number) {
@@ -176,14 +196,29 @@ export function PosClient({
         idempotencyKey: crypto.randomUUID() + crypto.randomUUID(),
         menuVersion: menu.version,
         paymentMethod: totals.isComplimentary ? null : payment,
-        lines: cart.map((l) => ({
-          clientLineId: l.clientLineId,
-          catalogItemId: l.catalogItemId,
-          quantity: l.quantity,
-          addons: l.addons.map((a) => ({ addonId: a.addonId, quantity: a.quantity })),
-          ...(l.note ? { note: l.note } : {}),
-          ...(l.lineDiscount ? { lineDiscount: l.lineDiscount } : {}),
-        })),
+        lines: cart.flatMap((l): CreateBillCommand['lines'] => {
+          if (l.comboId) {
+            return [
+              {
+                clientLineId: l.clientLineId,
+                comboId: l.comboId,
+                quantity: l.quantity,
+                ...(l.note ? { note: l.note } : {}),
+              },
+            ];
+          }
+          if (!l.catalogItemId) return [];
+          return [
+            {
+              clientLineId: l.clientLineId,
+              catalogItemId: l.catalogItemId,
+              quantity: l.quantity,
+              addons: l.addons.map((a) => ({ addonId: a.addonId, quantity: a.quantity })),
+              ...(l.note ? { note: l.note } : {}),
+              ...(l.lineDiscount ? { lineDiscount: l.lineDiscount } : {}),
+            },
+          ];
+        }),
         ...(billDiscount ? { billDiscount } : {}),
         terminalOccurredAt: new Date().toISOString(),
         ...(showCustomer && (customerName || customerMobile)
@@ -311,6 +346,32 @@ export function PosClient({
             ))}
             {visibleItems.length === 0 ? <p className="muted">No items match.</p> : null}
           </div>
+          {menu.combos.length > 0 && !category && !search ? (
+            <>
+              <h2 style={{ fontSize: 14, margin: '16px 0 10px' }}>Combos</h2>
+              <div className="item-grid">
+                {menu.combos.map((combo) => (
+                  <button
+                    key={combo.comboId}
+                    className="item-card"
+                    disabled={!combo.isAvailable}
+                    title={
+                      combo.isAvailable
+                        ? combo.components
+                            .map((c) => `${String(c.quantity)} x ${c.name}`)
+                            .join(', ')
+                        : (combo.availabilityNote ?? 'Out of stock')
+                    }
+                    onClick={() => addComboLine(combo)}
+                  >
+                    <span className="name">{combo.name}</span>
+                    <span className="price">₹{combo.price}</span>
+                    {!combo.isAvailable ? <span className="badge">Out of stock</span> : null}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
         </div>
         <div className="cart-pane">
           <h1 style={{ fontSize: 15, margin: '0 0 10px' }}>Current sale</h1>
@@ -336,7 +397,7 @@ export function PosClient({
                           : `₹${line.lineDiscount.value}`}{' '}
                         ({line.lineDiscount.reason})
                       </div>
-                    ) : (
+                    ) : line.comboId ? null : (
                       <button
                         className="link-btn"
                         onClick={() => setDiscountLineId(line.clientLineId)}

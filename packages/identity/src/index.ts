@@ -124,6 +124,7 @@ export {
   type MasterMenuView,
 } from './catalog';
 export { createTaxProfile, updateTaxProfile, listTaxProfiles } from './tax-profile';
+export { createCombo, updateCombo } from './combo';
 export {
   previewPublication,
   createAndApplyPublication,

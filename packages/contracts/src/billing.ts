@@ -18,16 +18,33 @@ export const billAddonInputSchema = z.object({
   quantity: z.int().positive().max(99),
 });
 
-export const billLineInputSchema = z.object({
+const billLineInputShape = z.object({
   /** client-side temp id, echoed back for cart reconciliation */
   clientLineId: z.string().min(1).max(64).optional(),
-  catalogItemId: z.uuid(),
+  catalogItemId: z.uuid().optional(),
+  /** present instead of catalogItemId => a combo, exploded server-side into
+   *  one bill line per component with a proportionally-allocated price
+   *  (`menu-publishing.md` "Billing proportionally allocates combo value and
+   *  discounts across component sale lines"). A combo line has no add-ons of
+   *  its own in this pass - its components are a fixed bundle. */
+  comboId: z.uuid().optional(),
   quantity: z.int().positive().max(999),
   addons: z.array(billAddonInputSchema).max(30).optional(),
   note: z.string().trim().max(500).optional(),
   lineDiscount: discountInputSchema.optional(),
 });
-export type BillLineInput = z.infer<typeof billLineInputSchema>;
+export const billLineInputSchema = billLineInputShape
+  .refine((v) => !!v.catalogItemId !== !!v.comboId, {
+    message: 'A bill line needs exactly one of catalogItemId or comboId',
+  })
+  .refine((v) => !v.comboId || !v.addons || v.addons.length === 0, {
+    message: 'A combo line cannot select its own add-ons',
+  })
+  .refine((v) => !v.comboId || !v.lineDiscount, {
+    message:
+      'A combo line has no discount of its own in this pass - apply a bill-level discount instead',
+  });
+export type BillLineInput = z.infer<typeof billLineInputShape>;
 
 const createBillCommandShape = z.object({
   idempotencyKey: z.string().min(16).max(200),
@@ -74,6 +91,11 @@ export const billLineViewSchema = z.object({
   finalTotal: moneySchema,
   note: z.string().nullable(),
   refundedQuantity: z.int(),
+  /** Set when this line is one exploded component of a combo purchase, so
+   *  the UI can group sibling lines under one heading. */
+  comboId: z.uuid().nullable(),
+  comboName: z.string().nullable(),
+  comboGroupId: z.uuid().nullable(),
   addons: z.array(
     z.object({
       addonId: z.uuid(),
@@ -168,6 +190,7 @@ export const receiptSnapshotSchema = z.object({
       discount: moneySchema,
       finalTotal: moneySchema,
       note: z.string().nullable(),
+      comboName: z.string().nullable(),
       addons: z.array(
         z.object({ addonName: z.string(), quantity: z.int(), unitPrice: moneySchema }),
       ),
