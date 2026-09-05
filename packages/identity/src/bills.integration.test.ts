@@ -333,7 +333,10 @@ describe.skipIf(!RUN)('Billing V1 Stage 3 - bills', () => {
       `select id from billing.cash_sessions where outlet_id = $1 and status = 'open'`,
       [outletId],
     );
-    await closeCashSession(pool, op, rows[0]!.id, { countedCash: '2000.00' });
+    // The earlier Cash bill (56.00) rolls into expected cash: 2000 opening + 56 = 2056.
+    const closed = await closeCashSession(pool, op, rows[0]!.id, { countedCash: '2056.00' });
+    expect(closed.expectedCash).toBe('2056.00');
+    expect(closed.variance).toBe('0.00');
     await expect(
       createBill(pool, op, {
         idempotencyKey: `idem-nocash-${S}-0006`,

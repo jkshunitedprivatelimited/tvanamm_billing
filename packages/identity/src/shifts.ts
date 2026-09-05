@@ -132,14 +132,19 @@ export async function openCashSession(
   });
 }
 
-/** Expected cash = opening + cash sales - cash refunds for the session.
- *  Sales/refunds are added in Stage 3; until then expected == opening. */
+/** Expected cash = opening + Cash sales for the session. Cash refunds
+ *  (Stage 5) will subtract here once billing.refunds exists. */
 async function expectedCashFor(client: PoolClient, cashSessionId: string): Promise<string> {
-  const { rows } = await client.query<{ opening_cash: string }>(
-    `select opening_cash from billing.cash_sessions where id = $1`,
+  const { rows } = await client.query<{ expected: string }>(
+    `select cs.opening_cash + coalesce(sum(p.amount) filter (where p.method = 'cash'), 0) as expected
+       from billing.cash_sessions cs
+       left join billing.bills b on b.cash_session_id = cs.id
+       left join billing.payments p on p.bill_id = b.id
+      where cs.id = $1
+      group by cs.opening_cash`,
     [cashSessionId],
   );
-  return rows[0]?.opening_cash ?? '0.00';
+  return rows[0]?.expected ?? '0.00';
 }
 
 export async function closeCashSession(
