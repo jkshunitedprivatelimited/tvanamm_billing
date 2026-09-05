@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { PAPER_KEY } from '../terminal-prefs';
 
 const CREDENTIAL_KEY = 'jksh_terminal_credential';
 const OUTLET_KEY = 'jksh_terminal_outlet';
@@ -41,6 +42,7 @@ export default function RegisterPage() {
       try {
         localStorage.setItem(CREDENTIAL_KEY, body.terminalCredential);
         localStorage.setItem(OUTLET_KEY, body.outletName ?? '');
+        localStorage.setItem(PAPER_KEY, paper);
       } catch {
         setError('This browser blocked local storage. Enable it to run the terminal.');
         return;

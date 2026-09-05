@@ -4,6 +4,7 @@ import { listEmployees, listOutlets, listTerminals } from '@jksh/identity';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { OutletDetail } from './detail';
+import { BillsPanel } from './bills-panel';
 
 export default async function OutletPage({ params }: { params: Promise<{ outletId: string }> }) {
   const actor = await requireAdminActor();
@@ -31,6 +32,7 @@ export default async function OutletPage({ params }: { params: Promise<{ outletI
         initialTerminals={terminals}
         initialEmployees={employees}
       />
+      <BillsPanel outletId={outletId} role={actor.role} />
     </main>
   );
 }

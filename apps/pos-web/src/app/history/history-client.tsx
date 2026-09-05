@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { BillView, ReceiptSnapshot } from '@jksh/contracts';
 import { ReceiptView } from '../receipt-view';
+import { terminalPaperWidthMm } from '../terminal-prefs';
 
 interface BillListRow {
   id: string;
@@ -60,7 +61,7 @@ export function HistoryClient() {
     return (
       <div>
         <div style={{ width: 380, maxWidth: '100%' }}>
-          <ReceiptView receipt={receipt} />
+          <ReceiptView receipt={receipt} paperWidthMm={terminalPaperWidthMm()} />
           <div className="no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <button onClick={() => printAndLog(selected.id)}>Reprint</button>
             <button className="ghost" onClick={() => setReceipt(null)}>

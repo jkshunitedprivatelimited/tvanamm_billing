@@ -9,6 +9,7 @@ import type {
   ReceiptSnapshot,
 } from '@jksh/contracts';
 import { ReceiptView } from '../receipt-view';
+import { terminalPaperWidthMm } from '../terminal-prefs';
 
 type MenuItem = PosMenuSnapshot['items'][number];
 type MenuAddon = MenuItem['addons'][number];
@@ -245,7 +246,7 @@ export function PosClient({
     return (
       <div className="screen no-print-bg">
         <div style={{ width: 380, maxWidth: '100%' }}>
-          <ReceiptView receipt={receipt} />
+          <ReceiptView receipt={receipt} paperWidthMm={terminalPaperWidthMm()} />
           <div className="no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
             <button onClick={printReceipt}>Print receipt</button>
             <button className="ghost" onClick={newSale}>

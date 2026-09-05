@@ -5,9 +5,15 @@ import type { ReceiptSnapshot } from '@jksh/contracts';
 /** Renders exactly `receiptSnapshotSchema`'s fields - never employee name,
  *  discount/refund reasons, or a GST rate/CGST/SGST breakout
  *  (`receipt-printing.md` "Confirmed Customer Receipt Content"). */
-export function ReceiptView({ receipt }: { receipt: ReceiptSnapshot }) {
+export function ReceiptView({
+  receipt,
+  paperWidthMm = 80,
+}: {
+  receipt: ReceiptSnapshot;
+  paperWidthMm?: 58 | 80;
+}) {
   return (
-    <div className="receipt">
+    <div className={`receipt${paperWidthMm === 58 ? ' w58' : ''}`}>
       <div className="center">
         <strong>{receipt.outletName}</strong>
         <div>{receipt.outletAddress}</div>
