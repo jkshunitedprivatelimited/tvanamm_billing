@@ -123,6 +123,7 @@ export {
   listMasterMenu,
   type MasterMenuView,
 } from './catalog';
+export { createTaxProfile, updateTaxProfile, listTaxProfiles } from './tax-profile';
 export {
   previewPublication,
   createAndApplyPublication,

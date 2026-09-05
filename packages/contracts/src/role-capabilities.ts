@@ -24,6 +24,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'catalog.menu.manage.master',
     'catalog.menu.publish',
     'catalog.item.pause',
+    'catalog.tax_profile.manage',
     'billing.sale.read.all_stores',
     'billing.report.store',
     'billing.report.global',

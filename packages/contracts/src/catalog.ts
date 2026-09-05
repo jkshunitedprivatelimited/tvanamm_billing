@@ -37,7 +37,7 @@ export const createAddonGroupCommandSchema = z.object({
 });
 export type CreateAddonGroupCommand = z.infer<typeof createAddonGroupCommandSchema>;
 
-export const createCatalogItemCommandSchema = z.object({
+const createCatalogItemCommandShape = z.object({
   brandId: z.uuid(),
   outletId: z.uuid().optional(), // present => franchise-owned private item
   categoryId: z.uuid().optional(),
@@ -45,15 +45,29 @@ export const createCatalogItemCommandSchema = z.object({
   description: z.string().trim().max(2000).optional(),
   imageUrl: z.url().max(2000).optional(),
   hsnCode: z.string().trim().max(20).optional(),
-  gstRate: gstRateSchema,
+  gstRate: gstRateSchema.optional(),
+  /** Required instead of `gstRate`/`hsnCode` for a Franchise-created (outlet)
+   *  item - Central is the tax-profile authority, so master items keep
+   *  entering GST/HSN directly (`menu-publishing.md` "GST/HSN comes from a
+   *  Central-approved tax profile rather than an arbitrary rate entered at
+   *  the outlet"). */
+  taxProfileId: z.uuid().optional(),
   price: moneySchema, // GST-inclusive
   isAvailable: z.boolean().default(true),
   offlineSaleAllowed: z.boolean().default(true),
   addonGroupIds: z.array(z.uuid()).max(30).default([]),
 });
-export type CreateCatalogItemCommand = z.infer<typeof createCatalogItemCommandSchema>;
 
-export const updateCatalogItemCommandSchema = createCatalogItemCommandSchema
+export const createCatalogItemCommandSchema = createCatalogItemCommandShape.refine(
+  (v) => (v.outletId ? !!v.taxProfileId && !v.gstRate : !!v.gstRate && !v.taxProfileId),
+  {
+    message:
+      'A master item sets gstRate directly; a Franchise-created outlet item must reference a taxProfileId instead',
+  },
+);
+export type CreateCatalogItemCommand = z.infer<typeof createCatalogItemCommandShape>;
+
+export const updateCatalogItemCommandSchema = createCatalogItemCommandShape
   .partial()
   .omit({ brandId: true, outletId: true });
 export type UpdateCatalogItemCommand = z.infer<typeof updateCatalogItemCommandSchema>;

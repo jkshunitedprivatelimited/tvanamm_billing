@@ -121,12 +121,37 @@ export async function createCatalogItem(
   assertCatalogWrite(actor, cmd.outletId);
   return withActorContext(pool, contextForActor(actor), async (client) => {
     await assertBrandInOrg(client, cmd.brandId, actor.scope.organizationId);
+    // The schema's refine() guarantees exactly one path: a master item sets
+    // gstRate/hsnCode directly, an outlet item references a tax profile
+    // instead (`menu-publishing.md` "GST/HSN comes from a Central-approved
+    // tax profile"). Resolve the profile now so gst_rate/hsn_code stay
+    // denormalized on the row for bill-calc/receipts, unchanged elsewhere.
+    let hsnCode = cmd.hsnCode ?? null;
+    let gstRate = cmd.gstRate;
+    if (cmd.outletId) {
+      const profile = await client.query<{
+        hsn_code: string;
+        gst_rate: string;
+        is_active: boolean;
+      }>(
+        `select hsn_code, gst_rate, is_active from billing.tax_profiles
+          where id = $1 and brand_id = $2`,
+        [cmd.taxProfileId, cmd.brandId],
+      );
+      if (!profile.rows[0]) throw new IdentityError('not_found', 'Tax profile not found');
+      if (!profile.rows[0].is_active) {
+        throw new IdentityError('validation', 'That tax profile is no longer active');
+      }
+      hsnCode = profile.rows[0].hsn_code;
+      gstRate = profile.rows[0].gst_rate;
+    }
     const id = randomUUID();
     await client.query(
       `insert into billing.catalog_items
          (id, organization_id, brand_id, owner_scope, outlet_id, category_id, name, description,
-          image_url, hsn_code, gst_rate, price, is_available, offline_sale_allowed, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          image_url, hsn_code, gst_rate, tax_profile_id, price, is_available, offline_sale_allowed,
+          created_by)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
       [
         id,
         actor.scope.organizationId,
@@ -137,8 +162,9 @@ export async function createCatalogItem(
         cmd.name,
         cmd.description ?? null,
         cmd.imageUrl ?? null,
-        cmd.hsnCode ?? null,
-        cmd.gstRate,
+        hsnCode,
+        gstRate,
+        cmd.taxProfileId ?? null,
         cmd.price,
         cmd.isAvailable,
         cmd.offlineSaleAllowed,
@@ -176,15 +202,29 @@ export async function updateCatalogItem(
     const { rows } = await client.query<{
       owner_scope: string;
       outlet_id: string | null;
+      brand_id: string;
       price: string;
       gst_rate: string;
     }>(
-      `select owner_scope, outlet_id, price, gst_rate from billing.catalog_items where id = $1 for update`,
+      `select owner_scope, outlet_id, brand_id, price, gst_rate from billing.catalog_items where id = $1 for update`,
       [itemId],
     );
     const item = rows[0];
     if (!item) throw new IdentityError('not_found', 'Item not found');
     assertCatalogWrite(actor, item.outlet_id ?? undefined);
+
+    if (item.outlet_id && cmd.gstRate !== undefined) {
+      throw new IdentityError(
+        'validation',
+        'This outlet item must reference a taxProfileId instead of setting gstRate directly',
+      );
+    }
+    if (!item.outlet_id && cmd.taxProfileId !== undefined) {
+      throw new IdentityError(
+        'validation',
+        'A master item sets gstRate directly, not a tax profile',
+      );
+    }
 
     const sets: string[] = [];
     const values: unknown[] = [itemId];
@@ -196,7 +236,28 @@ export async function updateCatalogItem(
     if (cmd.description !== undefined) put('description', cmd.description ?? null);
     if (cmd.imageUrl !== undefined) put('image_url', cmd.imageUrl ?? null);
     if (cmd.categoryId !== undefined) put('category_id', cmd.categoryId ?? null);
-    if (cmd.hsnCode !== undefined) put('hsn_code', cmd.hsnCode ?? null);
+    let effectiveGstRate = cmd.gstRate;
+    if (cmd.taxProfileId !== undefined) {
+      const profile = await client.query<{
+        hsn_code: string;
+        gst_rate: string;
+        is_active: boolean;
+      }>(
+        `select hsn_code, gst_rate, is_active from billing.tax_profiles
+          where id = $1 and brand_id = $2`,
+        [cmd.taxProfileId, item.brand_id],
+      );
+      if (!profile.rows[0]) throw new IdentityError('not_found', 'Tax profile not found');
+      if (!profile.rows[0].is_active) {
+        throw new IdentityError('validation', 'That tax profile is no longer active');
+      }
+      put('hsn_code', profile.rows[0].hsn_code);
+      put('gst_rate', profile.rows[0].gst_rate);
+      put('tax_profile_id', cmd.taxProfileId);
+      effectiveGstRate = profile.rows[0].gst_rate;
+    } else if (cmd.hsnCode !== undefined) {
+      put('hsn_code', cmd.hsnCode ?? null);
+    }
     if (cmd.gstRate !== undefined) put('gst_rate', cmd.gstRate);
     if (cmd.price !== undefined) put('price', cmd.price);
     if (cmd.isAvailable !== undefined) put('is_available', cmd.isAvailable);
@@ -206,7 +267,7 @@ export async function updateCatalogItem(
     await client.query(`update billing.catalog_items set ${sets.join(', ')} where id = $1`, values);
 
     const priceChanged = cmd.price !== undefined && cmd.price !== item.price;
-    const gstChanged = cmd.gstRate !== undefined && cmd.gstRate !== item.gst_rate;
+    const gstChanged = effectiveGstRate !== undefined && effectiveGstRate !== item.gst_rate;
     if (priceChanged || gstChanged) {
       await client.query(
         `insert into billing.catalog_price_history
@@ -217,7 +278,7 @@ export async function updateCatalogItem(
           item.price,
           cmd.price ?? item.price,
           item.gst_rate,
-          cmd.gstRate ?? item.gst_rate,
+          effectiveGstRate ?? item.gst_rate,
           actor.accountId ?? null,
         ],
       );

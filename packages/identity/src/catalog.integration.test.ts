@@ -15,6 +15,7 @@ import {
   previewPublication,
   retryFailedTargets,
 } from './menu-publish';
+import { createTaxProfile } from './tax-profile';
 
 const RUN = !!process.env.DATABASE_URL;
 const JKSH_ORG = '01000000-0000-4000-8000-000000000001';
@@ -138,6 +139,7 @@ describe.skipIf(!RUN)('Billing V1 Stage 1 - catalog + publication', () => {
         [adminPhone, ownerAPhone, ownerBPhone],
       ]);
       await pool.query(`delete from billing.catalog_items where brand_id = $1`, [brand]);
+      await pool.query(`delete from billing.tax_profiles where brand_id = $1`, [brand]);
       await pool.query(`delete from billing.brands where id = $1`, [brand]);
     } catch {
       /* best effort */
@@ -146,13 +148,20 @@ describe.skipIf(!RUN)('Billing V1 Stage 1 - catalog + publication', () => {
   });
 
   it('denies a Franchise Owner authoring a private item for another franchise outlet', async () => {
+    const admin = await actorFor(adminPhone);
+    const profile = await createTaxProfile(pool, admin, {
+      brandId: brand,
+      name: `Standard 5% ${S}`,
+      hsnCode: '2101',
+      gstRate: '5',
+    });
     const ownerB = await actorFor(ownerBPhone);
     await expect(
       createCatalogItem(pool, ownerB, {
         brandId: brand,
         outletId: outletA, // belongs to franchise A
         name: 'Sneaky Samosa',
-        gstRate: '5',
+        taxProfileId: profile.id,
         price: '20.00',
         isAvailable: true,
         offlineSaleAllowed: true,
@@ -382,4 +391,42 @@ describe.skipIf(!RUN)('Billing V1 Stage 1 - catalog + publication', () => {
     );
     expect(Number(versionsAfter.rows[0]!.n)).toBe(Number(versionsBefore.rows[0]!.n));
   }, 30_000);
+
+  it('requires a Franchise-created item to reference a Central-approved tax profile', async () => {
+    const admin = await actorFor(adminPhone);
+    const ownerA = await actorFor(ownerAPhone);
+    const profile = await createTaxProfile(pool, admin, {
+      brandId: brand,
+      name: `Snacks 12% ${S}`,
+      hsnCode: '2106',
+      gstRate: '12',
+    });
+    const item = await createCatalogItem(pool, ownerA, {
+      brandId: brand,
+      outletId: outletA, // this is the last test in the file - safe to leave live
+      name: `Owner Vada ${S}`,
+      taxProfileId: profile.id,
+      price: '18.00',
+      isAvailable: true,
+      offlineSaleAllowed: true,
+      addonGroupIds: [],
+    });
+    const row = await pool.query<{ gst_rate: string; hsn_code: string; tax_profile_id: string }>(
+      `select gst_rate, hsn_code, tax_profile_id from billing.catalog_items where id = $1`,
+      [item.id],
+    );
+    expect(row.rows[0]?.gst_rate).toBe('12.00');
+    expect(row.rows[0]?.hsn_code).toBe('2106');
+    expect(row.rows[0]?.tax_profile_id).toBe(profile.id);
+
+    // A Franchise Owner cannot manage tax profiles - only Central can.
+    await expect(
+      createTaxProfile(pool, ownerA, {
+        brandId: brand,
+        name: 'Owner attempted profile',
+        hsnCode: '9999',
+        gstRate: '18',
+      }),
+    ).rejects.toThrow(/Denied/);
+  });
 });
