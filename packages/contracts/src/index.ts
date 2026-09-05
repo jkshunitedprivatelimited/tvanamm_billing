@@ -8,6 +8,7 @@ export * from './franchise';
 export * from './identity';
 export * from './offline';
 export * from './outlet';
+export * from './reports';
 export * from './role-capabilities';
 export * from './session';
 export * from './shift';

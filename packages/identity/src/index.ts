@@ -164,6 +164,13 @@ export { issueOfflineAuth, reserveReceiptBlock, syncOfflineBills } from './offli
 export { createRefund, listRefunds } from './refunds';
 export { recordPrintAttempt, getReceiptSnapshot } from './receipts';
 export {
+  getFinancialReport,
+  resolveDateRange,
+  type ReportRange,
+  type ReportRangeKind,
+  type FinancialSummary,
+} from './reports';
+export {
   pinLogin,
   loadOperatorContext,
   lockOperator,
