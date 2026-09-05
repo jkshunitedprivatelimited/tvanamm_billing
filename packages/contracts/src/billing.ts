@@ -62,6 +62,7 @@ export const createBillCommandSchema = createBillCommandShape.refine(
 export type CreateBillCommand = z.infer<typeof createBillCommandShape>;
 
 export const billLineViewSchema = z.object({
+  id: z.uuid(),
   lineNo: z.int(),
   catalogItemId: z.uuid(),
   itemName: z.string(),

@@ -732,6 +732,7 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
     status,
     remainingRefundable,
     lines: lines.rows.map((l) => ({
+      id: l.id,
       lineNo: l.line_no,
       catalogItemId: l.catalog_item_id,
       itemName: l.item_name,
