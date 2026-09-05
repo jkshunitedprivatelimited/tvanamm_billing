@@ -143,6 +143,15 @@ export {
   outletBillingWindow,
 } from './shifts';
 export {
+  calculateBill,
+  type CalcInput,
+  type CalcResult,
+  type CalcLineInput,
+  type CalcDiscount,
+} from './bill-calc';
+export { createBill, getBill, listBills, type BillListRow } from './bills';
+export { recordOutbox, type OutboxInput } from './audit';
+export {
   pinLogin,
   loadOperatorContext,
   lockOperator,
