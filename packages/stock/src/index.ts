@@ -23,3 +23,37 @@ export {
   type VerifiedIdentity,
   type UpsertProjectionCommand,
 } from './identity-projection';
+export { toBaseQuantity } from './units';
+export { applyInbound, applyOutbound, positionValuePaise, type AvgState } from './valuation';
+export {
+  orderFefo,
+  allocateFefo,
+  type BatchPosition,
+  type Allocation,
+  type FefoResult,
+} from './fefo';
+export {
+  postMovement,
+  postMovements,
+  pickFefo,
+  rebuildProjections,
+  type MovementInput,
+  type MovementResult,
+  type FefoPick,
+} from './ledger';
+export {
+  createItem,
+  setItemUnitConversion,
+  addItemBarcode,
+  createWarehouse,
+  configureOutletStock,
+  createBatch,
+  listItems,
+  getItemBalances,
+  type CreateItemCommand,
+  type CreateWarehouseCommand,
+  type ConfigureOutletStockCommand,
+  type CreateBatchCommand,
+  type ItemRow,
+  type BalanceRow,
+} from './inventory';
