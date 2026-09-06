@@ -72,6 +72,31 @@ export {
 } from './recipes';
 export { processSaleCompleted, processSaleRefunded, type ProcessResult } from './consumption';
 export {
+  draftRecall,
+  activateRecall,
+  quarantineRecallLocation,
+  acknowledgeRecallLocation,
+  closeRecall,
+  getRecall,
+  type DraftRecallCommand,
+  type ActivateRecallResult,
+  type RecallSummary,
+} from './recall';
+export {
+  suggestReorderQty,
+  rebuildDailyConsumptionRollups,
+  generateReorderSuggestions,
+  dismissSuggestion,
+  flagAnomaly,
+  getOwnerDashboard,
+  getCentralOversight,
+  type SuggestionInputs,
+  type GenerateSuggestionsCommand,
+  type FlagAnomalyCommand,
+  type OwnerDashboard,
+  type CentralOversight,
+} from './analytics';
+export {
   recordLocalInward,
   reviewLocalInward,
   type RecordLocalInwardCommand,
