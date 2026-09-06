@@ -59,6 +59,9 @@ export const capabilitySchema = z.enum([
   // Scheduled offers
   'billing.offer.manage.master',
   'billing.offer.manage.franchise',
+
+  // Bulk import
+  'billing.bulk_import',
 ]);
 
 export type Capability = z.infer<typeof capabilitySchema>;

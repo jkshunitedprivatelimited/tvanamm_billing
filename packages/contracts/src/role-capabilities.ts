@@ -34,6 +34,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.expense.config',
     'billing.expense.read',
     'billing.offer.manage.master',
+    'billing.bulk_import',
     // Explicitly NOT sale.create / discount / refund / shift / cash: Central
     // manages outlets but never operates as a Store Employee.
   ],

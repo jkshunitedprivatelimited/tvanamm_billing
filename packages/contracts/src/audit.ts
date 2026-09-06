@@ -78,6 +78,8 @@ export const auditActionSchema = z.enum([
   'offer.created',
   'offer.published',
   'offer.paused',
+  'import.previewed',
+  'import.processed',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 

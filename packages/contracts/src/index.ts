@@ -8,6 +8,7 @@ export * from './events';
 export * from './expense';
 export * from './franchise';
 export * from './identity';
+export * from './import';
 export * from './notification';
 export * from './offer';
 export * from './offline';
