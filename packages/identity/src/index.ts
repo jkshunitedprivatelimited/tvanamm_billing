@@ -141,6 +141,7 @@ export {
   listExpenses,
   getExpenseReport,
 } from './expense';
+export { createOffer, offerLifecycle, listOffers } from './offer';
 export {
   previewPublication,
   createAndApplyPublication,

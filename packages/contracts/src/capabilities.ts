@@ -55,6 +55,10 @@ export const capabilitySchema = z.enum([
   'billing.expense.oversee',
   'billing.expense.config',
   'billing.expense.read',
+
+  // Scheduled offers
+  'billing.offer.manage.master',
+  'billing.offer.manage.franchise',
 ]);
 
 export type Capability = z.infer<typeof capabilitySchema>;

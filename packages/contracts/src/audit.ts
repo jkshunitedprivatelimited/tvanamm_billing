@@ -75,6 +75,9 @@ export const auditActionSchema = z.enum([
   'expense.reversed',
   'expense.category_created',
   'expense.threshold_set',
+  'offer.created',
+  'offer.published',
+  'offer.paused',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 

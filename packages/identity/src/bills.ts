@@ -9,10 +9,12 @@ import { businessDateString } from './membership';
 import {
   calculateBill,
   allocateProportionally,
+  discountPaise,
   toPaise,
   fromPaise,
   type CalcLineInput,
 } from './bill-calc';
+import { resolveOffersForOutlet, type ResolvedOffer } from './offer';
 import {
   parseOfflineAuthBundle,
   assertOfflineAuthCovers,
@@ -206,6 +208,8 @@ interface ResolvedLine {
   comboId: string | null;
   comboName: string | null;
   comboGroupId: string | null;
+  offerId: string | null;
+  offerLabel: string | null;
 }
 
 function resolveItemLine(
@@ -263,6 +267,7 @@ function resolveItemLine(
 function resolveComboLine(
   line: CreateBillCommand['lines'][number],
   combos: Map<string, SnapshotCombo>,
+  offers: Map<string, ResolvedOffer>,
 ): Omit<ResolvedLine, 'lineNo'>[] {
   const combo = combos.get(line.comboId ?? '');
   if (!combo) throw new IdentityError('validation', 'Combo not on the published menu');
@@ -275,6 +280,13 @@ function resolveComboLine(
   const totalPaise = toPaise(combo.price) * line.quantity;
   const weights = combo.components.map((c) => toPaise(c.unitPrice) * c.quantity);
   const shares = allocateProportionally(totalPaise, weights);
+  // A combo-targeted scheduled offer discounts the combo total, then that
+  // discount is allocated across components the same way the price is.
+  const offer = offers.get(`combo:${combo.comboId}`);
+  const offerDiscPaise = offer
+    ? discountPaise(totalPaise, { kind: offer.discountKind, value: offer.discountValue })
+    : 0;
+  const offerShares = offerDiscPaise > 0 ? allocateProportionally(offerDiscPaise, shares) : [];
   return combo.components.map((c, i) => {
     const componentQuantity = c.quantity * line.quantity;
     const item: SnapshotItem = {
@@ -297,11 +309,14 @@ function resolveComboLine(
         quantity: componentQuantity,
         addons: [],
         baseTotalOverride: fromPaise(shares[i] ?? 0),
+        ...(offer ? { autoLineDiscountPaise: offerShares[i] ?? 0 } : {}),
       },
       lineDiscount: null,
       comboId: combo.comboId,
       comboName: combo.comboName,
       comboGroupId,
+      offerId: offer?.offerId ?? null,
+      offerLabel: offer?.label ?? null,
     };
   });
 }
@@ -310,16 +325,30 @@ function resolveLines(
   cmd: CreateBillCommand,
   menu: Map<string, SnapshotItem>,
   combos: Map<string, SnapshotCombo>,
+  offers: Map<string, ResolvedOffer>,
 ): ResolvedLine[] {
   const resolved: ResolvedLine[] = [];
   for (const line of cmd.lines) {
     if (line.comboId) {
-      for (const r of resolveComboLine(line, combos)) {
+      for (const r of resolveComboLine(line, combos, offers)) {
         resolved.push({ ...r, lineNo: resolved.length + 1 });
       }
       continue;
     }
     const { item, addons } = resolveItemLine(line, menu);
+    // A scheduled offer on this item applies before any manual employee
+    // discount and never stacks with another offer (`scheduled-offers.md`).
+    const offer = offers.get(`item:${item.catalogItemId}`);
+    let autoPaise = 0;
+    if (offer) {
+      const basePaise =
+        toPaise(item.price) * line.quantity +
+        addons.reduce((s, a) => s + toPaise(a.snap.price) * a.quantity, 0);
+      autoPaise = discountPaise(basePaise, {
+        kind: offer.discountKind,
+        value: offer.discountValue,
+      });
+    }
     resolved.push({
       lineNo: resolved.length + 1,
       item,
@@ -330,6 +359,7 @@ function resolveLines(
         unitPrice: item.price,
         quantity: line.quantity,
         addons: addons.map((a) => ({ unitPrice: a.snap.price, quantity: a.quantity })),
+        ...(offer ? { autoLineDiscountPaise: autoPaise } : {}),
         ...(line.lineDiscount
           ? { lineDiscount: { kind: line.lineDiscount.kind, value: line.lineDiscount.value } }
           : {}),
@@ -338,6 +368,8 @@ function resolveLines(
       comboId: null,
       comboName: null,
       comboGroupId: null,
+      offerId: offer?.offerId ?? null,
+      offerLabel: offer?.label ?? null,
     });
   }
   return resolved;
@@ -490,7 +522,12 @@ export async function createBill(
 
     // 4. Authoritative pricing from the published menu version.
     const menu = await loadMenuVersion(client, outletId, cmd.menuVersion, cmd.offline ?? false);
-    const resolved = resolveLines(cmd, menu.items, menu.combos);
+    // Scheduled offers apply only to online bills - an offline device would
+    // need its offer versions cached in the signed bundle, which is deferred.
+    const offers = cmd.offline
+      ? new Map<string, ResolvedOffer>()
+      : await resolveOffersForOutlet(client, outletId, outlet.timezone, new Date());
+    const resolved = resolveLines(cmd, menu.items, menu.combos, offers);
 
     // 4a. Offline bills must present a valid, matching authorization bundle.
     let discountCeiling: DiscountPolicy | null = null;
@@ -624,8 +661,8 @@ export async function createBill(
         `insert into billing.bill_lines
            (id, bill_id, line_no, catalog_item_id, item_name, quantity, unit_price, gst_rate,
             base_total, discount, final_total, note, stock_recipe_id, stock_recipe_version,
-            combo_id, combo_name, combo_group_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+            combo_id, combo_name, combo_group_id, offer_id, offer_label, offer_discount)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
         [
           lineId,
           billId,
@@ -644,6 +681,9 @@ export async function createBill(
           line.comboId,
           line.comboName,
           line.comboGroupId,
+          line.offerId,
+          line.offerLabel,
+          lc.autoDiscount,
         ],
       );
       for (const a of line.addons) {
@@ -797,9 +837,12 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
     combo_id: string | null;
     combo_name: string | null;
     combo_group_id: string | null;
+    offer_label: string | null;
+    offer_discount: string;
   }>(
     `select id, line_no, catalog_item_id, item_name, quantity, unit_price, gst_rate,
-            base_total, discount, final_total, note, combo_id, combo_name, combo_group_id
+            base_total, discount, final_total, note, combo_id, combo_name, combo_group_id,
+            offer_label, offer_discount
        from billing.bill_lines where bill_id = $1 order by line_no`,
     [billId],
   );
@@ -883,6 +926,8 @@ async function loadBill(client: PoolClient, billId: string): Promise<BillView> {
       comboId: l.combo_id,
       comboName: l.combo_name,
       comboGroupId: l.combo_group_id,
+      offerLabel: l.offer_label,
+      offerDiscount: l.offer_discount,
       refundedQuantity: refundedQtyById.get(l.id) ?? 0,
       addons: addons.rows
         .filter((a) => a.bill_line_id === l.id)

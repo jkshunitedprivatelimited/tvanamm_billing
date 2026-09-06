@@ -96,6 +96,10 @@ export const billLineViewSchema = z.object({
   comboId: z.uuid().nullable(),
   comboName: z.string().nullable(),
   comboGroupId: z.uuid().nullable(),
+  /** Set when a scheduled offer auto-discounted this line; `offerDiscount`
+   *  is that offer's rupee amount, distinct from any employee discount. */
+  offerLabel: z.string().nullable(),
+  offerDiscount: moneySchema,
   addons: z.array(
     z.object({
       addonId: z.uuid(),
@@ -191,6 +195,7 @@ export const receiptSnapshotSchema = z.object({
       finalTotal: moneySchema,
       note: z.string().nullable(),
       comboName: z.string().nullable(),
+      offerLabel: z.string().nullable(),
       addons: z.array(
         z.object({ addonName: z.string(), quantity: z.int(), unitPrice: moneySchema }),
       ),

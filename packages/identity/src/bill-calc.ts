@@ -32,6 +32,12 @@ export interface CalcLineInput {
    *  (`menu-publishing.md` "Billing proportionally allocates combo value and
    *  discounts across component sale lines"). */
   baseTotalOverride?: string;
+  /** An automatic scheduled-offer discount, in paise, applied to this line
+   *  BEFORE any manual employee `lineDiscount` (which then computes on the
+   *  post-offer amount) - "Employee discount may apply afterward ... but
+   *  total discount cannot exceed remaining payable value"
+   *  (`scheduled-offers.md`). Clamped to the line base. */
+  autoLineDiscountPaise?: number;
 }
 
 export interface CalcInput {
@@ -42,7 +48,8 @@ export interface CalcInput {
 
 export interface CalcLineResult {
   baseTotal: string; // unit*qty + addons, before any discount
-  discount: string; // line discount + allocated share of the bill discount
+  autoDiscount: string; // scheduled-offer portion of the line discount
+  discount: string; // offer + line discount + allocated share of the bill discount
   finalTotal: string; // baseTotal - discount, never negative
 }
 
@@ -75,7 +82,7 @@ export function fromPaise(paise: number): string {
 }
 
 /** Discount in paise, clamped to [0, base]. Percent rounds half-up. */
-function discountPaise(base: number, d: CalcDiscount | undefined): number {
+export function discountPaise(base: number, d: CalcDiscount | undefined): number {
   if (!d) return 0;
   if (base <= 0) return 0;
   if (d.kind === 'fixed') {
@@ -131,8 +138,10 @@ export function calculateBill(input: CalcInput): CalcResult {
       }
     }
     if (base < 0) throw new Error('line base cannot be negative');
-    const lineDisc = discountPaise(base, line.lineDiscount);
-    return { base, lineDisc, afterLine: base - lineDisc };
+    const autoDisc = Math.min(Math.max(line.autoLineDiscountPaise ?? 0, 0), base);
+    const afterAuto = base - autoDisc;
+    const lineDisc = discountPaise(afterAuto, line.lineDiscount);
+    return { base, autoDisc, lineDisc, afterLine: afterAuto - lineDisc };
   });
 
   const subtotal = bases.reduce((s, b) => s + b.base, 0);
@@ -158,10 +167,11 @@ export function calculateBill(input: CalcInput): CalcResult {
 
   // 3. Per-line result.
   const lines: CalcLineResult[] = bases.map((b, i) => {
-    const discount = b.lineDisc + (alloc[i] ?? 0);
+    const discount = b.autoDisc + b.lineDisc + (alloc[i] ?? 0);
     const finalTotal = Math.max(b.base - discount, 0);
     return {
       baseTotal: fromPaise(b.base),
+      autoDiscount: fromPaise(b.autoDisc),
       discount: fromPaise(Math.min(discount, b.base)),
       finalTotal: fromPaise(finalTotal),
     };

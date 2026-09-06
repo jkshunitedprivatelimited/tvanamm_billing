@@ -129,6 +129,24 @@ describe('calculateBill - money', () => {
     ).toThrow(/positive integer/);
   });
 
+  it('an autoLineDiscountPaise (offer) applies before the manual line discount', () => {
+    const r = calculateBill({
+      paymentMethod: 'upi',
+      lines: [
+        {
+          unitPrice: '100.00',
+          quantity: 1,
+          addons: [],
+          autoLineDiscountPaise: 3000, // 30.00 offer
+          lineDiscount: { kind: 'percent', value: '10' }, // 10% of the post-offer 70.00
+        },
+      ],
+    });
+    expect(r.lines[0]!.autoDiscount).toBe('30.00');
+    expect(r.lines[0]!.discount).toBe('37.00');
+    expect(r.lines[0]!.finalTotal).toBe('63.00');
+  });
+
   it('a baseTotalOverride line skips the unitPrice*quantity computation', () => {
     const r = calculateBill({
       paymentMethod: 'upi',

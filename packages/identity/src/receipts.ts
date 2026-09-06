@@ -140,8 +140,10 @@ export async function getReceiptSnapshot(
       final_total: string;
       note: string | null;
       combo_name: string | null;
+      offer_label: string | null;
     }>(
-      `select id, item_name, quantity, unit_price, discount, final_total, note, combo_name
+      `select id, item_name, quantity, unit_price, discount, final_total, note, combo_name,
+              offer_label
          from billing.bill_lines where bill_id = $1 order by line_no`,
       [billId],
     );
@@ -172,6 +174,7 @@ export async function getReceiptSnapshot(
         finalTotal: l.final_total,
         note: l.note,
         comboName: l.combo_name,
+        offerLabel: l.offer_label,
         addons: addons.rows
           .filter((a) => a.bill_line_id === l.id)
           .map((a) => ({ addonName: a.addon_name, quantity: a.quantity, unitPrice: a.unit_price })),

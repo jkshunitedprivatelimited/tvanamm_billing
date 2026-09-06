@@ -33,6 +33,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.expense.oversee',
     'billing.expense.config',
     'billing.expense.read',
+    'billing.offer.manage.master',
     // Explicitly NOT sale.create / discount / refund / shift / cash: Central
     // manages outlets but never operates as a Store Employee.
   ],
@@ -70,6 +71,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.expense.record',
     'billing.expense.oversee',
     'billing.expense.read',
+    'billing.offer.manage.franchise',
   ],
   store_employee: [
     'catalog.item.pause',
