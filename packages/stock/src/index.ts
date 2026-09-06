@@ -59,6 +59,38 @@ export {
 } from './inventory';
 export { buildLabelPayload, type LabelInput, type LabelPayload } from './labels';
 export {
+  signCheckout,
+  signWebhook,
+  stubRazorpayGateway,
+  resolveRazorpayGateway,
+  type RazorpayGateway,
+  type RazorpayOrder,
+  type RazorpayPayment,
+} from './razorpay';
+export {
+  upsertDeliveryRule,
+  publishCatalogItem,
+  getSupplyCatalogForOutlet,
+  type UpsertDeliveryRuleCommand,
+  type PublishCatalogItemCommand,
+  type CatalogEntry,
+} from './supply-catalog';
+export {
+  computeDeliveryPaise,
+  createStockOrder,
+  submitStockOrderForPayment,
+  confirmCheckoutCallback,
+  reconcileStockOrderPayment,
+  handleRazorpayWebhook,
+  getStockOrder,
+  type CreateStockOrderCommand,
+  type StockOrderLineInput,
+  type StockOrderTotals,
+  type CheckoutCallbackCommand,
+  type RazorpayWebhookInput,
+  type StockOrderView,
+} from './stock-orders';
+export {
   createProductionOrder,
   issueProductionMaterials,
   recordProductionOutput,
