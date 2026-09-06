@@ -12,6 +12,7 @@ import type {
 import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 import { recordAudit } from './audit';
+import { emitNotification } from './notification';
 import { IdentityError } from './errors';
 import { businessDateString } from './membership';
 import type { RequestMeta } from './admin-auth';
@@ -205,6 +206,21 @@ export async function correctAttendance(
       outletId: session.rows[0].outlet_id,
       correlationId: meta.correlationId ?? randomUUID(),
       metadata: { attendanceSessionId, reason: cmd.reason },
+    });
+    return session.rows[0];
+  }).then(async (s) => {
+    await emitNotification(pool, {
+      organizationId: s.organization_id,
+      ...(s.franchise_id ? { franchiseId: s.franchise_id } : {}),
+      outletId: s.outlet_id,
+      recipientRole: 'franchise_owner',
+      category: 'workforce',
+      severity: 'info',
+      title: 'Attendance record corrected',
+      body: cmd.reason,
+      entityType: 'attendance_session',
+      entityId: attendanceSessionId,
+      dedupKey: `attendance-corrected:${attendanceSessionId}:${String(Date.now())}`,
     });
   });
 }

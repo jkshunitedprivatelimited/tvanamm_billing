@@ -143,6 +143,15 @@ export {
 } from './expense';
 export { createOffer, offerLifecycle, listOffers } from './offer';
 export {
+  emitNotification,
+  emitNotificationInTx,
+  listNotifications,
+  markNotification,
+  markAllNotificationsRead,
+  setNotificationMute,
+  type NotificationInput,
+} from './notification';
+export {
   previewPublication,
   createAndApplyPublication,
   retryFailedTargets,

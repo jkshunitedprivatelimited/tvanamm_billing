@@ -12,6 +12,7 @@ import type {
 import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 import { recordAudit } from './audit';
+import { emitNotification } from './notification';
 import { IdentityError } from './errors';
 import { businessDateString } from './membership';
 import type { RequestMeta } from './admin-auth';
@@ -67,12 +68,12 @@ export async function recordExpense(
     outletId: cmd.outletId,
   });
   const employeeId = actor.kind === 'operator' ? actor.employeeId : undefined;
-  return withActorContext(pool, contextForActor(actor), async (client) => {
+  const result = await withActorContext(pool, contextForActor(actor), async (client) => {
     const existing = await client.query<{ id: string }>(
       `select id from billing.outlet_expenses where outlet_id = $1 and idempotency_key = $2`,
       [cmd.outletId, cmd.idempotencyKey],
     );
-    if (existing.rows[0]) return { id: existing.rows[0].id };
+    if (existing.rows[0]) return { id: existing.rows[0].id, isNew: false, threshold: 0 };
 
     const outlet = await loadOutlet(client, cmd.outletId);
     if (outlet.status !== 'active') {
@@ -132,8 +133,35 @@ export async function recordExpense(
       correlationId: meta.correlationId ?? randomUUID(),
       metadata: { expenseId: id, amount: cmd.amount, paymentSource: cmd.paymentSource },
     });
-    return { id };
+    const threshold = await highValueThreshold(client, cmd.outletId, outlet.organization_id);
+    return {
+      id,
+      isNew: true,
+      threshold,
+      orgId: outlet.organization_id,
+      franchiseId: outlet.franchise_id,
+    };
   });
+
+  if (result.isNew) {
+    const high = Number(cmd.amount) >= result.threshold;
+    await emitNotification(pool, {
+      organizationId: actor.scope.organizationId,
+      ...('franchiseId' in result && result.franchiseId ? { franchiseId: result.franchiseId } : {}),
+      outletId: cmd.outletId,
+      recipientRole: 'franchise_owner',
+      category: 'expenses',
+      severity: high ? 'warning' : 'info',
+      title: high
+        ? `High-value expense: ₹${cmd.amount} (${cmd.categoryName})`
+        : `Expense pending review: ₹${cmd.amount} (${cmd.categoryName})`,
+      body: cmd.reason,
+      entityType: 'outlet_expense',
+      entityId: result.id,
+      dedupKey: `expense:${result.id}`,
+    });
+  }
+  return { id: result.id };
 }
 
 /** Owner review: approve (clears the highlight) or reverse (a linked
@@ -208,6 +236,23 @@ export async function reviewExpense(
       correlationId: meta.correlationId ?? randomUUID(),
       metadata: { expenseId, action: cmd.action, ...(cmd.reason ? { reason: cmd.reason } : {}) },
     });
+    return exp.rows[0];
+  }).then(async (row) => {
+    if (cmd.action === 'reverse') {
+      await emitNotification(pool, {
+        organizationId: row.organization_id,
+        ...(row.franchise_id ? { franchiseId: row.franchise_id } : {}),
+        outletId: row.outlet_id,
+        recipientRole: 'franchise_owner',
+        category: 'expenses',
+        severity: 'info',
+        title: 'An expense was reversed',
+        ...(cmd.reason ? { body: cmd.reason } : {}),
+        entityType: 'outlet_expense',
+        entityId: expenseId,
+        dedupKey: `expense-reversed:${expenseId}`,
+      });
+    }
   });
 }
 
