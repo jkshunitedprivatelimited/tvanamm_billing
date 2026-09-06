@@ -125,7 +125,7 @@ export interface StockOutboxInput {
   aggregateId: string;
   eventType: StockOutboundEventType;
   eventVersion?: number;
-  correlationId?: string;
+  correlationId?: string | null;
   payload: Record<string, unknown>;
 }
 

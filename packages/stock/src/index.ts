@@ -59,6 +59,25 @@ export {
 } from './inventory';
 export { buildLabelPayload, type LabelInput, type LabelPayload } from './labels';
 export {
+  scalePerServing,
+  scalingPreview,
+  createRecipe,
+  publishRecipeVersion,
+  getPublishedRecipe,
+  type ScalingPreview,
+  type CreateRecipeCommand,
+  type RecipeComponentInput,
+  type PublishRecipeVersionCommand,
+  type PublishedRecipe,
+} from './recipes';
+export { processSaleCompleted, processSaleRefunded, type ProcessResult } from './consumption';
+export {
+  recordLocalInward,
+  reviewLocalInward,
+  type RecordLocalInwardCommand,
+  type ReviewLocalInwardCommand,
+} from './local-inward';
+export {
   signCheckout,
   signWebhook,
   stubRazorpayGateway,
