@@ -76,6 +76,22 @@ export {
   type CatalogEntry,
 } from './supply-catalog';
 export {
+  buildGstInvoice,
+  approveStockOrder,
+  allocateStockOrder,
+  dispatchStockOrder,
+  recordOutletInward,
+  resolveDiscrepancy,
+  getDispatch,
+  type GstInvoice,
+  type GstInvoiceLine,
+  type AllocateResult,
+  type DispatchResult,
+  type RecordOutletInwardCommand,
+  type OutletInwardLineInput,
+  type ResolveDiscrepancyOptions,
+} from './dispatch';
+export {
   computeDeliveryPaise,
   createStockOrder,
   submitStockOrderForPayment,
