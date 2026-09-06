@@ -5,6 +5,7 @@ export * from './capabilities';
 export * from './catalog';
 export * from './employee';
 export * from './events';
+export * from './expense';
 export * from './franchise';
 export * from './identity';
 export * from './offline';

@@ -134,6 +134,14 @@ export {
   getEmployeeActivitySummary,
 } from './attendance';
 export {
+  recordExpense,
+  reviewExpense,
+  createExpenseCategory,
+  setExpenseThreshold,
+  listExpenses,
+  getExpenseReport,
+} from './expense';
+export {
   previewPublication,
   createAndApplyPublication,
   retryFailedTargets,

@@ -70,6 +70,11 @@ export const auditActionSchema = z.enum([
   'attendance.checked_out',
   'attendance.corrected',
   'attendance.schedule_set',
+  'expense.recorded',
+  'expense.reviewed',
+  'expense.reversed',
+  'expense.category_created',
+  'expense.threshold_set',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 

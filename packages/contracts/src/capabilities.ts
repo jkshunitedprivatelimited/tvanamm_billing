@@ -49,6 +49,12 @@ export const capabilitySchema = z.enum([
   'identity.attendance.self',
   'identity.attendance.oversee',
   'identity.attendance.schedule_manage',
+
+  // Outlet operational expenses
+  'billing.expense.record',
+  'billing.expense.oversee',
+  'billing.expense.config',
+  'billing.expense.read',
 ]);
 
 export type Capability = z.infer<typeof capabilitySchema>;

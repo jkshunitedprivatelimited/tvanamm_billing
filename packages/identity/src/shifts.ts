@@ -134,6 +134,10 @@ async function expectedCashFor(client: PoolClient, cashSessionId: string): Promi
                          where b.cash_session_id = cs.id and p.method = 'cash'), 0)
             - coalesce((select sum(r.amount) from billing.refunds r
                          where r.cash_session_id = cs.id and r.payout_method = 'cash'), 0)
+            - coalesce((select sum(e.amount) from billing.outlet_expenses e
+                         where e.cash_session_id = cs.id
+                           and e.payment_source = 'shared_cash_drawer'
+                           and e.reversed_at is null), 0)
               as expected
        from billing.cash_sessions cs
       where cs.id = $1`,
