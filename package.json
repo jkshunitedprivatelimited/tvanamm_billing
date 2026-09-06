@@ -24,7 +24,9 @@
     "format": "prettier --write .",
     "db:migrate": "tsx packages/db/src/cli.ts migrate",
     "db:status": "tsx packages/db/src/cli.ts status",
-    "db:seed": "tsx packages/db/src/cli.ts seed"
+    "db:seed": "tsx packages/db/src/cli.ts seed",
+    "stock:migrate": "tsx packages/db/src/stock-cli.ts migrate",
+    "stock:status": "tsx packages/db/src/stock-cli.ts status"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

@@ -17,5 +17,6 @@ export * from './reports';
 export * from './role-capabilities';
 export * from './session';
 export * from './shift';
+export * from './stock';
 export * from './tax-profile';
 export * from './terminal';

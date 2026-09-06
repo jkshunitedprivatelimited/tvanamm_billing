@@ -1,6 +1,19 @@
 export { pgPool, createPool, withTransaction, closePool, type Pool, type PoolClient } from './pg';
 export { applyContext, withActorContext, type DbContext } from './context';
 export {
+  stockPgPool,
+  createStockPool,
+  closeStockPool,
+  type StockPool,
+  type StockPoolClient,
+} from './stock-pg';
+export {
+  applyStockContext,
+  withStockActorContext,
+  stockSystemContext,
+  type StockDbContext,
+} from './stock-context';
+export {
   createServiceRoleClient,
   createAuthClient,
   createUserScopedClient,
