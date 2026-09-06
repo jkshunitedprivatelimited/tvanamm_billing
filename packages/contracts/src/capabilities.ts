@@ -44,6 +44,11 @@ export const capabilitySchema = z.enum([
   'billing.report.store',
   'billing.report.global',
   'billing.accounting.adjust',
+
+  // Workforce attendance
+  'identity.attendance.self',
+  'identity.attendance.oversee',
+  'identity.attendance.schedule_manage',
 ]);
 
 export type Capability = z.infer<typeof capabilitySchema>;

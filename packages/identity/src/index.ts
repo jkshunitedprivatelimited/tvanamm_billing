@@ -126,6 +126,14 @@ export {
 export { createTaxProfile, updateTaxProfile, listTaxProfiles } from './tax-profile';
 export { createCombo, updateCombo } from './combo';
 export {
+  checkIn,
+  checkOut,
+  correctAttendance,
+  setOutletSchedule,
+  listAttendance,
+  getEmployeeActivitySummary,
+} from './attendance';
+export {
   previewPublication,
   createAndApplyPublication,
   retryFailedTargets,

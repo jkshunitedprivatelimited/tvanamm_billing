@@ -28,6 +28,8 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.sale.read.all_stores',
     'billing.report.store',
     'billing.report.global',
+    'identity.attendance.oversee',
+    'identity.attendance.schedule_manage',
     // Explicitly NOT sale.create / discount / refund / shift / cash: Central
     // manages outlets but never operates as a Store Employee.
   ],
@@ -37,6 +39,8 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.report.store',
     'billing.report.global',
     'billing.accounting.adjust',
+    // Explicitly no attendance capability - "no attendance-management
+    // capability by default" (`workforce-attendance.md`).
   ],
   franchise_owner: [
     'identity.employee.manage',
@@ -58,6 +62,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.cash_session.open',
     'billing.cash_session.close',
     'billing.report.store',
+    'identity.attendance.oversee',
   ],
   store_employee: [
     'catalog.item.pause',
@@ -70,6 +75,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Role, readonly Capability[]>> = 
     'billing.shift.close',
     'billing.cash_session.open',
     'billing.cash_session.close',
+    'identity.attendance.self',
   ],
 };
 

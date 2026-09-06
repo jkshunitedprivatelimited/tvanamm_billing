@@ -66,6 +66,10 @@ export const auditActionSchema = z.enum([
   'receipt_numbers.voided',
   'sync.batch_processed',
   'bill.print_attempted',
+  'attendance.checked_in',
+  'attendance.checked_out',
+  'attendance.corrected',
+  'attendance.schedule_set',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 
