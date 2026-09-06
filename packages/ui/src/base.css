@@ -1,0 +1,87 @@
+/**
+ * JKSH shared base layer - the accessibility and interaction baseline every
+ * screen inherits (docs/architecture/ui-ux-design-system.md
+ * "Accessibility and Language", "Interaction Rules"). Import after
+ * tokens.css.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 var(--font-sans);
+  font-feature-settings: normal;
+}
+
+/* Prices, quantities, reports, receipt numbers align on tabular figures. */
+.num,
+.mono,
+td.num,
+.money {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: var(--num-tabular);
+}
+
+/* Visible keyboard focus everywhere; never remove the outline without a
+   replacement (WCAG 2.2 focus-visible). */
+:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Interactive targets meet the 44x44 minimum. */
+button,
+[role='button'],
+a.btn,
+input[type='button'],
+input[type='submit'] {
+  min-height: var(--tap-min);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Motion is short and functional and respects the OS preference. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Status must never be colour alone - pair with text/icon at the call site;
+   these classes just carry the semantic colour. */
+.status-ok {
+  color: var(--ok);
+}
+.status-warning {
+  color: var(--warning);
+}
+.status-danger {
+  color: var(--danger);
+}
