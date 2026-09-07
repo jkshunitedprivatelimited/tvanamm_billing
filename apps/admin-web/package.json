@@ -14,6 +14,7 @@
     "@jksh/contracts": "*",
     "@jksh/db": "*",
     "@jksh/identity": "*",
+    "@jksh/stock": "*",
     "next": "^16.3.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

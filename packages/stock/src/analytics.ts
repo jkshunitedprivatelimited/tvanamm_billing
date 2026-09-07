@@ -177,6 +177,46 @@ export async function generateReorderSuggestions(
   });
 }
 
+export interface SuggestionRow {
+  id: string;
+  itemId: string;
+  suggestedQtyBase: string;
+  inputs: unknown;
+  status: string;
+  dismissedUntil: string | null;
+}
+
+export async function listReorderSuggestions(
+  pool: StockPool,
+  actor: StockActor,
+  outletId: string,
+): Promise<SuggestionRow[]> {
+  ensureStockAllowed(actor, 'stock.inventory.read');
+  return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
+    const { rows } = await client.query<{
+      id: string;
+      item_id: string;
+      suggested_qty_base: string;
+      inputs: unknown;
+      status: string;
+      dismissed_until: string | null;
+    }>(
+      `select id, item_id, suggested_qty_base, inputs, status, dismissed_until
+         from stock.reorder_suggestions where outlet_id = $1
+        order by suggested_qty_base desc`,
+      [outletId],
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      itemId: r.item_id,
+      suggestedQtyBase: r.suggested_qty_base,
+      inputs: r.inputs,
+      status: r.status,
+      dismissedUntil: r.dismissed_until,
+    }));
+  });
+}
+
 export async function dismissSuggestion(
   pool: StockPool,
   actor: StockActor,

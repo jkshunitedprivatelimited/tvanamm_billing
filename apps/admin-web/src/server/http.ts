@@ -2,6 +2,7 @@ import 'server-only';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { IdentityError } from '@jksh/identity';
+import { StockError } from '@jksh/stock';
 import type { ActorContext } from '@jksh/contracts';
 import { getAdminActor } from './auth';
 
@@ -25,7 +26,7 @@ export function jsonError(error: unknown, correlationId?: string): NextResponse 
       { status: 400, ...(correlationId ? { correlationId } : {}) },
     );
   }
-  if (error instanceof IdentityError) {
+  if (error instanceof IdentityError || error instanceof StockError) {
     return apiJson(
       { error: error.code, message: error.message, details: error.details ?? null },
       { status: error.httpStatus, ...(correlationId ? { correlationId } : {}) },
