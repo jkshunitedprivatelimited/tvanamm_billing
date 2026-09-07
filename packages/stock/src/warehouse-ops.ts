@@ -5,7 +5,13 @@ import {
   type StockPool,
   type StockPoolClient,
 } from '@jksh/db';
-import { ensureStockAllowed, stockContextForActor, type StockActor } from './authorize';
+import {
+  assertOutletInFranchise,
+  assertWarehouseAccess,
+  ensureStockAllowed,
+  stockContextForActor,
+  type StockActor,
+} from './authorize';
 import { StockError } from './errors';
 import { requireRow } from './rows';
 import { recordStockAudit } from './audit';
@@ -41,6 +47,7 @@ export async function createProductionOrder(
   cmd: CreateProductionOrderCommand,
 ): Promise<{ id: string }> {
   ensureStockAllowed(actor, 'stock.production.operate');
+  assertWarehouseAccess(actor, cmd.warehouseId);
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
     const ins = await client.query<{ id: string }>(
       `insert into stock.production_orders
@@ -85,6 +92,7 @@ export async function issueProductionMaterials(
     ]);
     const order = po.rows[0];
     if (!order) throw new StockError('not_found', 'Production order not found');
+    assertWarehouseAccess(actor, order.warehouse_id);
     if (!['draft', 'materials_issued'].includes(order.status)) {
       throw new StockError('conflict', `Cannot issue materials to a ${order.status} order`);
     }
@@ -152,6 +160,7 @@ export async function recordProductionOutput(
     );
     const order = po.rows[0];
     if (!order) throw new StockError('not_found', 'Production order not found');
+    assertWarehouseAccess(actor, order.warehouse_id);
     if (order.status !== 'materials_issued') {
       throw new StockError('conflict', `Order must have materials issued, is ${order.status}`);
     }
@@ -242,6 +251,12 @@ export async function postProduction(
 ): Promise<void> {
   ensureStockAllowed(actor, 'stock.production.operate');
   await withStockActorContext(pool, stockContextForActor(actor), async (client) => {
+    const wh = await client.query<{ warehouse_id: string }>(
+      'select warehouse_id from stock.production_orders where id = $1',
+      [productionOrderId],
+    );
+    if (!wh.rows[0]) throw new StockError('not_found', 'Production order not found');
+    assertWarehouseAccess(actor, wh.rows[0].warehouse_id);
     const r = await client.query(
       `update stock.production_orders set status = 'posted', posted_by = $2
         where id = $1 and status in ('produced','quality_checked')`,
@@ -503,6 +518,8 @@ export async function recordWastage(
     ]);
     const l = loc.rows[0];
     if (!l) throw new StockError('not_found', 'Stock location not found');
+    if (l.warehouse_id) assertWarehouseAccess(actor, l.warehouse_id);
+    else if (l.outlet_id) await assertOutletInFranchise(pool, actor, l.outlet_id);
 
     const id = randomUUID();
     const mv = await postMovement(client, {
@@ -568,6 +585,15 @@ export async function createTransfer(
   ensureStockAllowed(actor, 'stock.transfer.operate');
   if (cmd.lines.length === 0) throw new StockError('validation', 'A transfer needs a line');
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
+    // A transfer operator must be assigned to BOTH the source and the
+    // destination warehouse.
+    const whs = await client.query<{ warehouse_id: string | null }>(
+      `select warehouse_id from stock.stock_locations where id = any($1::uuid[])`,
+      [[cmd.fromLocationId, cmd.toLocationId]],
+    );
+    for (const w of whs.rows) {
+      if (w.warehouse_id) assertWarehouseAccess(actor, w.warehouse_id);
+    }
     const ins = await client.query<{ id: string }>(
       `insert into stock.stock_transfers
          (organization_id, from_location_id, to_location_id, transfer_number)
@@ -610,6 +636,7 @@ export async function dispatchTransfer(
       'select warehouse_id from stock.stock_locations where id = $1',
       [transfer.from_location_id],
     );
+    if (fromLoc.rows[0]?.warehouse_id) assertWarehouseAccess(actor, fromLoc.rows[0].warehouse_id);
     const inTransit = (
       await client.query<{ id: string }>(
         `select id from stock.stock_locations
@@ -709,6 +736,7 @@ export async function receiveTransfer(
         [transfer.to_location_id],
       )
     ).rows[0]?.warehouse_id;
+    if (toWh) assertWarehouseAccess(actor, toWh);
     const inTransit = (
       await client.query<{ id: string }>(
         `select id from stock.stock_locations where warehouse_id = $1 and kind = 'in_transit'`,

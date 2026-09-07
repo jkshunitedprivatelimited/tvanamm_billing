@@ -53,6 +53,8 @@ interface SnapshotAddon {
   maxSelect: number;
   isRequired: boolean;
   isAvailable: boolean;
+  stockRecipeId?: string | null;
+  stockRecipeVersion?: number | null;
 }
 interface SnapshotItem {
   catalogItemId: string;
@@ -653,8 +655,10 @@ export async function createBill(
       throw err;
     }
 
+    const billLineIdByLineNo = new Map<number, string>();
     for (const line of resolved) {
       const lineId = randomUUID();
+      billLineIdByLineNo.set(line.lineNo, lineId);
       const lc = calc.lines[line.lineNo - 1];
       if (!lc) throw new IdentityError('validation', 'calculator/line mismatch');
       await client.query(
@@ -775,11 +779,17 @@ export async function createBill(
         businessDate: today,
         finalTotal: calc.finalTotal,
         lines: resolved.map((l) => ({
+          billLineId: billLineIdByLineNo.get(l.lineNo),
           catalogItemId: l.item.catalogItemId,
           quantity: l.quantity,
           stockRecipeId: l.item.stockRecipeId,
           stockRecipeVersion: l.item.stockRecipeVersion,
-          addons: l.addons.map((a) => ({ addonId: a.snap.addonId, quantity: a.quantity })),
+          addons: l.addons.map((a) => ({
+            addonId: a.snap.addonId,
+            quantity: a.quantity,
+            stockRecipeId: a.snap.stockRecipeId ?? null,
+            stockRecipeVersion: a.snap.stockRecipeVersion ?? null,
+          })),
         })),
       },
     });

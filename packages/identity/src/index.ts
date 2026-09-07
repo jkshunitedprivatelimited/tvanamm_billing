@@ -120,7 +120,9 @@ export {
   updateCatalogItem,
   upsertOutletItemOverride,
   pauseOutletItem,
+  linkStockRecipe,
   listMasterMenu,
+  type LinkStockRecipeCommand,
   type MasterMenuView,
 } from './catalog';
 export { createTaxProfile, updateTaxProfile, listTaxProfiles } from './tax-profile';

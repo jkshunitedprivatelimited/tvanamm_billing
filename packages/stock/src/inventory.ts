@@ -243,12 +243,10 @@ export async function configureOutletStock(
   actor: StockActor,
   cmd: ConfigureOutletStockCommand,
 ): Promise<{ sellableLocationId: string }> {
-  if (
-    actor.request !== 'system' &&
-    actor.role !== 'central_admin' &&
-    !(actor.role === 'franchise_owner' && actor.franchiseId === cmd.franchiseId)
-  ) {
-    throw new StockError('forbidden', 'Not permitted to configure this outlet');
+  // Outlet Stock onboarding (which locations exist, tracking on/off) is a
+  // Central operation - it must not trust a caller-supplied franchiseId.
+  if (actor.request !== 'system' && actor.role !== 'central_admin') {
+    throw new StockError('forbidden', 'Only Central configures outlet Stock');
   }
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
     await client.query(

@@ -30,6 +30,81 @@ export function assertCatalogWrite(actor: ActorContext, outletId: string | undef
   }
 }
 
+export interface LinkStockRecipeCommand {
+  target: 'item' | 'addon';
+  targetId: string;
+  /** null clears the link (item/add-on reverts to not_stock_tracked) */
+  stockRecipeId: string | null;
+  stockRecipeVersion: number | null;
+}
+
+/**
+ * Link a Billing menu item or paid add-on to a published Stock recipe version.
+ * This is the Billing half of the two-API menu/recipe workflow
+ * (`docs/architecture/billing-stock-recipe-contract.md` "Menu and Recipe
+ * Setup"): Stock publishes the immutable recipe version, then Billing records
+ * its id/version here so future SaleCompleted lines carry it. Central only for
+ * master rows; a Franchise Owner may link a recipe to their own outlet item.
+ */
+export async function linkStockRecipe(
+  pool: Pool,
+  actor: ActorContext,
+  cmd: LinkStockRecipeCommand,
+  meta: RequestMeta = {},
+): Promise<{ target: 'item' | 'addon'; targetId: string }> {
+  if ((cmd.stockRecipeId === null) !== (cmd.stockRecipeVersion === null)) {
+    throw new IdentityError(
+      'validation',
+      'stockRecipeId and stockRecipeVersion must be set together',
+    );
+  }
+  return withActorContext(pool, contextForActor(actor), async (client) => {
+    if (cmd.target === 'item') {
+      const item = await client.query<{ owner_scope: string; outlet_id: string | null }>(
+        `select owner_scope, outlet_id from billing.catalog_items where id = $1`,
+        [cmd.targetId],
+      );
+      if (!item.rows[0]) throw new IdentityError('not_found', 'Catalog item not found');
+      assertCatalogWrite(actor, item.rows[0].outlet_id ?? undefined);
+      const r = await client.query(
+        `update billing.catalog_items set stock_recipe_id = $2, stock_recipe_version = $3
+          where id = $1`,
+        [cmd.targetId, cmd.stockRecipeId, cmd.stockRecipeVersion],
+      );
+      if (!r.rowCount) throw new IdentityError('not_found', 'Catalog item not found');
+    } else {
+      const addon = await client.query<{ owner_scope: string; outlet_id: string | null }>(
+        `select g.owner_scope, g.outlet_id
+           from billing.addons a
+           join billing.addon_groups g on g.id = a.addon_group_id
+          where a.id = $1`,
+        [cmd.targetId],
+      );
+      if (!addon.rows[0]) throw new IdentityError('not_found', 'Add-on not found');
+      assertCatalogWrite(actor, addon.rows[0].outlet_id ?? undefined);
+      const r = await client.query(
+        `update billing.addons set stock_recipe_id = $2, stock_recipe_version = $3 where id = $1`,
+        [cmd.targetId, cmd.stockRecipeId, cmd.stockRecipeVersion],
+      );
+      if (!r.rowCount) throw new IdentityError('not_found', 'Add-on not found');
+    }
+    await recordAudit(client, {
+      action: 'catalog.recipe_linked',
+      result: 'success',
+      actorAccountId: actor.accountId,
+      organizationId: actor.scope.organizationId,
+      correlationId: meta.correlationId ?? randomUUID(),
+      metadata: {
+        target: cmd.target,
+        targetId: cmd.targetId,
+        stockRecipeId: cmd.stockRecipeId,
+        stockRecipeVersion: cmd.stockRecipeVersion,
+      },
+    });
+    return { target: cmd.target, targetId: cmd.targetId };
+  });
+}
+
 export async function assertBrandInOrg(
   client: PoolClient,
   brandId: string,

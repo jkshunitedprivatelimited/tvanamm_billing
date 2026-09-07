@@ -47,6 +47,8 @@ interface EffectiveItem {
     maxSelect: number;
     isRequired: boolean;
     isAvailable: boolean;
+    stockRecipeId: string | null;
+    stockRecipeVersion: number | null;
   }[];
 }
 
@@ -131,6 +133,8 @@ async function resolveEffectiveItems(
       addon_price: string;
       addon_gst: string;
       addon_available: boolean;
+      addon_stock_recipe_id: string | null;
+      addon_stock_recipe_version: number | null;
     }>(
       `select iag.catalog_item_id,
               g.id as group_id, g.name as group_name, g.min_select, g.max_select, g.is_required,
@@ -138,7 +142,9 @@ async function resolveEffectiveItems(
               coalesce(oao.name, a.name)          as addon_name,
               coalesce(oao.price, a.price)        as addon_price,
               a.gst_rate                          as addon_gst,
-              coalesce(oao.is_available, a.is_available) as addon_available
+              coalesce(oao.is_available, a.is_available) as addon_available,
+              a.stock_recipe_id                   as addon_stock_recipe_id,
+              a.stock_recipe_version              as addon_stock_recipe_version
          from billing.item_addon_groups iag
          join billing.addon_groups g on g.id = iag.addon_group_id and g.status = 'active'
          join billing.addons a on a.addon_group_id = g.id and a.status = 'active'
@@ -161,6 +167,8 @@ async function resolveEffectiveItems(
         maxSelect: a.max_select,
         isRequired: a.is_required,
         isAvailable: a.addon_available,
+        stockRecipeId: a.addon_stock_recipe_id,
+        stockRecipeVersion: a.addon_stock_recipe_version,
       });
     }
   }

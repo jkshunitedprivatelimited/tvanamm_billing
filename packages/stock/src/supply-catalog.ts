@@ -1,5 +1,10 @@
 import { withStockActorContext, type StockPool } from '@jksh/db';
-import { ensureStockAllowed, stockContextForActor, type StockActor } from './authorize';
+import {
+  assertOutletInFranchise,
+  ensureStockAllowed,
+  stockContextForActor,
+  type StockActor,
+} from './authorize';
 import { StockError } from './errors';
 import { requireRow } from './rows';
 
@@ -115,6 +120,7 @@ export async function getSupplyCatalogForOutlet(
   outletId: string,
 ): Promise<CatalogEntry[]> {
   ensureStockAllowed(actor, 'stock.order.create');
+  await assertOutletInFranchise(pool, actor, outletId);
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
     const { rows } = await client.query<{
       id: string;

@@ -243,12 +243,26 @@ describe.skipIf(!RUN)('Billing V1 Stage 3 - bills', () => {
       [bill.id],
     );
     expect(Number(pay.rows[0]!.n)).toBe(1);
-    const ob = await pool.query<{ n: string }>(
-      `select count(*)::int as n from outbox.events
+    const ob = await pool.query<{ n: string; payload: { lines: { billLineId?: string }[] } }>(
+      `select count(*)::int as n, (array_agg(payload))[1] as payload from outbox.events
         where event_type = 'SaleCompleted' and aggregate_id = $1`,
       [bill.id],
     );
     expect(Number(ob.rows[0]!.n)).toBe(1);
+    // Stock's SaleCompleted consumer requires a billLineId on every line.
+    const eventLines = ob.rows[0]!.payload.lines;
+    expect(eventLines.length).toBeGreaterThan(0);
+    for (const l of eventLines) {
+      expect(l.billLineId).toMatch(/^[0-9a-f-]{36}$/);
+    }
+    const dbLineIds = new Set(
+      (
+        await pool.query<{ id: string }>(`select id from billing.bill_lines where bill_id = $1`, [
+          bill.id,
+        ])
+      ).rows.map((r) => r.id),
+    );
+    for (const l of eventLines) expect(dbLineIds.has(l.billLineId!)).toBe(true);
   }, 30_000);
 
   it('is idempotent: the same key returns the original bill, once', async () => {

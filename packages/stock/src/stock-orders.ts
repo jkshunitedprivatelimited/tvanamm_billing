@@ -1,5 +1,10 @@
 import { withStockActorContext, stockSystemContext, type StockPool } from '@jksh/db';
-import { ensureStockAllowed, stockContextForActor, type StockActor } from './authorize';
+import {
+  assertOutletInFranchise,
+  ensureStockAllowed,
+  stockContextForActor,
+  type StockActor,
+} from './authorize';
 import { StockError } from './errors';
 import { requireRow } from './rows';
 import { recordStockAudit } from './audit';
@@ -63,6 +68,7 @@ export async function createStockOrder(
   if (actor.request !== 'system' && actor.franchiseId !== cmd.franchiseId) {
     throw new StockError('forbidden', 'Cannot order for another franchise');
   }
+  await assertOutletInFranchise(pool, actor, cmd.outletId);
   if (cmd.lines.length === 0) throw new StockError('validation', 'An order needs a line');
   const seen = new Set<string>();
   for (const line of cmd.lines) {
@@ -436,31 +442,49 @@ export async function handleRazorpayWebhook(
     );
 
     let processed = false;
+    let note: string | null = null;
     if (input.eventType === 'payment.captured') {
       const rzpOrderId = extractOrderId(input.payload);
       if (rzpOrderId) {
-        const order = await client.query<{ id: string }>(
-          'select id from stock.stock_orders where razorpay_order_id = $1',
+        const order = await client.query<{
+          id: string;
+          total_paise: string;
+          currency: string;
+        }>(
+          'select id, total_paise, currency from stock.stock_orders where razorpay_order_id = $1',
           [rzpOrderId],
         );
-        const orderId = order.rows[0]?.id;
-        if (orderId) {
+        const row = order.rows[0];
+        if (row) {
           const paymentId = extractPaymentId(input.payload);
           const amount = extractAmount(input.payload);
-          await client.query(
-            `update stock.stock_orders
-                set razorpay_payment_id = coalesce(razorpay_payment_id, $2),
-                    status = 'paid', captured_amount_paise = $3, paid_at = now()
-              where id = $1 and status in ('awaiting_payment','payment_pending')`,
-            [orderId, paymentId, amount],
-          );
-          processed = true;
+          const currency = extractCurrency(input.payload);
+          // Never mark paid from a browser-provided or unverified amount:
+          // the captured amount and currency must match the internal order.
+          if (amount !== Number(row.total_paise) || (currency && currency !== row.currency)) {
+            note = `amount/currency mismatch (got ${String(amount)} ${currency ?? '?'}, expected ${row.total_paise} ${row.currency})`;
+          } else {
+            await client.query(
+              `update stock.stock_orders
+                  set razorpay_payment_id = coalesce(razorpay_payment_id, $2),
+                      status = 'paid', captured_amount_paise = $3, paid_at = now()
+                where id = $1 and status in ('awaiting_payment','payment_pending')`,
+              [row.id, paymentId, amount],
+            );
+            await client.query(
+              `update stock.stock_order_payments set status = 'captured', signature_verified = true
+                where stock_order_id = $1
+                  and (razorpay_payment_id = $2 or razorpay_payment_id is null)`,
+              [row.id, paymentId],
+            );
+            processed = true;
+          }
         }
       }
     }
     await client.query(
-      'update stock.razorpay_webhook_events set processed_at = now() where event_id = $1',
-      [input.eventId],
+      'update stock.razorpay_webhook_events set processed_at = now(), process_note = $2 where event_id = $1',
+      [input.eventId, note],
     );
     return { duplicate: false, processed };
   });
@@ -483,6 +507,10 @@ function extractPaymentId(payload: Record<string, unknown>): string | null {
 function extractAmount(payload: Record<string, unknown>): number | null {
   const e = payloadEntity(payload);
   return typeof e?.amount === 'number' ? e.amount : null;
+}
+function extractCurrency(payload: Record<string, unknown>): string | null {
+  const e = payloadEntity(payload);
+  return typeof e?.currency === 'string' ? e.currency : null;
 }
 
 export interface StockOrderView {

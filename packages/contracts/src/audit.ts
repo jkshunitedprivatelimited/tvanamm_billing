@@ -48,6 +48,7 @@ export const auditActionSchema = z.enum([
   'catalog.item_override_set',
   'catalog.item_promoted',
   'catalog.item_paused',
+  'catalog.recipe_linked',
   'catalog.tax_profile_created',
   'catalog.tax_profile_updated',
   'menu.publication_created',

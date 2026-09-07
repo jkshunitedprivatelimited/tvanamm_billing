@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createStockPool, type StockPool } from '@jksh/db';
 import { stockMigrate } from '@jksh/db/stock-migrate';
 import { stockSystemActor, type StockActor } from './authorize';
-import { createItem } from './inventory';
+import { createItem, configureOutletStock } from './inventory';
 import {
   publishCatalogItem,
   upsertDeliveryRule,
@@ -77,6 +77,11 @@ beforeAll(async () => {
       deliveryRuleId: rule.id,
     })
   ).id;
+  await configureOutletStock(pool, sys, {
+    outletId: OUTLET,
+    organizationId: ORG,
+    franchiseId: FRANCHISE,
+  });
 });
 
 afterAll(async () => {

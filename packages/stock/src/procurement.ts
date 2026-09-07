@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { withStockActorContext, stockSystemContext, type StockPool } from '@jksh/db';
-import { ensureStockAllowed, stockContextForActor, type StockActor } from './authorize';
+import {
+  assertWarehouseAccess,
+  ensureStockAllowed,
+  stockContextForActor,
+  type StockActor,
+} from './authorize';
 import { StockError } from './errors';
 import { requireRow } from './rows';
 import { recordStockAudit } from './audit';
@@ -90,6 +95,7 @@ export async function createPurchaseOrder(
   cmd: CreatePurchaseOrderCommand,
 ): Promise<{ id: string; totalPaise: number }> {
   ensureStockAllowed(actor, 'stock.supplier.manage');
+  assertWarehouseAccess(actor, cmd.warehouseId);
   if (cmd.lines.length === 0) throw new StockError('validation', 'A purchase order needs a line');
 
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
@@ -248,6 +254,7 @@ export async function receiveSupplierShipment(
   cmd: ReceiveShipmentCommand,
 ): Promise<ReceiveShipmentResult> {
   ensureStockAllowed(actor, 'stock.receiving.operate');
+  assertWarehouseAccess(actor, cmd.warehouseId);
   if (cmd.lines.length === 0) throw new StockError('validation', 'A receipt needs a line');
 
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
@@ -591,6 +598,7 @@ export async function initiateSupplierReturn(
   cmd: InitiateSupplierReturnCommand,
 ): Promise<{ id: string }> {
   ensureStockAllowed(actor, 'stock.receiving.operate');
+  assertWarehouseAccess(actor, cmd.warehouseId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
     const locs = await client.query<{ kind: string; id: string }>(
       `select kind::text as kind, id from stock.stock_locations
@@ -676,6 +684,7 @@ export async function confirmSupplierReturnDispatch(
     );
     const row = r.rows[0];
     if (!row) throw new StockError('not_found', 'Supplier return not found');
+    assertWarehouseAccess(actor, row.warehouse_id);
     if (row.status !== 'requested') {
       throw new StockError('conflict', `Cannot dispatch a ${row.status} return`);
     }

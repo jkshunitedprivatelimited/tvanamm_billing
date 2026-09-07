@@ -1,5 +1,7 @@
 export { StockError, type StockErrorCode } from './errors';
 export {
+  assertOutletInFranchise,
+  assertWarehouseAccess,
   ensureStockAllowed,
   stockActorHas,
   stockCapabilities,

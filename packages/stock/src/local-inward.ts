@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { withStockActorContext, stockSystemContext, type StockPool } from '@jksh/db';
-import { ensureStockAllowed, type StockActor } from './authorize';
+import { assertOutletInFranchise, ensureStockAllowed, type StockActor } from './authorize';
 import { StockError } from './errors';
 import { requireRow } from './rows';
 import { recordStockAudit } from './audit';
@@ -31,14 +31,7 @@ export async function recordLocalInward(
   cmd: RecordLocalInwardCommand,
 ): Promise<{ id: string; valuationState: string }> {
   ensureStockAllowed(actor, 'stock.local_inward.record');
-  if (
-    actor.request !== 'system' &&
-    actor.role !== 'central_admin' &&
-    !(actor.role === 'franchise_owner' && actor.franchiseId === cmd.franchiseId) &&
-    !(actor.request === 'operator' && actor.outletId === cmd.outletId)
-  ) {
-    throw new StockError('forbidden', 'Not permitted to record inward for this outlet');
-  }
+  await assertOutletInFranchise(pool, actor, cmd.outletId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
     const item = await client.query<{ supply_rule: string }>(
       'select supply_rule::text as supply_rule from stock.items where id = $1',

@@ -1,5 +1,10 @@
 import { withStockActorContext, stockSystemContext, type StockPool } from '@jksh/db';
-import { ensureStockAllowed, stockContextForActor, type StockActor } from './authorize';
+import {
+  assertOutletInFranchise,
+  ensureStockAllowed,
+  stockContextForActor,
+  type StockActor,
+} from './authorize';
 import { StockError } from './errors';
 import { requireRow } from './rows';
 
@@ -76,6 +81,7 @@ export async function generateReorderSuggestions(
   cmd: GenerateSuggestionsCommand,
 ): Promise<{ created: number }> {
   ensureStockAllowed(actor, 'stock.inventory.read');
+  await assertOutletInFranchise(pool, actor, cmd.outletId);
   const trailingDays = cmd.trailingDays ?? 14;
   const leadTimeDays = cmd.leadTimeDays ?? 3;
   const safetyDays = cmd.safetyDays ?? 2;
@@ -192,6 +198,7 @@ export async function listReorderSuggestions(
   outletId: string,
 ): Promise<SuggestionRow[]> {
   ensureStockAllowed(actor, 'stock.inventory.read');
+  await assertOutletInFranchise(pool, actor, outletId);
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
     const { rows } = await client.query<{
       id: string;
@@ -295,6 +302,7 @@ export async function getOwnerDashboard(
   outletId: string,
 ): Promise<OwnerDashboard> {
   ensureStockAllowed(actor, 'stock.report.read');
+  await assertOutletInFranchise(pool, actor, outletId);
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
     const loc = await client.query<{ id: string }>(
       `select id from stock.stock_locations where outlet_id = $1 and scope = 'outlet' and kind = 'sellable'`,

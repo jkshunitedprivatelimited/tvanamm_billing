@@ -1,5 +1,11 @@
 import { withStockActorContext, stockSystemContext, type StockPool } from '@jksh/db';
-import { ensureStockAllowed, stockContextForActor, type StockActor } from './authorize';
+import {
+  assertOutletInFranchise,
+  assertWarehouseAccess,
+  ensureStockAllowed,
+  stockContextForActor,
+  type StockActor,
+} from './authorize';
 import { StockError } from './errors';
 import { requireRow } from './rows';
 import { recordStockAudit } from './audit';
@@ -91,9 +97,11 @@ export async function allocateStockOrder(
   warehouseId: string,
 ): Promise<AllocateResult> {
   ensureStockAllowed(actor, 'stock.dispatch.operate');
+  assertWarehouseAccess(actor, warehouseId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    // Serialise concurrent allocation of the same order.
     const order = await client.query<{ status: string }>(
-      'select status from stock.stock_orders where id = $1',
+      'select status from stock.stock_orders where id = $1 for update',
       [orderId],
     );
     if (!order.rows[0]) throw new StockError('not_found', 'Stock order not found');
@@ -114,7 +122,8 @@ export async function allocateStockOrder(
       qty_base: string;
       allocated_qty_base: string;
     }>(
-      'select id, item_id, qty_base, allocated_qty_base from stock.stock_order_lines where stock_order_id = $1',
+      `select id, item_id, qty_base, allocated_qty_base from stock.stock_order_lines
+        where stock_order_id = $1 for update`,
       [orderId],
     );
 
@@ -122,6 +131,13 @@ export async function allocateStockOrder(
     for (const line of lines.rows) {
       const outstanding = Number(line.qty_base) - Number(line.allocated_qty_base);
       if (outstanding <= 0) continue;
+      // Lock every balance row for this (location, item) so a concurrent
+      // allocation for another order cannot double-count the same usable stock.
+      await client.query(
+        `select 1 from stock.stock_balances
+          where stock_location_id = $1 and item_id = $2 for update`,
+        [sellable, line.item_id],
+      );
       const { picks } = await pickFefo(client, sellable, line.item_id, outstanding.toFixed(6));
       let allocated = 0;
       for (const pick of picks) {
@@ -170,6 +186,7 @@ export async function dispatchStockOrder(
   opts: { dispatchNumber: string; warehouseId: string },
 ): Promise<DispatchResult> {
   ensureStockAllowed(actor, 'stock.dispatch.operate');
+  assertWarehouseAccess(actor, opts.warehouseId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
     const order = await client.query<{
       status: string;
@@ -177,7 +194,7 @@ export async function dispatchStockOrder(
       outlet_id: string;
       franchise_id: string;
     }>(
-      'select status, organization_id, outlet_id, franchise_id from stock.stock_orders where id = $1',
+      'select status, organization_id, outlet_id, franchise_id from stock.stock_orders where id = $1 for update',
       [orderId],
     );
     const o = order.rows[0];
@@ -193,26 +210,37 @@ export async function dispatchStockOrder(
     ).rows[0]?.id;
     if (!sellable) throw new StockError('not_found', 'Warehouse sellable location missing');
 
+    // Only allocations held IN THIS WAREHOUSE are dispatched here; locked so a
+    // concurrent dispatch cannot pick them up too.
     const held = await client.query<{
       id: string;
       stock_order_line_id: string;
       batch_id: string | null;
       qty_base: string;
       item_id: string;
+      hsn_code: string | null;
+      unit_price_paise: string;
+      gst_rate: string;
     }>(
-      `select a.id, a.stock_order_line_id, a.batch_id, a.qty_base, l.item_id
+      `select a.id, a.stock_order_line_id, a.batch_id, a.qty_base, l.item_id,
+              l.hsn_code, l.unit_price_paise, l.gst_rate
          from stock.stock_order_allocations a
          join stock.stock_order_lines l on l.id = a.stock_order_line_id
-        where l.stock_order_id = $1 and a.status = 'held'`,
-      [orderId],
+        where l.stock_order_id = $1 and a.status = 'held' and a.warehouse_id = $2
+        for update of a`,
+      [orderId, opts.warehouseId],
     );
     if (held.rows.length === 0) throw new StockError('conflict', 'Nothing allocated to dispatch');
 
-    const invoiceLines = await client.query<OrderLineForInvoice>(
-      'select hsn_code, qty_base, unit_price_paise, gst_rate from stock.stock_order_lines where stock_order_id = $1',
-      [orderId],
+    // Invoice ONLY the quantities in this dispatch, not the whole order.
+    const invoice = buildGstInvoice(
+      held.rows.map((h) => ({
+        hsn_code: h.hsn_code,
+        qty_base: h.qty_base,
+        unit_price_paise: h.unit_price_paise,
+        gst_rate: h.gst_rate,
+      })),
     );
-    const invoice = buildGstInvoice(invoiceLines.rows);
 
     const dispatchIns = await client.query<{ id: string }>(
       `insert into stock.stock_dispatches
@@ -328,15 +356,30 @@ export async function recordOutletInward(
   cmd: RecordOutletInwardCommand,
 ): Promise<{ inwardId: string; status: string; discrepancies: number }> {
   ensureStockAllowed(actor, 'stock.inward.operate');
-  if (
-    actor.request !== 'system' &&
-    !(actor.role === 'franchise_owner' && actor.franchiseId === cmd.franchiseId) &&
-    !(actor.request === 'operator' && actor.outletId === cmd.outletId) &&
-    actor.role !== 'central_admin'
-  ) {
-    throw new StockError('forbidden', 'Not permitted to receive for this outlet');
-  }
+  await assertOutletInFranchise(pool, actor, cmd.outletId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    // Validate the order <-> dispatch <-> outlet <-> franchise chain up front.
+    const chain = await client.query<{
+      order_outlet: string;
+      order_franchise: string;
+      dispatch_order: string;
+    }>(
+      `select o.outlet_id as order_outlet, o.franchise_id as order_franchise,
+              d.stock_order_id as dispatch_order
+         from stock.stock_orders o
+         join stock.stock_dispatches d on d.id = $2
+        where o.id = $1`,
+      [cmd.stockOrderId, cmd.stockDispatchId],
+    );
+    const c = chain.rows[0];
+    if (!c) throw new StockError('not_found', 'Stock order or dispatch not found');
+    if (c.dispatch_order !== cmd.stockOrderId) {
+      throw new StockError('validation', 'Dispatch does not belong to this order');
+    }
+    if (c.order_outlet !== cmd.outletId || c.order_franchise !== cmd.franchiseId) {
+      throw new StockError('validation', 'Order outlet / franchise mismatch');
+    }
+
     const sellable = (
       await client.query<{ id: string }>(
         `select id from stock.stock_locations where outlet_id = $1 and scope = 'outlet' and kind = 'sellable'`,
@@ -369,14 +412,34 @@ export async function recordOutletInward(
           item_id: string;
           batch_id: string | null;
           stock_order_line_id: string;
+          qty_base: string;
         }>(
-          'select item_id, batch_id, stock_order_line_id from stock.stock_dispatch_lines where id = $1',
-          [line.stockDispatchLineId],
+          `select item_id, batch_id, stock_order_line_id, qty_base
+             from stock.stock_dispatch_lines
+            where id = $1 and stock_dispatch_id = $2`,
+          [line.stockDispatchLineId, cmd.stockDispatchId],
         )
       ).rows[0];
-      if (!dl) throw new StockError('not_found', 'Dispatch line not found');
+      if (!dl) throw new StockError('not_found', 'Dispatch line not found on this dispatch');
 
+      // Guard against repeated inward and quantities exceeding the dispatch.
+      const priorRows = await client.query<{ prior: string }>(
+        `select coalesce(sum(accepted_qty_base + short_qty_base + damaged_qty_base + rejected_qty_base), 0) as prior
+           from stock.outlet_inward_lines where stock_dispatch_line_id = $1`,
+        [line.stockDispatchLineId],
+      );
+      const prior = Number(priorRows.rows[0]?.prior ?? '0');
       const accepted = Number(line.acceptedQtyBase);
+      const thisNonExcess =
+        accepted +
+        Number(line.shortQtyBase ?? '0') +
+        Number(line.damagedQtyBase ?? '0') +
+        Number(line.rejectedQtyBase ?? '0');
+      if (prior + thisNonExcess > Number(dl.qty_base) + 1e-9) {
+        throw new StockError('conflict', 'Inward quantity exceeds the dispatched quantity', {
+          details: { dispatchLineId: line.stockDispatchLineId, dispatched: dl.qty_base },
+        });
+      }
       await client.query(
         `insert into stock.outlet_inward_lines
            (outlet_inward_id, stock_dispatch_line_id, item_id, accepted_qty_base, short_qty_base,

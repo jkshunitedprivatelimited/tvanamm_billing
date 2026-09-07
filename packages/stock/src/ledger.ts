@@ -79,6 +79,31 @@ export async function postMovement(
     throw new StockError('validation', 'Location belongs to another organization');
   }
 
+  // The item must exist and belong to the same organization.
+  const item = await client.query<{ organization_id: string }>(
+    'select organization_id from stock.items where id = $1',
+    [input.itemId],
+  );
+  if (!item.rows[0]) throw new StockError('not_found', 'Item not found');
+  if (item.rows[0].organization_id !== input.organizationId) {
+    throw new StockError('validation', 'Item belongs to another organization');
+  }
+
+  // A named batch must belong to this item and organization.
+  if (input.batchId) {
+    const batch = await client.query<{ item_id: string; organization_id: string }>(
+      'select item_id, organization_id from stock.batches where id = $1',
+      [input.batchId],
+    );
+    if (!batch.rows[0]) throw new StockError('not_found', 'Batch not found');
+    if (batch.rows[0].item_id !== input.itemId) {
+      throw new StockError('validation', 'Batch does not belong to this item');
+    }
+    if (batch.rows[0].organization_id !== input.organizationId) {
+      throw new StockError('validation', 'Batch belongs to another organization');
+    }
+  }
+
   const batchKey = input.batchId ?? NIL_UUID;
   await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
     `${input.stockLocationId}:${input.itemId}:${batchKey}`,
