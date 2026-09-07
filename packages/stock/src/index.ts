@@ -72,6 +72,21 @@ export {
 } from './recipes';
 export { processSaleCompleted, processSaleRefunded, type ProcessResult } from './consumption';
 export {
+  enqueueOfflineDraft,
+  syncOfflineDrafts,
+  isStockFeatureEnabled,
+  setStockFeatureFlag,
+  type OfflineDraftKind,
+  type EnqueueOfflineDraftCommand,
+  type SyncOfflineResult,
+} from './offline';
+export {
+  deliverBillingEventsToStock,
+  processStockInbox,
+  reconcileCrossSystem,
+  type ReconciliationReport,
+} from './relay';
+export {
   draftRecall,
   activateRecall,
   quarantineRecallLocation,
