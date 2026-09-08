@@ -560,6 +560,64 @@ describe.skipIf(!RUN)('Billing V1 Stage 5 - history, printing, refunds', () => {
     );
     expect(Number(printLog.rows[0]!.n)).toBe(1);
   }, 30_000);
+
+  it('rejects a cash refund when no cash session is open, then works once reopened', async () => {
+    const opA = await loginAs(pinA);
+    const bill = await ringUpBill(opA, 1);
+
+    await pool.query(
+      `update billing.cash_sessions
+          set status = 'closed', closed_at = now(),
+              closed_by_employee_id = opened_by_employee_id,
+              closed_by_name = opened_by_name,
+              counted_cash = opening_cash
+        where outlet_id = $1 and status = 'open'`,
+      [outletId],
+    );
+
+    await expect(
+      createRefund(pool, opA, {
+        idempotencyKey: `idem-nocash-${S}`,
+        billId: bill.id,
+        kind: 'full',
+        payoutMethod: 'cash',
+        reason: 'no session',
+      }),
+    ).rejects.toThrow(/cash session/i);
+
+    // A UPI refund is unaffected by the missing cash session.
+    const upi = await createRefund(pool, opA, {
+      idempotencyKey: `idem-nocash-upi-${S}`,
+      billId: bill.id,
+      kind: 'full',
+      payoutMethod: 'upi',
+      payoutReference: 'UTR-NO-CASH',
+      reason: 'no session upi',
+    });
+    expect(upi.payoutMethod).toBe('upi');
+
+    const reopened = await openCashSession(pool, opA, { openingCash: '1000.00' });
+    cashSessionId = reopened.id;
+  }, 30_000);
+
+  it('freezes the outlet legal details onto the receipt at bill time', async () => {
+    const opA = await loginAs(pinA);
+    const bill = await ringUpBill(opA, 1);
+    const original = await getReceiptSnapshot(pool, opA, bill.id);
+    expect(original.outletName).toContain('RfOut');
+
+    // The outlet is later renamed and re-registered under a new GSTIN.
+    await pool.query(
+      `update billing.outlets set display_name = 'Renamed Outlet XYZ', gstin = '99ZZZZZ9999Z9Z9'
+        where id = $1`,
+      [outletId],
+    );
+
+    const reprint = await getReceiptSnapshot(pool, opA, bill.id);
+    expect(reprint.outletName).toBe(original.outletName);
+    expect(reprint.gstin).toBe(original.gstin);
+    expect(reprint.outletName).not.toContain('Renamed');
+  }, 30_000);
 });
 
 async function lineIdOf(billId: string): Promise<string> {

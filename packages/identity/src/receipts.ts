@@ -105,31 +105,49 @@ export async function getReceiptSnapshot(
       final_total: string;
       payment_method: ReceiptSnapshot['paymentMethod'];
       is_complimentary: boolean;
+      receipt_header: {
+        outletName?: string;
+        outletAddress?: string;
+        outletPhone?: string | null;
+        gstin?: string | null;
+      } | null;
     }>(
       `select outlet_id, receipt_number, business_date::text as business_date, committed_at,
               subtotal, discount_total, round_adjustment, final_total, payment_method,
-              is_complimentary
+              is_complimentary, receipt_header
          from billing.bills where id = $1`,
       [billId],
     );
     const bill = b.rows[0];
     if (!bill) throw new IdentityError('not_found', 'Bill not found');
 
-    const outlet = await client.query<{
-      display_name: string;
-      address_line: string;
-      city: string;
-      state: string;
-      postal_code: string;
-      phone: string;
-      gstin: string | null;
-    }>(
-      `select display_name, address_line, city, state, postal_code, phone, gstin
-         from billing.outlets where id = $1`,
-      [bill.outlet_id],
-    );
-    const o = outlet.rows[0];
-    if (!o) throw new IdentityError('not_found', 'Outlet not found');
+    // Prefer the legal details frozen onto the bill when it was issued. Fall
+    // back to the live outlet only for bills created before receipt_header
+    // existed.
+    let header = bill.receipt_header;
+    if (!header?.outletName) {
+      const outlet = await client.query<{
+        display_name: string;
+        address_line: string;
+        city: string;
+        state: string;
+        postal_code: string;
+        phone: string;
+        gstin: string | null;
+      }>(
+        `select display_name, address_line, city, state, postal_code, phone, gstin
+           from billing.outlets where id = $1`,
+        [bill.outlet_id],
+      );
+      const o = outlet.rows[0];
+      if (!o) throw new IdentityError('not_found', 'Outlet not found');
+      header = {
+        outletName: o.display_name,
+        outletAddress: [o.address_line, o.city, o.state, o.postal_code].filter(Boolean).join(', '),
+        outletPhone: o.phone || null,
+        gstin: o.gstin,
+      };
+    }
 
     const lines = await client.query<{
       id: string;
@@ -159,10 +177,10 @@ export async function getReceiptSnapshot(
     );
 
     return {
-      outletName: o.display_name,
-      outletAddress: [o.address_line, o.city, o.state, o.postal_code].filter(Boolean).join(', '),
-      outletPhone: o.phone || null,
-      gstin: o.gstin,
+      outletName: header.outletName ?? '',
+      outletAddress: header.outletAddress ?? '',
+      outletPhone: header.outletPhone ?? null,
+      gstin: header.gstin ?? null,
       receiptNumber: bill.receipt_number,
       businessDate: bill.business_date,
       committedAt: bill.committed_at.toISOString(),

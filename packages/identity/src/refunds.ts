@@ -31,6 +31,10 @@ interface RefundableLine {
   refundedQuantity: number;
   remainingQuantity: number;
   perUnitPaise: number;
+  /** The line's own post-discount total, in paise. */
+  finalTotalPaise: number;
+  /** Sum of amounts already refunded against this line, in paise. */
+  refundedAmountPaise: number;
 }
 
 async function loadRefundableLines(client: PoolClient, billId: string): Promise<RefundableLine[]> {
@@ -40,23 +44,30 @@ async function loadRefundableLines(client: PoolClient, billId: string): Promise<
     `select id, quantity, final_total from billing.bill_lines where bill_id = $1`,
     [billId],
   );
-  const refunded = await client.query<{ bill_line_id: string; qty: string }>(
-    `select bl.id as bill_line_id, coalesce(sum(rl.quantity), 0) as qty
+  const refunded = await client.query<{ bill_line_id: string; qty: string; amount: string }>(
+    `select bl.id as bill_line_id,
+            coalesce(sum(rl.quantity), 0) as qty,
+            coalesce(sum(rl.amount), 0) as amount
        from billing.bill_lines bl
        left join billing.refund_lines rl on rl.bill_line_id = bl.id
       where bl.bill_id = $1
       group by bl.id`,
     [billId],
   );
-  const refundedByLine = new Map(refunded.rows.map((r) => [r.bill_line_id, Number(r.qty)]));
+  const refundedByLine = new Map(
+    refunded.rows.map((r) => [r.bill_line_id, { qty: Number(r.qty), amount: toPaise(r.amount) }]),
+  );
   return lines.rows.map((l) => {
-    const refundedQuantity = refundedByLine.get(l.id) ?? 0;
+    const prior = refundedByLine.get(l.id) ?? { qty: 0, amount: 0 };
+    const finalTotalPaise = toPaise(l.final_total);
     return {
       billLineId: l.id,
       originalQuantity: l.quantity,
-      refundedQuantity,
-      remainingQuantity: l.quantity - refundedQuantity,
-      perUnitPaise: Math.round(toPaise(l.final_total) / l.quantity),
+      refundedQuantity: prior.qty,
+      remainingQuantity: l.quantity - prior.qty,
+      perUnitPaise: Math.round(finalTotalPaise / l.quantity),
+      finalTotalPaise,
+      refundedAmountPaise: prior.amount,
     };
   });
 }
@@ -183,11 +194,18 @@ export async function createRefund(
       });
     }
 
-    const lineAmounts = targets.map((t) => ({
-      billLineId: t.line.billLineId,
-      quantity: t.quantity,
-      amountPaise: t.line.perUnitPaise * t.quantity,
-    }));
+    // Refunding every remaining unit of a line pays back exactly what is left
+    // of that line's own total (its final_total minus anything already
+    // refunded against it), so per-unit rounding can never drift the refund
+    // lines away from the line totals. A partial-quantity refund still uses
+    // the rounded per-unit amount for the units taken.
+    const lineAmounts = targets.map((t) => {
+      const clearsLine = t.quantity === t.line.remainingQuantity;
+      const amountPaise = clearsLine
+        ? t.line.finalTotalPaise - t.line.refundedAmountPaise
+        : t.line.perUnitPaise * t.quantity;
+      return { billLineId: t.line.billLineId, quantity: t.quantity, amountPaise };
+    });
     let totalPaise = lineAmounts.reduce((s, l) => s + l.amountPaise, 0);
 
     // A full refund pays back exactly what remains of the bill's own total
@@ -206,12 +224,22 @@ export async function createRefund(
     const employeeId = actor.kind === 'operator' ? (actor.employeeId ?? null) : null;
     const actorName = await resolveActorName(client, actor);
 
-    // A Cash payout draws down the currently open cash session, if any.
+    // A Cash payout draws down the currently open cash session; there must be
+    // one, so the cash that leaves the drawer is always accounted for in a
+    // session's expected-cash reconciliation.
     const cash = await client.query<{ id: string }>(
       `select id from billing.cash_sessions where outlet_id = $1 and status = 'open'`,
       [bill.outlet_id],
     );
-    const cashSessionId = cmd.payoutMethod === 'cash' ? (cash.rows[0]?.id ?? null) : null;
+    let cashSessionId: string | null = null;
+    if (cmd.payoutMethod === 'cash') {
+      cashSessionId = cash.rows[0]?.id ?? null;
+      if (!cashSessionId) {
+        throw new IdentityError('conflict', 'Open a cash session before giving a cash refund', {
+          details: { code: 'no_open_cash_session' },
+        });
+      }
+    }
 
     const refundId = randomUUID();
     try {

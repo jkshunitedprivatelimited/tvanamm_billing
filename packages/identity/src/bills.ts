@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
 import type { ActorContext, BillView, CreateBillCommand, DiscountInput } from '@jksh/contracts';
 import { contextForActor } from './db-context';
@@ -32,15 +32,61 @@ interface OutletRow {
   franchise_id: string | null;
   timezone: string;
   status: string;
+  display_name: string;
+  address_line: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  phone: string;
+  gstin: string | null;
 }
 
 async function loadOutlet(client: PoolClient, outletId: string): Promise<OutletRow> {
   const { rows } = await client.query<OutletRow>(
-    `select organization_id, franchise_id, timezone, status from billing.outlets where id = $1`,
+    `select organization_id, franchise_id, timezone, status,
+            display_name, address_line, city, state, postal_code, phone, gstin
+       from billing.outlets where id = $1`,
     [outletId],
   );
   if (!rows[0]) throw new IdentityError('not_found', 'Outlet not found');
   return rows[0];
+}
+
+/** A stable hash of the parts of a create-bill request that define the sale.
+ *  Stored on the bill so a retry that reuses the idempotency key for a
+ *  *different* cart is rejected instead of silently returning the first bill. */
+function requestFingerprint(outletId: string, cmd: CreateBillCommand): string {
+  const shape = {
+    outletId,
+    paymentMethod: cmd.paymentMethod ?? null,
+    customer: cmd.customer ?? null,
+    billDiscount: cmd.billDiscount ?? null,
+    lines: cmd.lines.map((l) => ({
+      catalogItemId: l.catalogItemId ?? null,
+      comboId: l.comboId ?? null,
+      quantity: l.quantity,
+      note: l.note ?? null,
+      lineDiscount: l.lineDiscount ?? null,
+      addons: (l.addons ?? []).map((a) => ({ addonId: a.addonId, quantity: a.quantity })),
+    })),
+  };
+  return createHash('sha256').update(JSON.stringify(shape)).digest('hex');
+}
+
+/** The outlet's legal receipt details, frozen onto the bill at creation so a
+ *  later address / GSTIN change never rewrites an already-issued tax receipt. */
+function receiptHeaderFor(o: OutletRow): {
+  outletName: string;
+  outletAddress: string;
+  outletPhone: string | null;
+  gstin: string | null;
+} {
+  return {
+    outletName: o.display_name,
+    outletAddress: [o.address_line, o.city, o.state, o.postal_code].filter(Boolean).join(', '),
+    outletPhone: o.phone || null,
+    gstin: o.gstin,
+  };
 }
 
 interface SnapshotAddon {
@@ -473,13 +519,28 @@ export async function createBill(
     });
   }
 
+  const fingerprint = requestFingerprint(outletId, cmd);
+
   return withActorContext(pool, contextForActor(actor), async (client) => {
-    // 1. Idempotency: a retry returns the original bill untouched.
-    const existing = await client.query<{ id: string }>(
-      `select id from billing.bills where outlet_id = $1 and idempotency_key = $2`,
+    // 1. Idempotency: a retry with the same cart returns the original bill
+    //    untouched; the same key with a *different* cart is a client bug and
+    //    is rejected rather than silently returning the wrong bill.
+    const existing = await client.query<{ id: string; request_fingerprint: string | null }>(
+      `select id, request_fingerprint from billing.bills
+        where outlet_id = $1 and idempotency_key = $2`,
       [outletId, cmd.idempotencyKey],
     );
-    if (existing.rows[0]) return loadBill(client, existing.rows[0].id);
+    if (existing.rows[0]) {
+      const prior = existing.rows[0].request_fingerprint;
+      if (prior && prior !== fingerprint) {
+        throw new IdentityError(
+          'conflict',
+          'This idempotency key was already used for a different sale',
+          { details: { code: 'idempotency_key_reused' } },
+        );
+      }
+      return loadBill(client, existing.rows[0].id);
+    }
 
     const outlet = await loadOutlet(client, outletId);
     if (outlet.status !== 'active') {
@@ -614,8 +675,9 @@ export async function createBill(
             shift_id, cash_session_id, receipt_number, business_date, menu_version,
             customer_name, customer_mobile, subtotal, discount_total, pre_round_total,
             round_adjustment, final_total, payment_method, is_complimentary, is_offline,
-            idempotency_key, terminal_occurred_at, correlation_id)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
+            idempotency_key, terminal_occurred_at, correlation_id, receipt_header,
+            request_fingerprint)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)`,
         [
           billId,
           outlet.organization_id,
@@ -642,15 +704,28 @@ export async function createBill(
           cmd.idempotencyKey,
           cmd.terminalOccurredAt,
           correlationId,
+          JSON.stringify(receiptHeaderFor(outlet)),
+          fingerprint,
         ],
       );
     } catch (err) {
       if ((err as { code?: string }).code === '23505') {
-        const again = await client.query<{ id: string }>(
-          `select id from billing.bills where outlet_id = $1 and idempotency_key = $2`,
+        const again = await client.query<{ id: string; request_fingerprint: string | null }>(
+          `select id, request_fingerprint from billing.bills
+            where outlet_id = $1 and idempotency_key = $2`,
           [outletId, cmd.idempotencyKey],
         );
-        if (again.rows[0]) return loadBill(client, again.rows[0].id);
+        if (again.rows[0]) {
+          const prior = again.rows[0].request_fingerprint;
+          if (prior && prior !== fingerprint) {
+            throw new IdentityError(
+              'conflict',
+              'This idempotency key was already used for a different sale',
+              { details: { code: 'idempotency_key_reused' } },
+            );
+          }
+          return loadBill(client, again.rows[0].id);
+        }
       }
       throw err;
     }

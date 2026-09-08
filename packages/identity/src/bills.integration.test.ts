@@ -289,6 +289,17 @@ describe.skipIf(!RUN)('Billing V1 Stage 3 - bills', () => {
       [outletId, key],
     );
     expect(Number(n.rows[0]!.n)).toBe(1);
+
+    // The same key with a different cart is a client bug, not a retry.
+    await expect(
+      createBill(pool, op, {
+        idempotencyKey: key,
+        menuVersion,
+        paymentMethod: 'upi',
+        lines: [{ catalogItemId: itemChaiId, quantity: 5, addons: [] }],
+        terminalOccurredAt: new Date().toISOString(),
+      }),
+    ).rejects.toThrow(/different sale/i);
   }, 30_000);
 
   it('rejects a stale menu version', async () => {
