@@ -13,16 +13,17 @@ const isProd = process.env.NODE_ENV === 'production';
 /** Per-request nonce-based CSP so Next.js's inline bootstrap scripts are allowed
  *  without `'unsafe-inline'` in production. */
 function contentSecurityPolicy(nonce: string): string {
+  const msg91 = 'https://verify.msg91.com https://verify.phone91.com';
   const scriptSrc = isProd
-    ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://verify.msg91.com`
-    : "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://verify.msg91.com";
+    ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${msg91}`
+    : `script-src 'self' 'unsafe-eval' 'unsafe-inline' ${msg91}`;
   return [
     "default-src 'self'",
     scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    "connect-src 'self' https://*.supabase.co https://control.msg91.com https://verify.msg91.com",
+    `connect-src 'self' https://*.supabase.co https://control.msg91.com ${msg91}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

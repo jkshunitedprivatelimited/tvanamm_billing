@@ -56,11 +56,21 @@ export default function LoginPage() {
       widgetReady.current = true;
     };
     if (w.initSendOTP) return init();
-    const s = document.createElement('script');
-    s.src = 'https://verify.msg91.com/otp-provider.js';
-    s.async = true;
-    s.onload = init;
-    document.body.appendChild(s);
+    const urls = [
+      'https://verify.msg91.com/otp-provider.js',
+      'https://verify.phone91.com/otp-provider.js',
+    ];
+    const load = (i: number) => {
+      const src = urls[i];
+      if (!src) return;
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.onload = init;
+      s.onerror = () => load(i + 1);
+      document.head.appendChild(s);
+    };
+    load(0);
   }, []);
 
   const finish = useCallback(
