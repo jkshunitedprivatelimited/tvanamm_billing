@@ -51,6 +51,24 @@ export function MenuManager({
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState({ categoryId: '', name: '', price: '' });
   const [newCategory, setNewCategory] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  function toggle(id: string) {
+    setCollapsed((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  function jump(id: string) {
+    setCollapsed((s) => {
+      const n = new Set(s);
+      n.delete(id);
+      return n;
+    });
+    document.getElementById(`cat-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [overwritePrice, setOverwritePrice] = useState(false);
@@ -309,22 +327,44 @@ export function MenuManager({
             </div>
           )}
 
+          {/* ---- Category jump bar ----------------------------------- */}
+          {!query && grouped.length > 1 && (
+            <div className="cat-nav">
+              {grouped.map((g) => (
+                <button key={g.id} type="button" className="cat-chip" onClick={() => jump(g.id)}>
+                  {g.name} <span>{g.items.length}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* ---- Category sections ------------------------------------- */}
-          {grouped.map((g) => (
-            <section key={g.id} className="card">
-              <div className="spread" style={{ marginBottom: 10 }}>
-                <strong>{g.name}</strong>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  {g.items.length} item{g.items.length === 1 ? '' : 's'}
-                </span>
-              </div>
-              <div className="menu-rows">
-                {g.items.map((it) => (
-                  <ItemRow key={it.id} item={it} busy={busy} onPatch={patchItem} />
-                ))}
-              </div>
-            </section>
-          ))}
+          {grouped.map((g) => {
+            const isOpen = query.length > 0 || !collapsed.has(g.id);
+            return (
+              <section key={g.id} id={`cat-${g.id}`} className="card cat-card">
+                <button
+                  type="button"
+                  className="cat-head"
+                  onClick={() => toggle(g.id)}
+                  aria-expanded={isOpen}
+                >
+                  <span className="cat-caret">{isOpen ? '▾' : '▸'}</span>
+                  <strong>{g.name}</strong>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {g.items.length} item{g.items.length === 1 ? '' : 's'}
+                  </span>
+                </button>
+                {isOpen && (
+                  <div className="menu-rows">
+                    {g.items.map((it) => (
+                      <ItemRow key={it.id} item={it} busy={busy} onPatch={patchItem} />
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
           {grouped.length === 0 && (
             <div className="empty-state">
               <h3>No items {query ? 'match your search' : 'yet'}</h3>
