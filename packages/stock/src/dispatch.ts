@@ -100,13 +100,21 @@ export async function allocateStockOrder(
   assertWarehouseAccess(actor, warehouseId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
     // Serialise concurrent allocation of the same order.
-    const order = await client.query<{ status: string }>(
-      'select status from stock.stock_orders where id = $1 for update',
+    const order = await client.query<{ status: string; organization_id: string }>(
+      'select status, organization_id from stock.stock_orders where id = $1 for update',
       [orderId],
     );
     if (!order.rows[0]) throw new StockError('not_found', 'Stock order not found');
     if (!['approved', 'allocated'].includes(order.rows[0].status)) {
       throw new StockError('conflict', `Cannot allocate a ${order.rows[0].status} order`);
+    }
+    const wh = await client.query<{ organization_id: string }>(
+      'select organization_id from stock.warehouses where id = $1',
+      [warehouseId],
+    );
+    if (!wh.rows[0]) throw new StockError('not_found', 'Warehouse not found');
+    if (wh.rows[0].organization_id !== order.rows[0].organization_id) {
+      throw new StockError('validation', 'Warehouse and order belong to different organizations');
     }
     const sellable = (
       await client.query<{ id: string }>(
@@ -201,6 +209,14 @@ export async function dispatchStockOrder(
     if (!o) throw new StockError('not_found', 'Stock order not found');
     if (!['allocated', 'partially_dispatched'].includes(o.status)) {
       throw new StockError('payment_unverified', `Cannot dispatch a ${o.status} order`);
+    }
+    const wh = await client.query<{ organization_id: string }>(
+      'select organization_id from stock.warehouses where id = $1',
+      [opts.warehouseId],
+    );
+    if (!wh.rows[0]) throw new StockError('not_found', 'Warehouse not found');
+    if (wh.rows[0].organization_id !== o.organization_id) {
+      throw new StockError('validation', 'Warehouse and order belong to different organizations');
     }
     const sellable = (
       await client.query<{ id: string }>(
@@ -358,26 +374,34 @@ export async function recordOutletInward(
   ensureStockAllowed(actor, 'stock.inward.operate');
   await assertOutletInFranchise(pool, actor, cmd.outletId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
-    // Validate the order <-> dispatch <-> outlet <-> franchise chain up front.
+    // Lock the dispatch row so two concurrent inwards against it are serialised
+    // and cannot both pass the per-line quantity cap.
     const chain = await client.query<{
       order_outlet: string;
       order_franchise: string;
+      order_org: string;
       dispatch_order: string;
+      dispatch_org: string;
     }>(
       `select o.outlet_id as order_outlet, o.franchise_id as order_franchise,
-              d.stock_order_id as dispatch_order
-         from stock.stock_orders o
-         join stock.stock_dispatches d on d.id = $2
-        where o.id = $1`,
-      [cmd.stockOrderId, cmd.stockDispatchId],
+              o.organization_id as order_org,
+              d.stock_order_id as dispatch_order, d.organization_id as dispatch_org
+         from stock.stock_dispatches d
+         join stock.stock_orders o on o.id = d.stock_order_id
+        where d.id = $1
+        for update of d`,
+      [cmd.stockDispatchId],
     );
     const c = chain.rows[0];
-    if (!c) throw new StockError('not_found', 'Stock order or dispatch not found');
+    if (!c) throw new StockError('not_found', 'Dispatch not found');
     if (c.dispatch_order !== cmd.stockOrderId) {
       throw new StockError('validation', 'Dispatch does not belong to this order');
     }
     if (c.order_outlet !== cmd.outletId || c.order_franchise !== cmd.franchiseId) {
       throw new StockError('validation', 'Order outlet / franchise mismatch');
+    }
+    if (c.order_org !== cmd.organizationId || c.dispatch_org !== cmd.organizationId) {
+      throw new StockError('validation', 'Organization mismatch on the order / dispatch');
     }
 
     const sellable = (

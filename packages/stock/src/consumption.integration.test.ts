@@ -17,7 +17,7 @@ import { stockSystemActor, type StockActor } from './authorize';
 import { createItem, configureOutletStock, getItemBalances } from './inventory';
 import { postMovements } from './ledger';
 import { ingestInboundEvent } from './events';
-import { createRecipe, publishRecipeVersion } from './recipes';
+import { assertRecipePublished, createRecipe, publishRecipeVersion } from './recipes';
 import { processSaleCompleted, processSaleRefunded } from './consumption';
 import { recordLocalInward, reviewLocalInward } from './local-inward';
 
@@ -151,6 +151,15 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (RUN) await pool.end();
+});
+
+describe.skipIf(!RUN)('assertRecipePublished (Billing link guard)', () => {
+  it('accepts a real published version and rejects unknown / wrong-kind ones', async () => {
+    const ref = await assertRecipePublished(pool, recipeId, 1);
+    expect(ref.kind).toBe('menu_item');
+    await expect(assertRecipePublished(pool, recipeId, 99)).rejects.toThrow(/not found/i);
+    await expect(assertRecipePublished(pool, randomUUID(), 1)).rejects.toThrow(/not found/i);
+  });
 });
 
 describe.skipIf(!RUN)('Stock sale consumption', () => {

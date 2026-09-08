@@ -107,6 +107,11 @@ export async function createPurchaseOrder(
     if (!supplier.rows[0].is_approved) {
       throw new StockError('forbidden', 'Supplier is not approved');
     }
+    const wh = await client.query(
+      'select 1 from stock.warehouses where id = $1 and organization_id = $2',
+      [cmd.warehouseId, cmd.organizationId],
+    );
+    if (!wh.rowCount) throw new StockError('validation', 'Warehouse is outside this organization');
 
     let subtotal = 0;
     let tax = 0;
@@ -288,11 +293,24 @@ export async function receiveSupplierShipment(
     const hasInvoice = !!cmd.supplierInvoiceNumber && cmd.supplierInvoiceNumber.trim().length > 0;
     const status: ReceiveShipmentResult['status'] = hasInvoice ? 'posted' : 'draft';
 
-    const po = await client.query<{ supplier_id: string }>(
-      'select supplier_id from stock.purchase_orders where id = $1',
+    const po = await client.query<{
+      supplier_id: string;
+      warehouse_id: string;
+      organization_id: string;
+    }>(
+      'select supplier_id, warehouse_id, organization_id from stock.purchase_orders where id = $1',
       [cmd.purchaseOrderId],
     );
     if (!po.rows[0]) throw new StockError('not_found', 'Purchase order not found');
+    if (
+      po.rows[0].organization_id !== cmd.organizationId ||
+      po.rows[0].warehouse_id !== cmd.warehouseId
+    ) {
+      throw new StockError(
+        'validation',
+        'Receipt does not match the purchase order warehouse / org',
+      );
+    }
 
     const receiptId = randomUUID();
     await client.query(

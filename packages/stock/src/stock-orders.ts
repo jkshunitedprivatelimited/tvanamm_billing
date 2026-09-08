@@ -343,14 +343,17 @@ export async function reconcileStockOrderPayment(
   }
   const order = await withStockActorContext(pool, stockContextForActor(actor), async (client) => {
     const { rows } = await client.query<{
+      razorpay_order_id: string | null;
       razorpay_payment_id: string | null;
       total_paise: string;
+      currency: string;
       status: string;
       organization_id: string;
       franchise_id: string;
       outlet_id: string;
     }>(
-      `select razorpay_payment_id, total_paise, status, organization_id, franchise_id, outlet_id
+      `select razorpay_order_id, razorpay_payment_id, total_paise, currency, status,
+              organization_id, franchise_id, outlet_id
          from stock.stock_orders where id = $1`,
       [orderId],
     );
@@ -362,9 +365,15 @@ export async function reconcileStockOrderPayment(
     throw new StockError('payment_unverified', 'No payment to reconcile');
 
   const payment = await gateway.fetchPayment(order.razorpay_payment_id);
+  const matches =
+    payment.status === 'captured' &&
+    payment.id === order.razorpay_payment_id &&
+    payment.amount === Number(order.total_paise) &&
+    payment.currency === order.currency &&
+    payment.order_id === order.razorpay_order_id;
 
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
-    if (payment.status === 'captured' && payment.amount === Number(order.total_paise)) {
+    if (matches) {
       await client.query(
         `update stock.stock_orders
             set status = 'paid', captured_amount_paise = $2, paid_at = now()
@@ -450,8 +459,10 @@ export async function handleRazorpayWebhook(
           id: string;
           total_paise: string;
           currency: string;
+          razorpay_payment_id: string | null;
         }>(
-          'select id, total_paise, currency from stock.stock_orders where razorpay_order_id = $1',
+          `select id, total_paise, currency, razorpay_payment_id
+             from stock.stock_orders where razorpay_order_id = $1`,
           [rzpOrderId],
         );
         const row = order.rows[0];
@@ -459,10 +470,21 @@ export async function handleRazorpayWebhook(
           const paymentId = extractPaymentId(input.payload);
           const amount = extractAmount(input.payload);
           const currency = extractCurrency(input.payload);
-          // Never mark paid from a browser-provided or unverified amount:
-          // the captured amount and currency must match the internal order.
-          if (amount !== Number(row.total_paise) || (currency && currency !== row.currency)) {
-            note = `amount/currency mismatch (got ${String(amount)} ${currency ?? '?'}, expected ${row.total_paise} ${row.currency})`;
+          // Never mark paid from an unverified webhook body: the payment id,
+          // captured amount, and currency must all match the internal order.
+          const reasons: string[] = [];
+          if (!paymentId) reasons.push('missing payment id');
+          if (row.razorpay_payment_id && paymentId && row.razorpay_payment_id !== paymentId) {
+            reasons.push('payment id does not match the checkout callback');
+          }
+          if (amount !== Number(row.total_paise)) {
+            reasons.push(`amount ${String(amount)} != ${row.total_paise}`);
+          }
+          if (currency !== row.currency) {
+            reasons.push(`currency ${currency ?? '(none)'} != ${row.currency}`);
+          }
+          if (reasons.length > 0) {
+            note = `rejected: ${reasons.join('; ')}`;
           } else {
             await client.query(
               `update stock.stock_orders

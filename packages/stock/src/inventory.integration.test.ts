@@ -147,6 +147,13 @@ describe.skipIf(!RUN)('Stock inventory core', () => {
       [key],
     );
     expect(Number(rows[0]!.n)).toBe(1);
+
+    // Reusing the same key with different parameters is a caller bug, not a retry.
+    await expect(
+      withStockActorContext(pool, stockSystemContext(), (c) =>
+        postMovement(c, { ...entry, quantity: '99.000000' }),
+      ),
+    ).rejects.toThrow(/reused with different/i);
   });
 
   it('picks batches first-expiry-first-out', async () => {

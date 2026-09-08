@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { withStockActorContext, type StockPool } from '@jksh/db';
+import { withStockActorContext, stockSystemContext, type StockPool } from '@jksh/db';
 import { ensureStockAllowed, stockContextForActor, type StockActor } from './authorize';
 import { StockError } from './errors';
 import { requireRow } from './rows';
@@ -36,6 +36,54 @@ export function scalingPreview(
     fullServings: Math.floor(theoretical),
     expectedRemainderBase: usableBatchYieldBase - Math.floor(theoretical) * servingQtyBase,
   };
+}
+
+export interface PublishedRecipeRef {
+  recipeId: string;
+  version: number;
+  kind: string;
+  billingMenuItemId: string | null;
+  billingAddonId: string | null;
+}
+
+/**
+ * Confirm a recipe id + version exists in the Stock database and is published.
+ * Called by Billing (through the shared portal) before it records the recipe
+ * link on a menu item / add-on, so a link can never point at a non-existent or
+ * still-draft recipe version.
+ */
+export async function assertRecipePublished(
+  pool: StockPool,
+  recipeId: string,
+  version: number,
+): Promise<PublishedRecipeRef> {
+  return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    const { rows } = await client.query<{
+      status: string;
+      kind: string;
+      billing_menu_item_id: string | null;
+      billing_addon_id: string | null;
+    }>(
+      `select r.status::text as status, r.kind::text as kind,
+              r.billing_menu_item_id, r.billing_addon_id
+         from stock.recipe_versions rv
+         join stock.recipes r on r.id = rv.recipe_id
+        where rv.recipe_id = $1 and rv.version = $2`,
+      [recipeId, version],
+    );
+    const row = rows[0];
+    if (!row) throw new StockError('not_found', 'Recipe version not found in Stock');
+    if (row.status !== 'published') {
+      throw new StockError('conflict', `Recipe is ${row.status}, not published`);
+    }
+    return {
+      recipeId,
+      version,
+      kind: row.kind,
+      billingMenuItemId: row.billing_menu_item_id,
+      billingAddonId: row.billing_addon_id,
+    };
+  });
 }
 
 export interface CreateRecipeCommand {

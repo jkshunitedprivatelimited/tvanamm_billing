@@ -250,7 +250,10 @@ describe.skipIf(!RUN)('Stock ledger integrity', () => {
 });
 
 describe.skipIf(!RUN)('Stock dispatch + webhook hardening', () => {
-  async function paidOrder(orderNumber: string, qty: string): Promise<string> {
+  async function paidOrder(
+    orderNumber: string,
+    qty: string,
+  ): Promise<{ orderId: string; paymentId: string }> {
     const order = await createStockOrder(pool, sys, {
       organizationId: ORG,
       outletId: OUT_A,
@@ -270,12 +273,11 @@ describe.skipIf(!RUN)('Stock dispatch + webhook hardening', () => {
       },
       gateway,
     );
-    return order.id;
+    return { orderId: order.id, paymentId: payId };
   }
 
   it('invoices only the quantity in a partial dispatch', async () => {
-    const orderId = await paidOrder(`HO1-${S}`, '2000'); // more than the 1000 on hand
-    // Move it to paid via webhook with the correct amount.
+    const { orderId, paymentId } = await paidOrder(`HO1-${S}`, '2000'); // > the 1000 on hand
     const rzp = (
       await pool.query<{ razorpay_order_id: string; total_paise: string }>(
         'select razorpay_order_id, total_paise from stock.stock_orders where id = $1',
@@ -294,7 +296,7 @@ describe.skipIf(!RUN)('Stock dispatch + webhook hardening', () => {
           payload: {
             payment: {
               entity: {
-                id: `pw-${orderId}`,
+                id: paymentId,
                 order_id: rzp.razorpay_order_id,
                 amount: Number(rzp.total_paise),
                 currency: 'INR',
@@ -321,7 +323,7 @@ describe.skipIf(!RUN)('Stock dispatch + webhook hardening', () => {
   });
 
   it('does not mark an order paid from a webhook with the wrong amount', async () => {
-    const orderId = await paidOrder(`HO2-${S}`, '5');
+    const { orderId, paymentId } = await paidOrder(`HO2-${S}`, '5');
     const rzp = (
       await pool.query<{ razorpay_order_id: string; total_paise: string }>(
         'select razorpay_order_id, total_paise from stock.stock_orders where id = $1',
@@ -340,9 +342,9 @@ describe.skipIf(!RUN)('Stock dispatch + webhook hardening', () => {
           payload: {
             payment: {
               entity: {
-                id: `pwbad-${orderId}`,
+                id: paymentId, // right payment id...
                 order_id: rzp.razorpay_order_id,
-                amount: Number(rzp.total_paise) - 1,
+                amount: Number(rzp.total_paise) - 1, // ...wrong amount
                 currency: 'INR',
               },
             },
@@ -359,6 +361,41 @@ describe.skipIf(!RUN)('Stock dispatch + webhook hardening', () => {
         [`evtbad-${orderId}`],
       )
     ).rows[0]!.process_note;
-    expect(note).toMatch(/mismatch/i);
+    expect(note).toMatch(/rejected.*amount/i);
+  });
+
+  it('rejects a webhook whose payment id differs from the checkout callback', async () => {
+    const { orderId } = await paidOrder(`HO3-${S}`, '4');
+    const rzp = (
+      await pool.query<{ razorpay_order_id: string; total_paise: string }>(
+        'select razorpay_order_id, total_paise from stock.stock_orders where id = $1',
+        [orderId],
+      )
+    ).rows[0]!;
+    const body = JSON.stringify({ id: `evtpid-${orderId}` });
+    const res = await handleRazorpayWebhook(
+      pool,
+      {
+        eventId: `evtpid-${orderId}`,
+        eventType: 'payment.captured',
+        rawBody: body,
+        signature: signWebhook(body, 'w'),
+        payload: {
+          payload: {
+            payment: {
+              entity: {
+                id: `someone-elses-payment-${orderId}`,
+                order_id: rzp.razorpay_order_id,
+                amount: Number(rzp.total_paise),
+                currency: 'INR',
+              },
+            },
+          },
+        },
+      },
+      gateway,
+    );
+    expect(res.processed).toBe(false);
+    expect((await getStockOrder(pool, sys, orderId)).status).not.toBe('paid');
   });
 });

@@ -53,12 +53,37 @@ export async function postMovement(
   client: StockPoolClient,
   input: MovementInput,
 ): Promise<MovementResult> {
-  const existing = await client.query<{ id: string }>(
-    'select id from stock.stock_movements where organization_id = $1 and idempotency_key = $2',
+  const existing = await client.query<{
+    id: string;
+    stock_location_id: string;
+    item_id: string;
+    batch_id: string | null;
+    quantity: string;
+    movement_type: string;
+  }>(
+    `select id, stock_location_id, item_id, batch_id, quantity, movement_type
+       from stock.stock_movements where organization_id = $1 and idempotency_key = $2`,
     [input.organizationId, input.idempotencyKey],
   );
   const dup = existing.rows[0];
   if (dup) {
+    // A true retry replays the exact same command. A reuse of the key with
+    // different parameters is a caller bug, not a duplicate - fail loudly.
+    const same =
+      dup.stock_location_id === input.stockLocationId &&
+      dup.item_id === input.itemId &&
+      (dup.batch_id ?? null) === (input.batchId ?? null) &&
+      dup.movement_type === input.movementType &&
+      Number(dup.quantity) === Number(input.quantity);
+    if (!same) {
+      throw new StockError(
+        'conflict',
+        'Idempotency key reused with different movement parameters',
+        {
+          details: { idempotencyKey: input.idempotencyKey, existingMovementId: dup.id },
+        },
+      );
+    }
     const bal = await currentOnHand(
       client,
       input.stockLocationId,

@@ -105,15 +105,109 @@ export function stubRazorpayGateway(opts: StubOptions = {}): RazorpayGateway {
   };
 }
 
+interface RazorpayApiOrder {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+}
+interface RazorpayApiPayment {
+  id: string;
+  order_id: string | null;
+  amount: number;
+  currency: string;
+  status: string;
+}
+
 /**
- * Select the gateway from the environment. With no Razorpay keys configured this
- * is the stub (dev). A real HTTP implementation is wired in S7 hardening; until
- * then a configured key still uses the stub's local signing so flows are
- * testable end to end.
+ * Real Razorpay REST gateway. createOrder / fetchPayment call api.razorpay.com
+ * with HTTP Basic auth (key id : key secret); checkout and webhook signatures
+ * are verified locally with HMAC-SHA256 exactly as Razorpay documents.
+ */
+export function httpRazorpayGateway(opts: {
+  keyId: string;
+  keySecret: string;
+  webhookSecret: string;
+  baseUrl?: string;
+}): RazorpayGateway {
+  const base = opts.baseUrl ?? 'https://api.razorpay.com/v1';
+  const auth = `Basic ${Buffer.from(`${opts.keyId}:${opts.keySecret}`).toString('base64')}`;
+
+  async function call<T>(path: string, init: { method?: string; body?: string } = {}): Promise<T> {
+    const res = await fetch(`${base}${path}`, {
+      method: init.method ?? 'GET',
+      headers: { Authorization: auth, 'content-type': 'application/json' },
+      ...(init.body !== undefined ? { body: init.body } : {}),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      throw new Error(`Razorpay ${init.method ?? 'GET'} ${path} -> ${String(res.status)}: ${text}`);
+    }
+    return JSON.parse(text) as T;
+  }
+
+  const normStatus = (s: string): RazorpayPayment['status'] =>
+    (['created', 'authorized', 'captured', 'failed', 'refunded'] as const).includes(
+      s as RazorpayPayment['status'],
+    )
+      ? (s as RazorpayPayment['status'])
+      : 'created';
+
+  return {
+    async createOrder({ amountPaise, currency, receipt }) {
+      const order = await call<RazorpayApiOrder>('/orders', {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: amountPaise,
+          currency,
+          receipt,
+          payment_capture: 1,
+        }),
+      });
+      return {
+        id: order.id,
+        amount: order.amount,
+        currency: order.currency,
+        status: order.status,
+      };
+    },
+    verifyCheckoutSignature(orderId, paymentId, signature) {
+      return safeEqualHex(signCheckout(orderId, paymentId, opts.keySecret), signature);
+    },
+    verifyWebhookSignature(rawBody, signature) {
+      if (!opts.webhookSecret) return false;
+      return safeEqualHex(signWebhook(rawBody, opts.webhookSecret), signature);
+    },
+    async fetchPayment(paymentId) {
+      const p = await call<RazorpayApiPayment>(`/payments/${paymentId}`);
+      return {
+        id: p.id,
+        order_id: p.order_id ?? '',
+        amount: p.amount,
+        currency: p.currency,
+        status: normStatus(p.status),
+      };
+    },
+  };
+}
+
+/**
+ * Select the gateway from the environment: the real HTTP gateway when a
+ * Razorpay key id/secret is configured, otherwise the in-process stub for local
+ * dev and tests.
  */
 export function resolveRazorpayGateway(): RazorpayGateway {
+  const keyId = process.env.RAZORPAY_KEY_ID;
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (keyId && keyId.startsWith('rzp_') && keySecret) {
+    return httpRazorpayGateway({
+      keyId,
+      keySecret,
+      webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET ?? '',
+    });
+  }
   return stubRazorpayGateway({
-    keySecret: process.env.RAZORPAY_KEY_SECRET ?? 'stub_key_secret',
+    keySecret: keySecret ?? 'stub_key_secret',
     webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET ?? 'stub_webhook_secret',
   });
 }

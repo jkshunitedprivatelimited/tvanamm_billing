@@ -213,7 +213,12 @@ describe.skipIf(!RUN)('Stock franchise orders', () => {
       payload: {
         payload: {
           payment: {
-            entity: { id: payWebhook, order_id: sub.razorpayOrderId, amount: order2.totalPaise },
+            entity: {
+              id: payWebhook,
+              order_id: sub.razorpayOrderId,
+              amount: order2.totalPaise,
+              currency: 'INR',
+            },
           },
         },
       },

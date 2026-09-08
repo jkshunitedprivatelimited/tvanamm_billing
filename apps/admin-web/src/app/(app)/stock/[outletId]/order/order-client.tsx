@@ -9,12 +9,47 @@ interface CatalogItem {
   gstRate: string;
 }
 
+interface RazorpayCheckoutResponse {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+}
+interface RazorpayInstance {
+  open: () => void;
+}
+type RazorpayCtor = new (options: Record<string, unknown>) => RazorpayInstance;
+
+const CHECKOUT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
+
+function loadCheckout(): Promise<RazorpayCtor | null> {
+  return new Promise((resolve) => {
+    const w = window as unknown as { Razorpay?: RazorpayCtor };
+    if (w.Razorpay) {
+      resolve(w.Razorpay);
+      return;
+    }
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${CHECKOUT_SRC}"]`);
+    const onReady = () => resolve(w.Razorpay ?? null);
+    if (existing) {
+      existing.addEventListener('load', onReady, { once: true });
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = CHECKOUT_SRC;
+    s.async = true;
+    s.addEventListener('load', onReady, { once: true });
+    s.addEventListener('error', () => resolve(null), { once: true });
+    document.body.appendChild(s);
+  });
+}
+
 export function OrderClient({ outletId, catalog }: { outletId: string; catalog: CatalogItem[] }) {
   const [qty, setQty] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [order, setOrder] = useState<{ id: string; totalPaise: number } | null>(null);
-  const [payment, setPayment] = useState<string | null>(null);
+
+  const razorpayKeyId = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
 
   const lines = useMemo(
     () => catalog.map((c) => ({ item: c, qty: Number(qty[c.id] ?? '0') })).filter((l) => l.qty > 0),
@@ -47,6 +82,12 @@ export function OrderClient({ outletId, catalog }: { outletId: string; catalog: 
     }
   }
 
+  async function refreshStatus(orderId: string): Promise<string> {
+    const res = await fetch(`/api/v1/stock/orders/${orderId}`);
+    const body = (await res.json()) as { status?: string };
+    return body.status ?? 'unknown';
+  }
+
   async function pay() {
     if (!order) return;
     setBusy(true);
@@ -57,12 +98,54 @@ export function OrderClient({ outletId, catalog }: { outletId: string; catalog: 
         setStatus(`Error: ${JSON.stringify(body)}`);
         return;
       }
-      const p = body as { razorpayOrderId: string; amountPaise: number; status: string };
-      setPayment(p.razorpayOrderId);
-      setStatus(
-        `Razorpay order ${p.razorpayOrderId} created for ₹${(p.amountPaise / 100).toFixed(2)}. ` +
-          `Complete Razorpay Checkout; the order becomes "paid" only after the signed webhook is verified.`,
-      );
+      const p = body as { razorpayOrderId: string; amountPaise: number };
+
+      if (!razorpayKeyId) {
+        setStatus(
+          `Razorpay order ${p.razorpayOrderId} created for ₹${(p.amountPaise / 100).toFixed(2)}. ` +
+            `Set NEXT_PUBLIC_RAZORPAY_KEY_ID to open Checkout; the order becomes "paid" only after the verified webhook.`,
+        );
+        return;
+      }
+
+      const Razorpay = await loadCheckout();
+      if (!Razorpay) {
+        setStatus('Could not load Razorpay Checkout.');
+        return;
+      }
+      const rzp = new Razorpay({
+        key: razorpayKeyId,
+        order_id: p.razorpayOrderId,
+        amount: p.amountPaise,
+        currency: 'INR',
+        name: 'JKSH',
+        description: 'Outlet stock order',
+        handler: (response: RazorpayCheckoutResponse) => {
+          void (async () => {
+            const cb = await fetch(`/api/v1/stock/orders/${order.id}/checkout-callback`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                razorpayPaymentId: response.razorpay_payment_id,
+                razorpaySignature: response.razorpay_signature,
+              }),
+            });
+            if (!cb.ok) {
+              setStatus(`Callback rejected: ${JSON.stringify(await cb.json())}`);
+              return;
+            }
+            const s = await refreshStatus(order.id);
+            setStatus(
+              s === 'paid'
+                ? 'Payment captured — order is paid.'
+                : `Payment recorded (status: ${s}); it becomes "paid" once the signed webhook is reconciled.`,
+            );
+          })();
+        },
+        modal: { ondismiss: () => setStatus('Payment cancelled.') },
+      });
+      rzp.open();
+      setStatus('Razorpay Checkout opened…');
     } finally {
       setBusy(false);
     }
@@ -115,7 +198,7 @@ export function OrderClient({ outletId, catalog }: { outletId: string; catalog: 
         </button>
         {order ? (
           <button className="secondary" onClick={pay} disabled={busy}>
-            Submit for payment
+            Pay with Razorpay
           </button>
         ) : null}
       </div>
@@ -123,11 +206,6 @@ export function OrderClient({ outletId, catalog }: { outletId: string; catalog: 
       {status ? (
         <p className={status.startsWith('Error') ? 'error' : 'ok'} style={{ marginTop: 12 }}>
           {status}
-        </p>
-      ) : null}
-      {payment ? (
-        <p className="muted mono" style={{ fontSize: 12 }}>
-          razorpay_order_id: {payment}
         </p>
       ) : null}
     </div>
