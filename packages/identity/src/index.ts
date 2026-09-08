@@ -213,6 +213,12 @@ export {
   type BillsWorkbook,
 } from './retention';
 export {
+  listAuditEvents,
+  type AuditQuery,
+  type AuditEventView,
+  type AuditPage,
+} from './audit-read';
+export {
   pinLogin,
   loadOperatorContext,
   lockOperator,

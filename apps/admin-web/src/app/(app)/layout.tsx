@@ -20,7 +20,10 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   const items: NavItem[] =
     actor.role === 'accountant'
-      ? [{ href: '/reports', label: 'Reports' }]
+      ? [
+          { href: '/reports', label: 'Reports' },
+          { href: '/audit', label: 'Audit' },
+        ]
       : [
           { href: '/', label: 'Outlets' },
           ...(actor.role === 'central_admin' || actor.role === 'franchise_owner'
@@ -28,6 +31,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 { href: '/menu', label: 'Menu' },
                 { href: '/reports', label: 'Reports' },
                 { href: '/stock', label: 'Stock' },
+                { href: '/audit', label: 'Audit' },
               ]
             : []),
           ...(actor.role === 'central_admin' ? [{ href: '/stock/ops', label: 'Stock ops' }] : []),
