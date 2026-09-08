@@ -130,7 +130,8 @@ async function summarizeOutlets(
       grossSales: row.gross,
       discountTotal: row.discount,
       refundTotal: refunded,
-      netSales: (Number(row.gross) - Number(refunded)).toFixed(2),
+      // Net = menu value, less the discounts given, less refunds paid out.
+      netSales: (Number(row.gross) - Number(row.discount) - Number(refunded)).toFixed(2),
       cashTotal: row.cash,
       upiTotal: row.upi,
       complimentaryCount: Number(row.comp_count),

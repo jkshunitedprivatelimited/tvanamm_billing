@@ -27,8 +27,10 @@ let ownerAPhone: string;
 let brand: string;
 let franchiseA: string;
 let franchiseB: string;
+let franchiseC: string;
 let outletA: string;
 let outletB: string;
+let outletC: string;
 let itemId: string;
 
 async function seedAccount(phone: string, role: string, fId: string | null): Promise<void> {
@@ -59,6 +61,7 @@ async function setupOutletWithBill(
   franchiseId: string,
   label: string,
   paymentMethod: 'cash' | 'upi',
+  billDiscount?: { kind: 'fixed' | 'percent'; value: string },
 ): Promise<{ outletId: string; menuVersion: string; billId: string }> {
   const admin = await adminActor(adminPhone);
   const outletId = randomUUID();
@@ -109,6 +112,7 @@ async function setupOutletWithBill(
     menuVersion,
     paymentMethod,
     lines: [{ catalogItemId: itemId, quantity: 1, addons: [] }],
+    ...(billDiscount ? { billDiscount } : {}),
     terminalOccurredAt: new Date().toISOString(),
   });
   return { outletId, menuVersion, billId: bill.id };
@@ -129,9 +133,11 @@ describe.skipIf(!RUN)('Billing V1 Stage 6 - financial reports', () => {
     ownerAPhone = `+9168${S.slice(-8).padStart(8, '0')}`;
     franchiseA = randomUUID();
     franchiseB = randomUUID();
+    franchiseC = randomUUID();
     for (const [id, n] of [
       [franchiseA, `rep-a-${S}`],
       [franchiseB, `rep-b-${S}`],
+      [franchiseC, `rep-c-${S}`],
     ] as const) {
       await pool.query(
         `insert into billing.franchises (id, organization_id, brand_id, name, slug)
@@ -161,6 +167,13 @@ describe.skipIf(!RUN)('Billing V1 Stage 6 - financial reports', () => {
     const b = await setupOutletWithBill(franchiseB, `RepOutB${S.slice(-4)}`, 'upi');
     outletB = b.outletId;
 
+    // A ₹100 bill with a ₹30 whole-bill discount: gross 100, discount 30, net 70.
+    const c = await setupOutletWithBill(franchiseC, `RepOutC${S.slice(-4)}`, 'cash', {
+      kind: 'fixed',
+      value: '30.00',
+    });
+    outletC = c.outletId;
+
     // Refund the outletA bill today so its net effect shows up in today's report.
     const owner = await adminActor(ownerAPhone);
     await createRefund(pool, owner, {
@@ -174,7 +187,7 @@ describe.skipIf(!RUN)('Billing V1 Stage 6 - financial reports', () => {
 
   afterAll(async () => {
     try {
-      for (const outletId of [outletA, outletB]) {
+      for (const outletId of [outletA, outletB, outletC]) {
         await pool.query(
           `delete from billing.refund_lines where refund_id in (select id from billing.refunds where outlet_id = $1)`,
           [outletId],
@@ -273,6 +286,16 @@ describe.skipIf(!RUN)('Billing V1 Stage 6 - financial reports', () => {
     expect(byOutlet).toHaveLength(1);
     expect(byOutlet[0]!.outletId).toBe(outletB);
   });
+
+  it('net sales subtract discounts, not just refunds', async () => {
+    const admin = await adminActor(adminPhone);
+    const { byOutlet } = await getFinancialReport(pool, admin, { kind: 'today' }, {});
+    const c = byOutlet.find((o) => o.outletId === outletC)!;
+    expect(c.grossSales).toBe('100.00');
+    expect(c.discountTotal).toBe('30.00');
+    expect(c.refundTotal).toBe('0.00');
+    expect(c.netSales).toBe('70.00');
+  }, 30_000);
 
   it('a Store Employee has no report capability', async () => {
     // Any operator actor is rejected before touching the database.
