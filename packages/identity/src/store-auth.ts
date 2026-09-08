@@ -28,7 +28,9 @@ export interface PinLoginOutput {
   operatorToken?: string;
 }
 
-const OPERATOR_SESSION_HOURS = 16;
+/** A PIN login lasts a full working day; the operator ends it explicitly with
+ *  "End shift", or the next employee's PIN takes the terminal over. */
+const OPERATOR_SESSION_HOURS = 24;
 
 /** Only the terminal/outlet state is disclosed; every bad-PIN case is generic. */
 type RejectReason = 'invalid' | 'locked' | 'terminal_revoked' | 'outlet_inactive';

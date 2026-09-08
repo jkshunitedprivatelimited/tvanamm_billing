@@ -25,11 +25,31 @@ export default function StoreLoginPage() {
     } catch {
       stored = null;
     }
-    if (!stored) {
-      router.replace('/register');
+    if (stored) {
+      setCredential(stored);
       return;
     }
-    setCredential(stored);
+    // localStorage was cleared (or a fresh browser profile on this device):
+    // recover the credential from the durable server cookie before making the
+    // owner re-run activation.
+    void (async () => {
+      try {
+        const res = await fetch('/api/v1/terminals/session');
+        if (res.ok) {
+          const { credential: recovered } = (await res.json()) as { credential: string };
+          try {
+            localStorage.setItem(CREDENTIAL_KEY, recovered);
+          } catch {
+            /* storage disabled — still usable for this session */
+          }
+          setCredential(recovered);
+          return;
+        }
+      } catch {
+        /* offline / no cookie — fall through to registration */
+      }
+      router.replace('/register');
+    })();
   }, [router]);
 
   async function submit(nextPin: string) {
