@@ -17,10 +17,10 @@ export default async function MenuPage() {
   return (
     <main>
       <h1>Menu</h1>
-      <p className="muted">
+      <p className="page-intro">
         {isCentral
-          ? 'Edit the TVANAMM master menu, then publish immutable versions to outlets. Outlet price and availability overrides are preserved unless you explicitly overwrite them.'
-          : 'Set outlet selling prices and availability, then publish a new immutable menu version for your outlet.'}
+          ? 'One common TVANAMM menu. Edit an item and hit Publish — the new version goes live at every outlet instantly. Outlet price overrides are kept unless you reset them.'
+          : 'Set your outlet’s prices and availability, then publish. The new version is live on the terminal straight away.'}
       </p>
       <MenuManager
         role={actor.role}
