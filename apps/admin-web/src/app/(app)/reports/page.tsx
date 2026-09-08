@@ -1,36 +1,53 @@
-import { getFinancialReport, getRetentionStatus } from '@jksh/identity';
+import { getFinancialReport, getRetentionStatus, type ReportRangeKind } from '@jksh/identity';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
+import { RangeTabs } from './RangeTabs';
 import { RetentionPanel } from './RetentionPanel';
+
+const RANGE_LABEL: Record<string, string> = {
+  today: 'Today',
+  yesterday: 'Yesterday',
+  last7: 'Last 7 days',
+  last30: 'Last 30 days',
+};
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="muted">{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 600 }}>{value}</div>
+    <div className="stat">
+      <div className="label">{label}</div>
+      <div className="value">{value}</div>
     </div>
   );
 }
 
-export default async function ReportsPage() {
+export default async function ReportsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string }>;
+}) {
   const actor = await requireAdminActor();
+  const raw = (await searchParams).range;
+  const range: ReportRangeKind =
+    raw === 'today' || raw === 'yesterday' || raw === 'last30' ? raw : 'last7';
+
   const [{ combined, byOutlet }, retention] = await Promise.all([
-    getFinancialReport(db(), actor, { kind: 'last7' }),
+    getFinancialReport(db(), actor, { kind: range }),
     getRetentionStatus(db(), actor),
   ]);
 
   return (
     <main>
       <h1>Reports</h1>
-      <p className="muted">
-        Last 7 days ({combined.from} to {combined.to})
-        {actor.role === 'accountant'
-          ? ' · read-only across every outlet; GST detail and Excel export arrive in a later pass.'
-          : ''}
+      <p className="page-intro">
+        {RANGE_LABEL[range]} ({combined.from} to {combined.to}) · sales recognised on the bill date,
+        refunds on the refund date. Net sales = menu value − discounts − refunds.
       </p>
+
+      <RangeTabs current={range} />
+
       <div
-        className="card"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}
+        className="card grid"
+        style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}
       >
         <Metric label="Gross sales" value={`₹${combined.grossSales}`} />
         <Metric label="Discounts" value={`₹${combined.discountTotal}`} />
@@ -44,32 +61,32 @@ export default async function ReportsPage() {
 
       {byOutlet.length > 0 ? (
         <>
-          <h2 style={{ marginTop: 24 }}>By outlet</h2>
-          <div style={{ overflowX: 'auto' }}>
+          <h2 className="section-label">By outlet</h2>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Outlet</th>
-                  <th>Gross</th>
-                  <th>Discounts</th>
-                  <th>Refunds</th>
-                  <th>Net</th>
-                  <th>Cash</th>
-                  <th>UPI</th>
-                  <th>Bills</th>
+                  <th className="num">Gross</th>
+                  <th className="num">Discounts</th>
+                  <th className="num">Refunds</th>
+                  <th className="num">Net</th>
+                  <th className="num">Cash</th>
+                  <th className="num">UPI</th>
+                  <th className="num">Bills</th>
                 </tr>
               </thead>
               <tbody>
                 {byOutlet.map((o) => (
                   <tr key={o.outletId}>
                     <td>{o.outletName}</td>
-                    <td>₹{o.grossSales}</td>
-                    <td>₹{o.discountTotal}</td>
-                    <td>₹{o.refundTotal}</td>
-                    <td>₹{o.netSales}</td>
-                    <td>₹{o.cashTotal}</td>
-                    <td>₹{o.upiTotal}</td>
-                    <td>{o.billCount}</td>
+                    <td className="num">₹{o.grossSales}</td>
+                    <td className="num">₹{o.discountTotal}</td>
+                    <td className="num">₹{o.refundTotal}</td>
+                    <td className="num">₹{o.netSales}</td>
+                    <td className="num">₹{o.cashTotal}</td>
+                    <td className="num">₹{o.upiTotal}</td>
+                    <td className="num">{o.billCount}</td>
                   </tr>
                 ))}
               </tbody>
