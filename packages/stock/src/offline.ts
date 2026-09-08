@@ -10,8 +10,8 @@ export type OfflineDraftKind = 'local_inward' | 'wastage' | 'count_line' | 'rece
 export interface EnqueueOfflineDraftCommand {
   deviceId: string;
   organizationId: string;
-  outletId?: string | null;
-  warehouseId?: string | null;
+  outletId?: string | null | undefined;
+  warehouseId?: string | null | undefined;
   kind: OfflineDraftKind;
   sequence: number;
   idempotencyKey: string;

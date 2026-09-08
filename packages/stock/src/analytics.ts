@@ -70,9 +70,9 @@ export async function rebuildDailyConsumptionRollups(
 export interface GenerateSuggestionsCommand {
   organizationId: string;
   outletId: string;
-  trailingDays?: number;
-  leadTimeDays?: number;
-  safetyDays?: number;
+  trailingDays?: number | undefined;
+  leadTimeDays?: number | undefined;
+  safetyDays?: number | undefined;
 }
 
 export async function generateReorderSuggestions(
@@ -246,10 +246,10 @@ export async function dismissSuggestion(
 
 export interface FlagAnomalyCommand {
   organizationId: string;
-  outletId?: string | null;
-  warehouseId?: string | null;
+  outletId?: string | null | undefined;
+  warehouseId?: string | null | undefined;
   subjectType: string;
-  subjectId?: string | null;
+  subjectId?: string | null | undefined;
   kind: string;
   explanation: Record<string, unknown>;
 }

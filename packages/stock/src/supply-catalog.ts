@@ -10,11 +10,11 @@ import { requireRow } from './rows';
 
 export interface UpsertDeliveryRuleCommand {
   organizationId: string;
-  id?: string;
+  id?: string | undefined;
   name: string;
   kind: 'flat' | 'per_outlet' | 'free_over_threshold' | 'free';
-  amountPaise?: number;
-  freeOverPaise?: number | null;
+  amountPaise?: number | undefined;
+  freeOverPaise?: number | null | undefined;
 }
 
 export async function upsertDeliveryRule(
@@ -51,14 +51,14 @@ export async function upsertDeliveryRule(
 
 export interface PublishCatalogItemCommand {
   organizationId: string;
-  brandId?: string | null;
+  brandId?: string | null | undefined;
   itemId: string;
   gstInclusivePricePaise: number;
-  gstRate?: string | number;
-  hsnCode?: string | null;
-  orderPackBase?: string;
-  deliveryRuleId?: string | null;
-  isAvailable?: boolean;
+  gstRate?: string | number | undefined;
+  hsnCode?: string | null | undefined;
+  orderPackBase?: string | undefined;
+  deliveryRuleId?: string | null | undefined;
+  isAvailable?: boolean | undefined;
 }
 
 export async function publishCatalogItem(

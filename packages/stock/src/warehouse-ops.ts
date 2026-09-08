@@ -37,8 +37,8 @@ export interface CreateProductionOrderCommand {
   warehouseId: string;
   outputItemId: string;
   plannedQtyBase: string;
-  recipeId?: string | null;
-  recipeVersion?: number | null;
+  recipeId?: string | null | undefined;
+  recipeVersion?: number | null | undefined;
 }
 
 export async function createProductionOrder(
@@ -71,7 +71,7 @@ export async function createProductionOrder(
 export interface ProductionInputRequest {
   itemId: string;
   qtyBase: string;
-  batchId?: string | null;
+  batchId?: string | null | undefined;
 }
 
 /** Issue raw materials into a production order, FEFO unless a lot is named. */
@@ -134,9 +134,9 @@ export async function issueProductionMaterials(
 
 export interface RecordProductionOutputCommand {
   outputBatchCode: string;
-  expiryDate?: string | null;
+  expiryDate?: string | null | undefined;
   acceptedQtyBase: string;
-  rejectedQtyBase?: string;
+  rejectedQtyBase?: string | undefined;
 }
 
 export async function recordProductionOutput(
@@ -279,7 +279,7 @@ export interface OpenStockCountCommand {
   organizationId: string;
   stockLocationId: string;
   countType: 'full' | 'cycle';
-  periodLabel?: string | null;
+  periodLabel?: string | null | undefined;
 }
 
 export async function openStockCount(
@@ -320,9 +320,9 @@ export async function openStockCount(
 
 export interface CountLineInput {
   itemId: string;
-  batchId?: string | null;
+  batchId?: string | null | undefined;
   countedQtyBase: string;
-  reason?: string | null;
+  reason?: string | null | undefined;
 }
 
 export async function enterCountLine(
@@ -489,7 +489,7 @@ export interface RecordWastageCommand {
   organizationId: string;
   stockLocationId: string;
   itemId: string;
-  batchId?: string | null;
+  batchId?: string | null | undefined;
   qtyBase: string;
   reason:
     | 'spoilage'
@@ -499,7 +499,7 @@ export interface RecordWastageCommand {
     | 'customer_cancelled'
     | 'pest'
     | 'other';
-  evidenceUrl?: string | null;
+  evidenceUrl?: string | null | undefined;
 }
 
 export async function recordWastage(
@@ -565,7 +565,7 @@ export async function recordWastage(
 
 export interface TransferLineInput {
   itemId: string;
-  batchId?: string | null;
+  batchId?: string | null | undefined;
   qtyBase: string;
 }
 
@@ -697,8 +697,8 @@ export async function dispatchTransfer(
 export interface TransferReceiptInput {
   lineId: string;
   acceptedQtyBase: string;
-  damagedQtyBase?: string;
-  shortageQtyBase?: string;
+  damagedQtyBase?: string | undefined;
+  shortageQtyBase?: string | undefined;
 }
 
 export async function receiveTransfer(
@@ -841,10 +841,10 @@ export async function receiveTransfer(
 export interface RecordLabelJobCommand {
   organizationId: string;
   itemId: string;
-  batchId?: string | null;
+  batchId?: string | null | undefined;
   quantity: number;
   template: string;
-  paperMm?: 38 | 50 | 58 | 80;
+  paperMm?: 38 | 50 | 58 | 80 | undefined;
   label: LabelInput;
 }
 

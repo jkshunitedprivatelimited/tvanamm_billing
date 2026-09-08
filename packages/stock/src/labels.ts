@@ -7,10 +7,10 @@
 export interface LabelInput {
   itemName: string;
   sku: string;
-  batchCode?: string | null;
-  expiryDate?: string | null;
+  batchCode?: string | null | undefined;
+  expiryDate?: string | null | undefined;
   barcodeValue: string;
-  paperMm?: 38 | 50 | 58 | 80;
+  paperMm?: 38 | 50 | 58 | 80 | undefined;
 }
 
 export interface LabelPayload {

@@ -16,11 +16,11 @@ import { postMovement } from './ledger';
 export interface CreateSupplierCommand {
   organizationId: string;
   name: string;
-  gstin?: string | null;
-  contactName?: string | null;
-  contactPhone?: string | null;
-  contactEmail?: string | null;
-  paymentTermsDays?: number;
+  gstin?: string | null | undefined;
+  contactName?: string | null | undefined;
+  contactPhone?: string | null | undefined;
+  contactEmail?: string | null | undefined;
+  paymentTermsDays?: number | undefined;
 }
 
 export async function createSupplier(
@@ -77,7 +77,7 @@ export interface PurchaseOrderLineInput {
   itemId: string;
   orderQtyBase: string;
   unitPricePaise: number;
-  gstRate?: string | number;
+  gstRate?: string | number | undefined;
 }
 
 export interface CreatePurchaseOrderCommand {
@@ -85,7 +85,7 @@ export interface CreatePurchaseOrderCommand {
   supplierId: string;
   warehouseId: string;
   poNumber: string;
-  expectedDate?: string | null;
+  expectedDate?: string | null | undefined;
   lines: PurchaseOrderLineInput[];
 }
 
@@ -215,16 +215,16 @@ export async function transitionPurchaseOrder(
 // ---- Receiving ---------------------------------------------------
 
 export interface ReceiptLineInput {
-  purchaseOrderLineId?: string | null;
+  purchaseOrderLineId?: string | null | undefined;
   itemId: string;
-  batchCode?: string | null;
-  manufactureDate?: string | null;
-  expiryDate?: string | null;
+  batchCode?: string | null | undefined;
+  manufactureDate?: string | null | undefined;
+  expiryDate?: string | null | undefined;
   acceptedQtyBase: string;
-  damagedQtyBase?: string;
-  rejectedQtyBase?: string;
+  damagedQtyBase?: string | undefined;
+  rejectedQtyBase?: string | undefined;
   unitCostPaise: number;
-  manualEntryReason?: string | null;
+  manualEntryReason?: string | null | undefined;
 }
 
 export interface ReceiveShipmentCommand {
@@ -233,9 +233,9 @@ export interface ReceiveShipmentCommand {
   warehouseId: string;
   receiptNumber: string;
   idempotencyKey: string;
-  supplierInvoiceNumber?: string | null;
-  invoiceDate?: string | null;
-  landedCosts?: Record<string, unknown>;
+  supplierInvoiceNumber?: string | null | undefined;
+  invoiceDate?: string | null | undefined;
+  landedCosts?: Record<string, unknown> | undefined;
   lines: ReceiptLineInput[];
 }
 
@@ -468,10 +468,10 @@ export async function receiveSupplierShipment(
 export interface CreateSupplierInvoiceCommand {
   organizationId: string;
   supplierId: string;
-  supplierReceiptId?: string | null;
+  supplierReceiptId?: string | null | undefined;
   invoiceNumber: string;
   invoiceDate: string;
-  dueDate?: string | null;
+  dueDate?: string | null | undefined;
   amountPaise: number;
 }
 
@@ -509,7 +509,7 @@ export interface RecordSupplierPaymentCommand {
   supplierInvoiceId: string;
   amountPaise: number;
   method: 'bank_transfer' | 'upi' | 'cheque' | 'cash' | 'adjustment' | 'credit_note';
-  reference?: string | null;
+  reference?: string | null | undefined;
   paidOn: string;
 }
 
@@ -601,13 +601,13 @@ export interface InitiateSupplierReturnCommand {
   supplierId: string;
   warehouseId: string;
   itemId: string;
-  batchId?: string | null;
+  batchId?: string | null | undefined;
   quantityBase: string;
   reason: 'damaged' | 'wrong_item' | 'expired' | 'rejected' | 'quality_failed';
-  purchaseOrderId?: string | null;
-  supplierReceiptId?: string | null;
-  supplierInvoiceId?: string | null;
-  evidenceUrl?: string | null;
+  purchaseOrderId?: string | null | undefined;
+  supplierReceiptId?: string | null | undefined;
+  supplierInvoiceId?: string | null | undefined;
+  evidenceUrl?: string | null | undefined;
 }
 
 export async function initiateSupplierReturn(

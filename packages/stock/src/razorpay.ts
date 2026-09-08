@@ -60,10 +60,10 @@ export function signWebhook(rawBody: string, webhookSecret: string): string {
 }
 
 export interface StubOptions {
-  keySecret?: string;
-  webhookSecret?: string;
+  keySecret?: string | undefined;
+  webhookSecret?: string | undefined;
   /** payment id -> reconciliation state the caller wants fetchPayment to report */
-  payments?: Map<string, RazorpayPayment>;
+  payments?: Map<string, RazorpayPayment> | undefined;
 }
 
 /**

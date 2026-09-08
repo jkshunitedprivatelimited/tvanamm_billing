@@ -97,13 +97,13 @@ export async function resolveStockActor(
 }
 
 export interface UpsertProjectionCommand {
-  accountId?: string;
-  employeeId?: string;
+  accountId?: string | undefined;
+  employeeId?: string | undefined;
   role: StockActorRole;
   organizationId: string;
-  franchiseId?: string;
-  displayName?: string;
-  isActive?: boolean;
+  franchiseId?: string | undefined;
+  displayName?: string | undefined;
+  isActive?: boolean | undefined;
 }
 
 /** Central Admin grants or refreshes a Stock access projection for an account. */

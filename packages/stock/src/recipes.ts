@@ -88,11 +88,11 @@ export async function assertRecipePublished(
 
 export interface CreateRecipeCommand {
   organizationId: string;
-  brandId?: string | null;
+  brandId?: string | null | undefined;
   kind: 'menu_item' | 'addon' | 'intermediate';
-  billingMenuItemId?: string | null;
-  billingAddonId?: string | null;
-  outputItemId?: string | null;
+  billingMenuItemId?: string | null | undefined;
+  billingAddonId?: string | null | undefined;
+  outputItemId?: string | null | undefined;
   name: string;
 }
 
@@ -127,18 +127,18 @@ export interface RecipeComponentInput {
   componentType: 'fixed' | 'optional' | 'alternative' | 'addon' | 'packaging';
   itemId: string;
   qtyBase: string;
-  alternativeGroup?: string | null;
-  isDefault?: boolean;
-  processLossPct?: number;
+  alternativeGroup?: string | null | undefined;
+  isDefault?: boolean | undefined;
+  processLossPct?: number | undefined;
 }
 
 export interface PublishRecipeVersionCommand {
   servingQtyBase: string;
   servingUnit: string;
-  batchYieldBase?: string | null;
-  preparedBaseItemId?: string | null;
-  preparedBaseQtyBase?: string | null;
-  yieldUnverified?: boolean;
+  batchYieldBase?: string | null | undefined;
+  preparedBaseItemId?: string | null | undefined;
+  preparedBaseQtyBase?: string | null | undefined;
+  yieldUnverified?: boolean | undefined;
   components: RecipeComponentInput[];
 }
 

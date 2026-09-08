@@ -11,12 +11,12 @@ export interface RecordLocalInwardCommand {
   outletId: string;
   franchiseId: string;
   itemId: string;
-  batchCode?: string | null;
-  expiryDate?: string | null;
+  batchCode?: string | null | undefined;
+  expiryDate?: string | null | undefined;
   qtyBase: string;
-  unitCostPaise?: number | null;
-  supplierName?: string | null;
-  invoiceNumber?: string | null;
+  unitCostPaise?: number | null | undefined;
+  supplierName?: string | null | undefined;
+  invoiceNumber?: string | null | undefined;
 }
 
 /**
@@ -119,10 +119,10 @@ export async function recordLocalInward(
 
 export interface ReviewLocalInwardCommand {
   action: 'confirm' | 'reverse';
-  unitCostPaise?: number | null;
-  supplierName?: string | null;
-  invoiceNumber?: string | null;
-  reason?: string | null;
+  unitCostPaise?: number | null | undefined;
+  supplierName?: string | null | undefined;
+  invoiceNumber?: string | null | undefined;
+  reason?: string | null | undefined;
 }
 
 /** Owner review: confirm (optionally filling missing cost) or post a reversal. */

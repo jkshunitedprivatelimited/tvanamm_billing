@@ -11,16 +11,16 @@ type Ref = string | null | undefined;
 export interface StockAuditInput {
   action: string;
   actorRequest: 'system' | 'admin' | 'operator';
-  accountId?: Ref;
-  employeeId?: Ref;
-  organizationId?: Ref;
-  franchiseId?: Ref;
-  outletId?: Ref;
-  warehouseId?: Ref;
-  subjectType?: Ref;
-  subjectId?: Ref;
-  requestId?: Ref;
-  data?: Record<string, unknown>;
+  accountId?: Ref | undefined;
+  employeeId?: Ref | undefined;
+  organizationId?: Ref | undefined;
+  franchiseId?: Ref | undefined;
+  outletId?: Ref | undefined;
+  warehouseId?: Ref | undefined;
+  subjectType?: Ref | undefined;
+  subjectId?: Ref | undefined;
+  requestId?: Ref | undefined;
+  data?: Record<string, unknown> | undefined;
 }
 
 /** Append a Stock audit event inside the same transaction as its action. */

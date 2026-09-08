@@ -9,6 +9,12 @@ import {
 } from '@jksh/stock';
 import type { ActorContext } from '@jksh/contracts';
 import { IdentityError } from '@jksh/identity';
+import { actorOrThrow } from './http';
+
+/** Resolve the current admin session to a Stock actor in one call. */
+export async function currentStockActor(opts: { outletId?: string } = {}) {
+  return stockActorFor(await actorOrThrow(), opts);
+}
 
 /** The Stock database pool — a physically separate project from Billing. */
 export function stockDb(): StockPool {

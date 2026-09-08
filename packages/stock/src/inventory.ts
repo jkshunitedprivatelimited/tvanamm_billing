@@ -41,20 +41,20 @@ const WAREHOUSE_DEFAULT_KINDS: LocationKind[] = [
 
 export interface CreateItemCommand {
   organizationId: string;
-  brandId?: string | null;
+  brandId?: string | null | undefined;
   sku: string;
   name: string;
   itemType: ItemType;
   dimension: Dimension;
   baseUnit: string;
-  supplyRule?: SupplyRule;
-  isBatchTracked?: boolean;
-  isReturnable?: boolean;
-  shelfLifeDays?: number | null;
-  orderPack?: number | null;
-  gstRate?: string | number;
-  hsnCode?: string | null;
-  purchaseUnit?: string | null;
+  supplyRule?: SupplyRule | undefined;
+  isBatchTracked?: boolean | undefined;
+  isReturnable?: boolean | undefined;
+  shelfLifeDays?: number | null | undefined;
+  orderPack?: number | null | undefined;
+  gstRate?: string | number | undefined;
+  hsnCode?: string | null | undefined;
+  purchaseUnit?: string | null | undefined;
 }
 
 export async function createItem(
@@ -149,8 +149,8 @@ export interface AddBarcodeCommand {
   organizationId: string;
   itemId: string;
   barcode: string;
-  kind?: 'ean' | 'upc' | 'qr' | 'alias';
-  isPrimary?: boolean;
+  kind?: 'ean' | 'upc' | 'qr' | 'alias' | undefined;
+  isPrimary?: boolean | undefined;
 }
 
 export async function addItemBarcode(
@@ -185,7 +185,7 @@ export interface CreateWarehouseCommand {
   organizationId: string;
   code: string;
   name: string;
-  timezone?: string;
+  timezone?: string | undefined;
 }
 
 export async function createWarehouse(
@@ -228,9 +228,9 @@ export async function createWarehouse(
 export interface ConfigureOutletStockCommand {
   outletId: string;
   organizationId: string;
-  franchiseId?: string | null;
-  trackingEnabled?: boolean;
-  timezone?: string;
+  franchiseId?: string | null | undefined;
+  trackingEnabled?: boolean | undefined;
+  timezone?: string | undefined;
 }
 
 /**
@@ -287,11 +287,11 @@ export interface CreateBatchCommand {
   organizationId: string;
   itemId: string;
   batchCode: string;
-  manufactureDate?: string | null;
-  expiryDate?: string | null;
+  manufactureDate?: string | null | undefined;
+  expiryDate?: string | null | undefined;
   origin: 'received' | 'produced' | 'opening' | 'transfer' | 'local_inward';
-  supplierId?: string | null;
-  parentBatchId?: string | null;
+  supplierId?: string | null | undefined;
+  parentBatchId?: string | null | undefined;
 }
 
 export async function createBatch(

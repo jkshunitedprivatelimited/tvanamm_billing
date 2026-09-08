@@ -14,19 +14,19 @@ export interface MovementInput {
   organizationId: string;
   stockLocationId: string;
   itemId: string;
-  batchId?: string | null;
+  batchId?: string | null | undefined;
   /** signed fixed-point decimal string in the item base unit: + in, - out */
   quantity: string;
   movementType: string;
-  unitCostPaise?: number | null;
+  unitCostPaise?: number | null | undefined;
   sourceDocType: string;
-  sourceDocId?: string | null;
+  sourceDocId?: string | null | undefined;
   idempotencyKey: string;
-  correlationId?: string | null;
-  actorRequest?: string | null;
-  actorAccountId?: string | null;
-  actorEmployeeId?: string | null;
-  notes?: string | null;
+  correlationId?: string | null | undefined;
+  actorRequest?: string | null | undefined;
+  actorAccountId?: string | null | undefined;
+  actorEmployeeId?: string | null | undefined;
+  notes?: string | null | undefined;
 }
 
 export interface MovementResult {

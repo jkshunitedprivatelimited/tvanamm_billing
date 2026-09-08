@@ -350,10 +350,10 @@ export async function dispatchStockOrder(
 export interface OutletInwardLineInput {
   stockDispatchLineId: string;
   acceptedQtyBase: string;
-  shortQtyBase?: string;
-  damagedQtyBase?: string;
-  excessQtyBase?: string;
-  rejectedQtyBase?: string;
+  shortQtyBase?: string | undefined;
+  damagedQtyBase?: string | undefined;
+  excessQtyBase?: string | undefined;
+  rejectedQtyBase?: string | undefined;
 }
 
 export interface RecordOutletInwardCommand {
@@ -560,9 +560,9 @@ export async function recordOutletInward(
 }
 
 export interface ResolveDiscrepancyOptions {
-  creditNoteNumber?: string;
-  amountPaise?: number;
-  reason?: string;
+  creditNoteNumber?: string | undefined;
+  amountPaise?: number | undefined;
+  reason?: string | undefined;
 }
 
 export async function resolveDiscrepancy(

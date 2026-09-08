@@ -8,6 +8,17 @@ import { getAdminActor } from './auth';
 
 const NO_STORE = { 'Cache-Control': 'no-store, no-cache, must-revalidate', Pragma: 'no-cache' };
 
+/**
+ * Drop keys whose value is `undefined` from a parsed request body so it matches
+ * a domain command type under `exactOptionalPropertyTypes` (zod `.optional()` /
+ * `.nullish()` yields explicit `undefined`, which those types reject).
+ */
+export function clean<T extends object>(o: T): { [K in keyof T]: Exclude<T[K], undefined> } {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) if (v !== undefined) out[k] = v;
+  return out as { [K in keyof T]: Exclude<T[K], undefined> };
+}
+
 /** JSON response that is never cached and carries the correlation id. */
 export function apiJson(body: unknown, init: { status?: number; correlationId?: string } = {}) {
   const headers: Record<string, string> = { ...NO_STORE };

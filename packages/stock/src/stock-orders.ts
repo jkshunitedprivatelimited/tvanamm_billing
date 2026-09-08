@@ -42,7 +42,7 @@ export interface CreateStockOrderCommand {
   franchiseId: string;
   orderNumber: string;
   lines: StockOrderLineInput[];
-  suggestionId?: string | null;
+  suggestionId?: string | null | undefined;
 }
 
 export interface StockOrderTotals {
