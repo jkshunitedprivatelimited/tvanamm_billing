@@ -6,7 +6,8 @@ import { buildAdminActor, IdentityError } from '@jksh/identity';
 import { db } from './pool';
 import { supabaseServer } from './supabase';
 import { WS_COOKIE, readWorkspace } from './ws-cookie';
-import { DEV_COOKIE, devOtpEnabled, readDevSession, syntheticAuthUserId } from './dev-session';
+import { DEV_COOKIE, readDevSession, syntheticAuthUserId } from './dev-session';
+import { localSessionAuthEnabled } from '@/dev-auth-flags';
 
 export interface AuthUser {
   id: string;
@@ -14,9 +15,9 @@ export interface AuthUser {
 }
 
 export async function getAuthUser(): Promise<AuthUser | null> {
-  if (devOtpEnabled()) {
-    const dev = readDevSession((await cookies()).get(DEV_COOKIE)?.value);
-    if (dev) return { id: syntheticAuthUserId(dev.phone), phone: dev.phone };
+  if (localSessionAuthEnabled()) {
+    const local = readDevSession((await cookies()).get(DEV_COOKIE)?.value);
+    if (local) return { id: syntheticAuthUserId(local.phone), phone: local.phone };
   }
 
   const supabase = await supabaseServer();

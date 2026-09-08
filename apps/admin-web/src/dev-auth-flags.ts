@@ -18,3 +18,23 @@ export function insecureDevAuthEnabled(
     env.ADMIN_DEV_OTP.length > 0
   );
 }
+
+/**
+ * MSG91 OTP Widget login is active when its Widget ID and account auth key are
+ * configured and the insecure dev bypass is NOT in use. Both paths establish
+ * the same HMAC-signed local session cookie.
+ */
+export function msg91WidgetAuthEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return (
+    !insecureDevAuthEnabled(env) && !!env.MSG91_WIDGET_ID?.trim() && !!env.MSG91_AUTHKEY?.trim()
+  );
+}
+
+/** Either path issues the signed local session cookie the app reads. */
+export function localSessionAuthEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return insecureDevAuthEnabled(env) || msg91WidgetAuthEnabled(env);
+}

@@ -14,15 +14,15 @@ const isProd = process.env.NODE_ENV === 'production';
  *  without `'unsafe-inline'` in production. */
 function contentSecurityPolicy(nonce: string): string {
   const scriptSrc = isProd
-    ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
-    : "script-src 'self' 'unsafe-eval' 'unsafe-inline'";
+    ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://verify.msg91.com`
+    : "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://verify.msg91.com";
   return [
     "default-src 'self'",
     scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    "connect-src 'self' https://*.supabase.co",
+    "connect-src 'self' https://*.supabase.co https://control.msg91.com https://verify.msg91.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
