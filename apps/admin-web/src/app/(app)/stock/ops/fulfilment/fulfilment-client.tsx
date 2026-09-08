@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import type { FulfilmentOrderRow } from '@jksh/stock';
+import { DataTable, type Column } from '@/components/DataTable';
 import { apiPost } from '../api';
 
 interface Wh {
@@ -35,6 +36,97 @@ export function FulfilmentClient({
 
   const defaultWh = warehouses[0]?.id ?? '';
 
+  const columns: Column<FulfilmentOrderRow>[] = [
+    {
+      key: 'order',
+      header: 'Order',
+      width: 'minmax(140px,1fr)',
+      nowrap: true,
+      sortValue: (o) => o.orderNumber,
+      render: (o) => <span className="mono">{o.orderNumber}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: '150px',
+      sortValue: (o) => o.status,
+      render: (o) => <span className={`pill ${o.status}`}>{o.status.replace('_', ' ')}</span>,
+    },
+    { key: 'lines', header: 'Lines', width: '70px', align: 'right', render: (o) => o.lines },
+    {
+      key: 'total',
+      header: 'Total',
+      width: '110px',
+      align: 'right',
+      sortValue: (o) => o.totalPaise,
+      render: (o) => rupees(o.totalPaise),
+    },
+    {
+      key: 'wh',
+      header: 'Warehouse',
+      width: '120px',
+      render: (o) => (
+        <select
+          value={wh[o.id] ?? defaultWh}
+          onChange={(e) => setWh({ ...wh, [o.id]: e.target.value })}
+          style={{ margin: 0 }}
+        >
+          {warehouses.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.code}
+            </option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      key: 'action',
+      header: '',
+      width: '120px',
+      render: (o) => {
+        const selected = wh[o.id] ?? defaultWh;
+        if (o.status === 'paid')
+          return (
+            <button
+              className="secondary sm"
+              disabled={pending}
+              onClick={() => void act(`/api/v1/stock/orders/${o.id}/approve`)}
+            >
+              Approve
+            </button>
+          );
+        if (o.status === 'approved')
+          return (
+            <button
+              className="secondary sm"
+              disabled={pending || !selected}
+              onClick={() =>
+                void act(`/api/v1/stock/orders/${o.id}/allocate`, { warehouseId: selected })
+              }
+            >
+              Allocate
+            </button>
+          );
+        if ((o.status === 'allocated' || o.status === 'partially_dispatched') && selected)
+          return (
+            <button
+              className="secondary sm"
+              disabled={pending}
+              onClick={() =>
+                void act(`/api/v1/stock/orders/${o.id}/dispatch`, {
+                  warehouseId: selected,
+                  dispatchNumber: `DSP-${o.orderNumber}-${Date.now().toString(36)}`,
+                })
+              }
+            >
+              Dispatch
+            </button>
+          );
+        return null;
+      },
+    },
+  ];
+
   return (
     <div className="card">
       {warehouses.length === 0 ? (
@@ -45,88 +137,12 @@ export function FulfilmentClient({
           {msg}
         </p>
       ) : null}
-      <table>
-        <thead>
-          <tr>
-            <th>Order</th>
-            <th>Status</th>
-            <th>Lines</th>
-            <th>Total</th>
-            <th>Warehouse</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {orders.map((o) => {
-            const selected = wh[o.id] ?? defaultWh;
-            return (
-              <tr key={o.id}>
-                <td className="mono">{o.orderNumber}</td>
-                <td>
-                  <span className={`pill ${o.status}`}>{o.status}</span>
-                </td>
-                <td className="num">{o.lines}</td>
-                <td className="num">{rupees(o.totalPaise)}</td>
-                <td>
-                  <select
-                    value={selected}
-                    onChange={(e) => setWh({ ...wh, [o.id]: e.target.value })}
-                  >
-                    {warehouses.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.code}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td style={{ display: 'flex', gap: 6 }}>
-                  {o.status === 'paid' ? (
-                    <button
-                      className="secondary"
-                      disabled={pending}
-                      onClick={() => void act(`/api/v1/stock/orders/${o.id}/approve`)}
-                    >
-                      Approve
-                    </button>
-                  ) : null}
-                  {o.status === 'approved' ? (
-                    <button
-                      className="secondary"
-                      disabled={pending || !selected}
-                      onClick={() =>
-                        void act(`/api/v1/stock/orders/${o.id}/allocate`, { warehouseId: selected })
-                      }
-                    >
-                      Allocate
-                    </button>
-                  ) : null}
-                  {(o.status === 'allocated' || o.status === 'partially_dispatched') && selected ? (
-                    <button
-                      className="secondary"
-                      disabled={pending}
-                      onClick={() =>
-                        void act(`/api/v1/stock/orders/${o.id}/dispatch`, {
-                          warehouseId: selected,
-                          dispatchNumber: `DSP-${o.orderNumber}-${Date.now().toString(36)}`,
-                        })
-                      }
-                    >
-                      Dispatch
-                    </button>
-                  ) : null}
-                </td>
-              </tr>
-            );
-          })}
-          {orders.length === 0 ? (
-            <tr>
-              <td colSpan={6} className="muted">
-                Nothing awaiting fulfilment.
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columns}
+        rows={orders}
+        rowKey={(o) => o.id}
+        empty="Nothing awaiting fulfilment."
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import type { RecipeRow } from '@jksh/stock';
+import { DataTable } from '@/components/DataTable';
 import { apiPost } from '../api';
 
 interface ItemOpt {
@@ -131,49 +132,69 @@ export function RecipesClient({ rows, items }: { rows: RecipeRow[]; items: ItemO
         ) : null}
       </form>
 
-      <table style={{ marginTop: 12 }}>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Kind</th>
-            <th>Status</th>
-            <th>Version</th>
-            <th>Billing link</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td>{r.name}</td>
-              <td className="muted">{r.kind}</td>
-              <td>
-                <span className={`pill ${r.status}`}>{r.status}</span>
-              </td>
-              <td className="num">{r.currentVersion}</td>
-              <td className="mono" style={{ fontSize: 11 }}>
+      <DataTable
+        columns={[
+          {
+            key: 'name',
+            header: 'Name',
+            width: 'minmax(160px,1fr)',
+            nowrap: true,
+            sortValue: (r) => r.name,
+            render: (r) => r.name,
+          },
+          {
+            key: 'kind',
+            header: 'Kind',
+            width: '120px',
+            sortValue: (r) => r.kind,
+            render: (r) => <span className="muted">{r.kind}</span>,
+          },
+          {
+            key: 'status',
+            header: 'Status',
+            width: '120px',
+            sortValue: (r) => r.status,
+            render: (r) => <span className={`pill ${r.status}`}>{r.status}</span>,
+          },
+          {
+            key: 'v',
+            header: 'Version',
+            width: '90px',
+            align: 'right',
+            sortValue: (r) => r.currentVersion,
+            render: (r) => r.currentVersion,
+          },
+          {
+            key: 'link',
+            header: 'Billing link',
+            width: 'minmax(120px,1fr)',
+            nowrap: true,
+            render: (r) => (
+              <span className="mono" style={{ fontSize: 11 }}>
                 {r.billingMenuItemId ?? r.billingAddonId ?? '—'}
-              </td>
-              <td>
-                <button
-                  className="secondary"
-                  onClick={() => setOpenRecipe(openRecipe === r.id ? null : r.id)}
-                  disabled={pending}
-                >
-                  {openRecipe === r.id ? 'Cancel' : 'Publish version'}
-                </button>
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={6} className="muted">
-                No recipes yet.
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
+              </span>
+            ),
+          },
+          {
+            key: 'action',
+            header: '',
+            width: '130px',
+            render: (r) => (
+              <button
+                className="secondary sm"
+                onClick={() => setOpenRecipe(openRecipe === r.id ? null : r.id)}
+                disabled={pending}
+              >
+                {openRecipe === r.id ? 'Cancel' : 'Publish version'}
+              </button>
+            ),
+          },
+        ]}
+        rows={rows}
+        rowKey={(r) => r.id}
+        initialSort={{ key: 'name', dir: 'asc' }}
+        empty="No recipes yet."
+      />
 
       {openRecipe ? (
         <form className="card" onSubmit={publish} style={{ marginTop: 12 }}>

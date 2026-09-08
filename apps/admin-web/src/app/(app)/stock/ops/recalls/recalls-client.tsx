@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import type { RecallRow } from '@jksh/stock';
+import { DataTable, type Column } from '@/components/DataTable';
 import { apiPost } from '../api';
 
 export function RecallsClient({ rows }: { rows: RecallRow[] }) {
@@ -37,6 +38,75 @@ export function RecallsClient({ rows }: { rows: RecallRow[] }) {
     setMsg(r.ok ? `${verb}d.` : `Failed: ${r.error}`);
     startTransition(() => router.refresh());
   }
+
+  const columns: Column<RecallRow>[] = [
+    {
+      key: 'item',
+      header: 'Item',
+      width: 'minmax(140px,1fr)',
+      nowrap: true,
+      sortValue: (r) => r.itemName,
+      render: (r) => r.itemName,
+    },
+    {
+      key: 'batch',
+      header: 'Batch',
+      width: '120px',
+      nowrap: true,
+      render: (r) => <span className="mono">{r.batchCode}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: '110px',
+      sortValue: (r) => r.status,
+      render: (r) => <span className={`pill ${r.status}`}>{r.status}</span>,
+    },
+    {
+      key: 'ident',
+      header: 'Identified',
+      width: '100px',
+      align: 'right',
+      render: (r) => r.identifiedBase,
+    },
+    {
+      key: 'quar',
+      header: 'Quarantined',
+      width: '110px',
+      align: 'right',
+      render: (r) => r.quarantinedBase,
+    },
+    {
+      key: 'reason',
+      header: 'Reason',
+      width: 'minmax(140px,1.4fr)',
+      nowrap: true,
+      render: (r) => r.reason,
+    },
+    {
+      key: 'action',
+      header: '',
+      width: '100px',
+      render: (r) =>
+        r.status === 'draft' ? (
+          <button
+            className="secondary sm"
+            disabled={pending}
+            onClick={() => void act(r.id, 'activate')}
+          >
+            Activate
+          </button>
+        ) : r.status === 'active' ? (
+          <button
+            className="secondary sm"
+            disabled={pending}
+            onClick={() => void act(r.id, 'close')}
+          >
+            Close
+          </button>
+        ) : null,
+    },
+  ];
 
   return (
     <>
@@ -78,62 +148,13 @@ export function RecallsClient({ rows }: { rows: RecallRow[] }) {
         ) : null}
       </form>
 
-      <table style={{ marginTop: 12 }}>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Batch</th>
-            <th>Status</th>
-            <th>Identified</th>
-            <th>Quarantined</th>
-            <th>Reason</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td>{r.itemName}</td>
-              <td className="mono">{r.batchCode}</td>
-              <td>
-                <span className={`pill ${r.status}`}>{r.status}</span>
-              </td>
-              <td className="num">{r.identifiedBase}</td>
-              <td className="num">{r.quarantinedBase}</td>
-              <td className="muted" style={{ fontSize: 12, maxWidth: 260 }}>
-                {r.reason}
-              </td>
-              <td style={{ display: 'flex', gap: 6 }}>
-                {r.status === 'draft' ? (
-                  <button
-                    className="secondary"
-                    disabled={pending}
-                    onClick={() => void act(r.id, 'activate')}
-                  >
-                    Activate
-                  </button>
-                ) : null}
-                {r.status === 'active' ? (
-                  <button
-                    className="secondary"
-                    disabled={pending}
-                    onClick={() => void act(r.id, 'close')}
-                  >
-                    Close
-                  </button>
-                ) : null}
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={7} className="muted">
-                No recalls.
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(r) => r.id}
+        initialSort={{ key: 'status', dir: 'asc' }}
+        empty="No recalls."
+      />
     </>
   );
 }
