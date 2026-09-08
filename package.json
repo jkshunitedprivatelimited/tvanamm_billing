@@ -13,6 +13,7 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "dev:admin": "npm run dev -w @jksh/admin-web",
     "dev:pos": "npm run dev -w @jksh/pos-web",
     "build": "npm run build --workspaces --if-present",

@@ -1,0 +1,44 @@
+#!/bin/sh
+# Blocks committing env files and obvious hard-coded secrets.
+# Enabled per clone by the "prepare" npm script:
+#   git config core.hooksPath .githooks
+
+fail() { echo "pre-commit: $1" >&2; exit 1; }
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# 1. Never commit a real env file (.env.example is the only allowed one).
+if echo "$staged" | grep -E '(^|/)\.env($|\.)' | grep -qv '\.env\.example$'; then
+  fail "an .env file is staged — run: git restore --staged <file>"
+fi
+
+added=$(git diff --cached --unified=0 -- $staged | grep '^+' | grep -v '^+++')
+
+check() {
+  # $1 = human name, $2 = extended-regex pattern
+  hits=$(printf '%s\n' "$added" | grep -nE -e "$2" 2>/dev/null)
+  rc=$?
+  if [ "$rc" -eq 2 ]; then
+    fail "secret scan '$1' failed to run — aborting to stay safe"
+  fi
+  if [ -n "$hits" ]; then
+    printf '%s\n' "$hits" >&2
+    fail "possible $1 in the staged diff — move it to .env and read it via process.env"
+  fi
+}
+
+check "live payment / cloud key" 'rzp_live_[A-Za-z0-9]{10,}|sk_live_[A-Za-z0-9]{10,}|AKIA[0-9A-Z]{16}|sb_secret_[A-Za-z0-9_-]{16,}'
+check "private key block"        'BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY'
+check "JWT literal"              'eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{8,}'
+
+# Hard-coded credential assignment — ignore lines that read from an env object.
+cred=$(printf '%s\n' "$added" \
+  | grep -nE '(AUTHKEY|API_KEY|SECRET_KEY|ACCESS_KEY|DB_PASS|PASSWORD)["'"'"' ]*[:=]["'"'"' ]*[A-Za-z0-9/+_-]{12,}' 2>/dev/null \
+  | grep -vE 'process\.env|import\.meta\.env|CHANGE|xxxx|placeholder|example|<|>')
+if [ -n "$cred" ]; then
+  printf '%s\n' "$cred" >&2
+  fail "a credential looks hard-coded — read it via process.env instead"
+fi
+
+exit 0
