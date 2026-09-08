@@ -1,5 +1,28 @@
-/** TVANAMM roundel — cream cup, steam and a tea leaf on a deep-green disc. */
+'use client';
+import { useState } from 'react';
+
+/**
+ * TVANAMM brand mark. Renders the real logo from
+ * `public/brand/tvanamm-logo.png` (drop the file there) and falls back to an
+ * inline roundel drawing until that file exists or if it fails to load.
+ */
 export function BrandMark({ size = 28 }: { size?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <RoundelFallback size={size} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/brand/tvanamm-logo.png"
+      alt="TVANAMM"
+      width={size}
+      height={size}
+      onError={() => setFailed(true)}
+      style={{ display: 'block', flexShrink: 0, objectFit: 'contain' }}
+    />
+  );
+}
+
+function RoundelFallback({ size }: { size: number }) {
   return (
     <svg
       width={size}
