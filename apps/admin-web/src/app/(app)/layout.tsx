@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { requireAdminActor } from '@/server/auth';
+import { BrandMark } from '@/components/BrandMark';
+import { AppNav, type NavItem } from './AppNav';
 import { LogoutButton } from './LogoutButton';
 
 const ROLE_LABEL: Record<string, string> = {
@@ -11,29 +13,35 @@ const ROLE_LABEL: Record<string, string> = {
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const actor = await requireAdminActor();
+
+  const items: NavItem[] =
+    actor.role === 'accountant'
+      ? [{ href: '/reports', label: 'Reports' }]
+      : [
+          { href: '/', label: 'Outlets' },
+          ...(actor.role === 'central_admin' || actor.role === 'franchise_owner'
+            ? [
+                { href: '/menu', label: 'Menu' },
+                { href: '/stock', label: 'Stock' },
+              ]
+            : []),
+          ...(actor.role === 'central_admin' ? [{ href: '/stock/ops', label: 'Stock ops' }] : []),
+        ];
+
   return (
     <>
       <div className="topbar">
-        <strong>
-          JKSH Admin · <span className="pill">{ROLE_LABEL[actor.role] ?? actor.role}</span>
-        </strong>
-        <nav>
-          {actor.role === 'accountant' ? (
-            <Link href="/reports">Reports</Link>
-          ) : (
-            <>
-              <Link href="/">Outlets</Link>
-              {(actor.role === 'central_admin' || actor.role === 'franchise_owner') && (
-                <Link href="/menu">Menu</Link>
-              )}
-              {(actor.role === 'central_admin' || actor.role === 'franchise_owner') && (
-                <Link href="/stock">Stock</Link>
-              )}
-              {actor.role === 'central_admin' && <Link href="/stock/ops">Stock ops</Link>}
-            </>
-          )}
+        <Link href="/" className="brand">
+          <BrandMark />
+          <span>
+            T&nbsp;VANAMM <small>· JKSH</small>
+          </span>
+        </Link>
+        <div className="row">
+          <AppNav items={items} />
+          <span className="badge">{ROLE_LABEL[actor.role] ?? actor.role}</span>
           <LogoutButton />
-        </nav>
+        </div>
       </div>
       {children}
     </>

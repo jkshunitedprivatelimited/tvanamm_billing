@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { BrandMark } from '@/components/BrandMark';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -72,7 +73,13 @@ export default function LoginPage() {
   return (
     <div className="center">
       <div className="card">
-        <h2>Sign in to JKSH Admin</h2>
+        <div className="auth-brand">
+          <BrandMark size={32} />
+          <strong>
+            T&nbsp;VANAMM <span className="muted">· JKSH Admin</span>
+          </strong>
+        </div>
+        <h2>Sign in</h2>
         {step === 'phone' ? (
           <form onSubmit={start}>
             <label htmlFor="phone">Mobile number</label>

@@ -46,20 +46,19 @@ export default async function StockOpsHubPage() {
 
   return (
     <main>
-      <p className="muted">
-        <Link href="/stock">← Stock</Link>
-      </p>
       <h1>Stock operations</h1>
+      <p className="page-intro">
+        Central-run warehouse and supply desk — master data, procurement, recipes, order fulfilment
+        and recalls for every TVANAMM outlet.
+      </p>
       <div className="grid">
         {SECTIONS.map((s) => (
-          <div key={s.href} className="card">
-            <strong>
-              <Link href={s.href}>{s.title}</Link>
-            </strong>
-            <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+          <Link key={s.href} href={s.href} className="card interactive">
+            <strong>{s.title}</strong>
+            <p className="muted" style={{ fontSize: 13, marginTop: 6, marginBottom: 0 }}>
               {s.blurb}
             </p>
-          </div>
+          </Link>
         ))}
       </div>
     </main>

@@ -148,7 +148,7 @@ export function RecipesClient({ rows, items }: { rows: RecipeRow[]; items: ItemO
               <td>{r.name}</td>
               <td className="muted">{r.kind}</td>
               <td>
-                <span className="pill">{r.status}</span>
+                <span className={`pill ${r.status}`}>{r.status}</span>
               </td>
               <td className="num">{r.currentVersion}</td>
               <td className="mono" style={{ fontSize: 11 }}>

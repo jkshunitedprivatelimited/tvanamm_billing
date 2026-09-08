@@ -96,7 +96,7 @@ export function RecallsClient({ rows }: { rows: RecallRow[] }) {
               <td>{r.itemName}</td>
               <td className="mono">{r.batchCode}</td>
               <td>
-                <span className="pill">{r.status}</span>
+                <span className={`pill ${r.status}`}>{r.status}</span>
               </td>
               <td className="num">{r.identifiedBase}</td>
               <td className="num">{r.quarantinedBase}</td>

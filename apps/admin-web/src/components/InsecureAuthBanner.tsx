@@ -4,16 +4,7 @@ import { devOtpEnabled } from '@/server/dev-session';
 export function InsecureAuthBanner() {
   if (!devOtpEnabled()) return null;
   return (
-    <div
-      style={{
-        background: '#b42318',
-        color: '#fff',
-        textAlign: 'center',
-        padding: '6px 12px',
-        fontSize: 13,
-        fontWeight: 600,
-      }}
-    >
+    <div className="dev-banner">
       NON-PRODUCTION · insecure dev OTP login is enabled (ADMIN_DEV_OTP)
     </div>
   );

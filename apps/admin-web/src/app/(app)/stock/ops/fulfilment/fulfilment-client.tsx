@@ -63,7 +63,7 @@ export function FulfilmentClient({
               <tr key={o.id}>
                 <td className="mono">{o.orderNumber}</td>
                 <td>
-                  <span className="pill">{o.status}</span>
+                  <span className={`pill ${o.status}`}>{o.status}</span>
                 </td>
                 <td className="num">{o.lines}</td>
                 <td className="num">{rupees(o.totalPaise)}</td>

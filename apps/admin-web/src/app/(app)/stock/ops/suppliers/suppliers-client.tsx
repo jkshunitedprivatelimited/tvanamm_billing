@@ -36,11 +36,7 @@ export function SuppliersClient({ rows }: { rows: SupplierRow[] }) {
 
   return (
     <>
-      <form
-        className="card"
-        onSubmit={create}
-        style={{ display: 'flex', gap: 8, alignItems: 'end' }}
-      >
+      <form className="card toolbar" onSubmit={create}>
         <label>
           <div className="muted" style={{ fontSize: 12 }}>
             Name
@@ -71,28 +67,29 @@ export function SuppliersClient({ rows }: { rows: SupplierRow[] }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((s) => (
-            <tr key={s.id}>
-              <td>{s.name}</td>
-              <td className="mono">{s.gstin ?? '—'}</td>
-              <td>
-                <span className="pill">
-                  {!s.isActive ? 'inactive' : s.isApproved ? 'approved' : 'pending'}
-                </span>
-              </td>
-              <td>
-                {!s.isApproved && s.isActive ? (
-                  <button
-                    className="secondary"
-                    onClick={() => void approve(s.id)}
-                    disabled={pending}
-                  >
-                    Approve
-                  </button>
-                ) : null}
-              </td>
-            </tr>
-          ))}
+          {rows.map((s) => {
+            const status = !s.isActive ? 'inactive' : s.isApproved ? 'approved' : 'pending';
+            return (
+              <tr key={s.id}>
+                <td>{s.name}</td>
+                <td className="mono">{s.gstin ?? '—'}</td>
+                <td>
+                  <span className={`pill ${status}`}>{status}</span>
+                </td>
+                <td>
+                  {!s.isApproved && s.isActive ? (
+                    <button
+                      className="secondary"
+                      onClick={() => void approve(s.id)}
+                      disabled={pending}
+                    >
+                      Approve
+                    </button>
+                  ) : null}
+                </td>
+              </tr>
+            );
+          })}
           {rows.length === 0 ? (
             <tr>
               <td colSpan={4} className="muted">

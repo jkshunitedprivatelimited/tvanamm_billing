@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { BrandMark } from '@/components/BrandMark';
 
 const CREDENTIAL_KEY = 'jksh_terminal_credential';
 const OUTLET_KEY = 'jksh_terminal_outlet';
@@ -81,6 +82,12 @@ export default function StoreLoginPage() {
     return (
       <div className="screen">
         <div className="panel">
+          <div className="brand">
+            <BrandMark />
+            <span>
+              T&nbsp;VANAMM <small>· Billing</small>
+            </span>
+          </div>
           <h1>Is this you?</h1>
           <p className="muted">{outletName}</p>
           <p style={{ fontSize: 22, fontWeight: 700, margin: '12px 0 24px' }}>{confirmName}</p>
@@ -115,6 +122,12 @@ export default function StoreLoginPage() {
   return (
     <div className="screen">
       <div className="panel">
+        <div className="brand">
+          <BrandMark />
+          <span>
+            T&nbsp;VANAMM <small>· Billing</small>
+          </span>
+        </div>
         <h1>{outletName || 'Store terminal'}</h1>
         <p className="muted">Enter your four-digit PIN.</p>
         <div className="pinrow">

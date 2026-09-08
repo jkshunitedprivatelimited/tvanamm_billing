@@ -27,11 +27,7 @@ export function WarehousesClient({ rows }: { rows: WarehouseRow[] }) {
 
   return (
     <>
-      <form
-        className="card"
-        onSubmit={create}
-        style={{ display: 'flex', gap: 8, alignItems: 'end' }}
-      >
+      <form className="card toolbar" onSubmit={create}>
         <label>
           <div className="muted" style={{ fontSize: 12 }}>
             Code
@@ -52,37 +48,39 @@ export function WarehousesClient({ rows }: { rows: WarehouseRow[] }) {
         ) : null}
       </form>
 
-      <table style={{ marginTop: 12 }}>
-        <thead>
-          <tr>
-            <th>Code</th>
-            <th>Name</th>
-            <th>Timezone</th>
-            <th>Locations</th>
-            <th>Active</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((w) => (
-            <tr key={w.id}>
-              <td className="mono">{w.code}</td>
-              <td>{w.name}</td>
-              <td className="muted">{w.timezone}</td>
-              <td className="muted" style={{ fontSize: 12 }}>
-                {w.locations.map((l) => l.kind).join(', ') || '—'}
-              </td>
-              <td>{w.isActive ? 'yes' : 'no'}</td>
-            </tr>
-          ))}
-          {rows.length === 0 ? (
+      <div className="table-wrap" style={{ marginTop: 16 }}>
+        <table>
+          <thead>
             <tr>
-              <td colSpan={5} className="muted">
-                No warehouses yet.
-              </td>
+              <th>Code</th>
+              <th>Name</th>
+              <th>Timezone</th>
+              <th>Locations</th>
+              <th>Active</th>
             </tr>
-          ) : null}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((w) => (
+              <tr key={w.id}>
+                <td className="mono">{w.code}</td>
+                <td>{w.name}</td>
+                <td className="muted">{w.timezone}</td>
+                <td className="muted" style={{ fontSize: 12 }}>
+                  {w.locations.map((l) => l.kind).join(', ') || '—'}
+                </td>
+                <td>{w.isActive ? 'yes' : 'no'}</td>
+              </tr>
+            ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="muted">
+                  No warehouses yet.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }

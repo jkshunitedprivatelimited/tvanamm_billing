@@ -1,127 +1,470 @@
 @import '@jksh/ui/tokens.css';
 @import '@jksh/ui/base.css';
 
-:root {
-  color-scheme: light dark;
-}
-body {
-  font-size: 15px;
-}
-a {
-  color: var(--accent);
-}
+/* ====================================================================== */
+/*  App shell                                                             */
+/* ====================================================================== */
 main {
-  max-width: 960px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: 24px 20px 64px;
+  padding: var(--space-6) var(--space-5) var(--space-8);
 }
+@media (max-width: 640px) {
+  main {
+    padding: var(--space-4) var(--space-4) var(--space-8);
+  }
+}
+
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 20px;
+  gap: var(--space-4);
+  padding: 10px 20px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
-.topbar strong {
-  font-size: 14px;
+.topbar .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.topbar .brand:hover {
+  text-decoration: none;
+}
+.topbar .brand small {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* nav */
+.topbar nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
 }
 .topbar nav a {
-  margin-left: 16px;
-  font-size: 14px;
+  padding: 7px 12px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-radius: 999px;
+  line-height: 1;
 }
+.topbar nav a:hover {
+  color: var(--text);
+  background: var(--panel-3);
+  text-decoration: none;
+}
+.topbar nav a[aria-current='page'] {
+  color: var(--primary);
+  background: var(--primary-soft);
+  font-weight: 600;
+}
+
+/* role badge */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+/* ====================================================================== */
+/*  Typography helpers                                                    */
+/* ====================================================================== */
+main > h1:first-child {
+  margin-bottom: var(--space-2);
+}
+.page-intro {
+  color: var(--text-muted);
+  font-size: 14px;
+  max-width: 68ch;
+  margin: 0 0 var(--space-5);
+}
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin: var(--space-6) 0 var(--space-3);
+}
+
+/* ====================================================================== */
+/*  Cards + grid                                                          */
+/* ====================================================================== */
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 20px;
-  margin: 16px 0;
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  margin: var(--space-4) 0;
 }
 .card h2 {
-  margin: 0 0 12px;
-  font-size: 16px;
+  margin: 0 0 var(--space-3);
+  font-size: 15px;
 }
+.card > :last-child {
+  margin-bottom: 0;
+}
+
 .grid {
   display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
 }
+.grid .card {
+  margin: 0;
+}
+
+/* linked stat cards lift slightly */
+a.card,
+.card.interactive {
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease,
+    border-color 0.15s ease;
+}
+a.card:hover,
+.card.interactive:hover {
+  box-shadow: var(--shadow-2);
+  border-color: var(--border-strong);
+  text-decoration: none;
+}
+
+/* stat block */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stat .label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.stat .value {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ====================================================================== */
+/*  Forms                                                                 */
+/* ====================================================================== */
 label {
   display: block;
-  font-size: 13px;
-  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-muted);
   margin-bottom: 4px;
 }
 input,
-select {
+select,
+textarea {
   width: 100%;
-  padding: 9px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
+  padding: 9px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
   color: var(--text);
   font: inherit;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-3);
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
 }
-button {
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--text-muted) 70%, transparent);
+}
+textarea {
+  resize: vertical;
+  min-height: 90px;
+}
+
+/* filter/toolbar row of inline fields */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: end;
+}
+.toolbar label {
+  margin-bottom: 4px;
+}
+.toolbar input,
+.toolbar select,
+.toolbar textarea {
+  margin-bottom: 0;
+}
+
+/* ====================================================================== */
+/*  Buttons                                                               */
+/* ====================================================================== */
+button,
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 9px 16px;
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
-  border-radius: 8px;
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: var(--primary-ink);
+  border-radius: var(--radius-sm);
   font: inherit;
+  font-weight: 600;
+  font-size: 13.5px;
   cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+button:hover:not(:disabled),
+a.btn:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  text-decoration: none;
+}
+button:active:not(:disabled) {
+  background: var(--primary-active);
 }
 button.secondary {
-  background: transparent;
-  color: var(--accent);
+  background: var(--panel);
+  color: var(--primary);
+  border-color: var(--border-strong);
 }
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
+button.secondary:hover:not(:disabled) {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+button.ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+}
+button.ghost:hover:not(:disabled) {
+  background: var(--panel-3);
+  color: var(--text);
+}
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+button.sm {
+  padding: 6px 11px;
+  font-size: 12.5px;
+  min-height: 34px;
+}
+
+/* ====================================================================== */
+/*  Tables                                                                */
+/* ====================================================================== */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  margin: var(--space-4) 0;
+}
+.table-wrap table {
+  border: 0;
+  border-radius: 0;
 }
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
-}
-th,
-td {
-  text-align: left;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-}
-th {
-  color: var(--muted);
-  font-weight: 600;
-}
-.pill {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 999px;
+  font-size: 13.5px;
+  background: var(--panel);
   border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.card table {
+  border: 0;
+  border-radius: 0;
+}
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-2);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+tbody td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+tbody tr {
+  transition: background 0.1s ease;
+}
+tbody tr:hover {
+  background: var(--panel-3);
+}
+td .muted {
+  font-size: 12.5px;
+}
+
+/* ====================================================================== */
+/*  Pills / status chips                                                  */
+/* ====================================================================== */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+.pill.ok,
+.pill.active,
+.pill.approved,
+.pill.paid,
+.pill.received,
+.pill.published,
+.pill.closed {
+  background: var(--ok-soft);
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 22%, transparent);
+}
+.pill.warn,
+.pill.pending,
+.pill.draft,
+.pill.awaiting_payment,
+.pill.partially_dispatched,
+.pill.partially_received {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 22%, transparent);
+}
+.pill.danger,
+.pill.failed,
+.pill.cancelled,
+.pill.expired,
+.pill.inactive {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 22%, transparent);
+}
+.pill.info,
+.pill.allocated,
+.pill.approved-info,
+.pill.dispatched {
+  background: var(--info-soft);
+  color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 22%, transparent);
+}
+
+/* ====================================================================== */
+/*  Inline notices                                                        */
+/* ====================================================================== */
+.error,
+.ok,
+.notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  margin: var(--space-2) 0;
 }
 .error {
   color: var(--danger);
-  font-size: 14px;
-  margin: 8px 0;
+  background: var(--danger-soft);
 }
 .ok {
   color: var(--ok);
-  font-size: 14px;
-  margin: 8px 0;
+  background: var(--ok-soft);
 }
-.muted {
-  color: var(--muted);
+.notice {
+  color: var(--text-muted);
+  background: var(--panel-2);
 }
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
+
+/* ====================================================================== */
+/*  Auth screens                                                          */
+/* ====================================================================== */
 .center {
-  min-height: 70vh;
+  min-height: 82vh;
   display: grid;
   place-items: center;
+  padding: var(--space-5);
 }
 .center .card {
-  width: 360px;
+  width: 380px;
+  max-width: 100%;
+  padding: var(--space-6);
+  box-shadow: var(--shadow-2);
+}
+.center .card h2 {
+  font-size: 18px;
+}
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: var(--space-5);
+}
+
+/* dev / non-prod banner */
+.dev-banner {
+  background: var(--danger);
+  color: #fff;
+  text-align: center;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }

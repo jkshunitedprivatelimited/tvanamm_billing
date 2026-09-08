@@ -8,7 +8,7 @@ export function LogoutButton() {
   const [busy, setBusy] = useState(false);
   return (
     <button
-      className="secondary"
+      className="ghost sm"
       disabled={busy}
       onClick={() => {
         setBusy(true);
