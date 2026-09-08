@@ -29,6 +29,9 @@ export const createOutletCommandSchema = z
     city: z.string().trim().max(80).default(''),
     state: z.string().trim().max(80).default(''),
     postalCode: z.string().trim().max(16).default(''),
+    nearestBusStop: z.string().trim().max(200).optional(),
+    /** GST-inclusive delivery charge JKSH adds when supplying this branch. */
+    transportChargePaise: z.int().nonnegative().max(100_000_00).optional(),
     country: z.string().trim().length(2).default('IN'),
     timezone: z.string().min(3).max(64).default('Asia/Kolkata'),
     paymentMethods: z

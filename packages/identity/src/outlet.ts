@@ -68,8 +68,9 @@ export async function createOutlet(
       `insert into billing.outlets
          (id, organization_id, brand_id, franchise_id, ownership_type, status,
           display_name, legal_name, slug, phone, gstin, address_line, city, state,
-          postal_code, country, timezone, payment_methods, created_by, managed_by)
-       values ($1,$2,$3,$4,$5,'draft',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$18)`,
+          postal_code, nearest_bus_stop, transport_charge_paise, country, timezone,
+          payment_methods, created_by, managed_by)
+       values ($1,$2,$3,$4,$5,'draft',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20)`,
       [
         id,
         organizationId,
@@ -85,6 +86,8 @@ export async function createOutlet(
         cmd.city,
         cmd.state,
         cmd.postalCode,
+        cmd.nearestBusStop ?? null,
+        cmd.transportChargePaise ?? 0,
         cmd.country,
         cmd.timezone,
         cmd.paymentMethods,
