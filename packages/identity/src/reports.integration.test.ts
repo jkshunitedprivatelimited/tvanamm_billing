@@ -61,7 +61,7 @@ async function setupOutletWithBill(
   franchiseId: string,
   label: string,
   paymentMethod: 'cash' | 'upi',
-  billDiscount?: { kind: 'fixed' | 'percent'; value: string },
+  billDiscount?: { kind: 'fixed' | 'percent'; value: string; reason: string },
 ): Promise<{ outletId: string; menuVersion: string; billId: string }> {
   const admin = await adminActor(adminPhone);
   const outletId = randomUUID();
@@ -107,14 +107,15 @@ async function setupOutletWithBill(
   await openCashSession(pool, op, { openingCash: '500.00' });
   await startShift(pool, op, {});
 
-  const bill = await createBill(pool, op, {
+  const cmd: Parameters<typeof createBill>[2] = {
     idempotencyKey: `idem-report-${S}-${label}`,
     menuVersion,
     paymentMethod,
     lines: [{ catalogItemId: itemId, quantity: 1, addons: [] }],
-    ...(billDiscount ? { billDiscount } : {}),
     terminalOccurredAt: new Date().toISOString(),
-  });
+  };
+  if (billDiscount) cmd.billDiscount = billDiscount;
+  const bill = await createBill(pool, op, cmd);
   return { outletId, menuVersion, billId: bill.id };
 }
 
@@ -171,6 +172,7 @@ describe.skipIf(!RUN)('Billing V1 Stage 6 - financial reports', () => {
     const c = await setupOutletWithBill(franchiseC, `RepOutC${S.slice(-4)}`, 'cash', {
       kind: 'fixed',
       value: '30.00',
+      reason: 'promo',
     });
     outletC = c.outletId;
 
