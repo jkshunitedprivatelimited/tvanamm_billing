@@ -1,10 +1,12 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
+import { SwRegister } from '@/components/SwRegister';
 
 export const metadata: Metadata = {
   title: 'JKSH Billing',
   description: 'Store Billing terminal',
+  manifest: '/manifest.webmanifest',
 };
 
 // The Edge proxy issues a per-request CSP nonce; Next only threads that nonce
@@ -15,7 +17,10 @@ export const dynamic = 'force-dynamic';
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <SwRegister />
+        {children}
+      </body>
     </html>
   );
 }

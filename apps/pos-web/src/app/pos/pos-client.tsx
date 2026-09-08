@@ -8,10 +8,17 @@ import type {
   DiscountInput,
   ReceiptSnapshot,
 } from '@jksh/contracts';
+import Link from 'next/link';
 import { ReceiptView } from '../receipt-view';
 import { terminalPaperWidthMm } from '../terminal-prefs';
-import { enqueueBill } from '@/lib/bill-queue';
-import { useBillSync } from '@/lib/use-bill-sync';
+import { BrandMark } from '@/components/BrandMark';
+import { useOffline } from '@/lib/use-offline';
+import {
+  enqueueOutboxBill,
+  kitUsable,
+  readOfflineKit,
+  takeReceiptNumber,
+} from '@/lib/offline-store';
 
 type MenuItem = PosMenuSnapshot['items'][number];
 type MenuAddon = MenuItem['addons'][number];
@@ -77,10 +84,12 @@ export function PosClient({
   const [receipt, setReceipt] = useState<ReceiptSnapshot | null>(null);
   const [receiptBillId, setReceiptBillId] = useState<string | null>(null);
   const [queuedNotice, setQueuedNotice] = useState<string | null>(null);
+  const [offlineDone, setOfflineDone] = useState<{ receiptNumber: string; total: string } | null>(
+    null,
+  );
 
-  // A queued bill has no receipt yet; when it finally reaches the server, show
-  // its receipt if the till is idle, otherwise just note it (reprint from
-  // History).
+  // A synced offline bill now has a real receipt; show it if the till is idle,
+  // otherwise leave a note (reprint from History).
   const showSyncedReceipt = useCallback(
     (billId: string) => {
       void (async () => {
@@ -89,7 +98,7 @@ export function PosClient({
           if (!r.ok) return;
           const snap = (await r.json()) as ReceiptSnapshot;
           setReceipt((cur) => {
-            if (cur || cart.length > 0) {
+            if (cur || cart.length > 0 || offlineDone) {
               setQueuedNotice(`A saved bill just synced (receipt ${snap.receiptNumber}).`);
               return cur;
             }
@@ -101,9 +110,9 @@ export function PosClient({
         }
       })();
     },
-    [cart.length],
+    [cart.length, offlineDone],
   );
-  const billSync = useBillSync(showSyncedReceipt);
+  const offline = useOffline(menu, outletName, showSyncedReceipt);
   const [showCustomer, setShowCustomer] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerMobile, setCustomerMobile] = useState('');
@@ -260,16 +269,52 @@ export function PosClient({
             }
           : {}),
       };
-      const queueForLater = () => {
-        enqueueBill(cmd);
-        setQueuedNotice(
-          'No connection — bill saved. It sends automatically and the receipt prints once it does.',
-        );
-        clearSale();
+      const provisionalCommon = {
+        total: totals.final,
+        paymentMethod: cmd.paymentMethod,
+        lineCount: cmd.lines.length,
+      };
+
+      // Queue a bill that could not be sent right now. `offline` marks a true
+      // offline sale (carries its own reserved receipt number + auth bundle);
+      // otherwise it's a transient online failure the server will number on sync.
+      const queue = async (opts: { offline: boolean; receiptNumber: string | null }) => {
+        const finalCmd: CreateBillCommand =
+          opts.offline && opts.receiptNumber
+            ? { ...cmd, offline: true, terminalReceiptNumber: opts.receiptNumber }
+            : cmd;
+        await enqueueOutboxBill({
+          key: finalCmd.idempotencyKey,
+          cmd: finalCmd,
+          provisional: { ...provisionalCommon, receiptNumber: opts.receiptNumber },
+          queuedAt: new Date().toISOString(),
+        });
+        void offline.sync();
+        if (opts.offline && opts.receiptNumber) {
+          setOfflineDone({ receiptNumber: opts.receiptNumber, total: totals.final });
+        } else {
+          setQueuedNotice(
+            'No connection — bill saved. It sends automatically and the receipt prints once it does.',
+          );
+          clearSale();
+        }
       };
 
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        queueForLater();
+        const kit = await readOfflineKit();
+        if (!kitUsable(kit)) {
+          setError(
+            'Offline, and this terminal is not armed for offline sales yet. Reconnect once so it can load the menu and receipt numbers.',
+          );
+          return;
+        }
+        const rn = await takeReceiptNumber();
+        if (!rn || !kit) {
+          setError('Offline receipt numbers are exhausted. Reconnect to reserve more.');
+          return;
+        }
+        cmd.offlineAuthBundle = kit.authToken;
+        await queue({ offline: true, receiptNumber: rn });
         return;
       }
 
@@ -282,11 +327,11 @@ export function PosClient({
         });
       } catch {
         // fetch rejects only on a network failure — hold the bill and retry.
-        queueForLater();
+        await queue({ offline: false, receiptNumber: null });
         return;
       }
       if (res.status === 502 || res.status === 503 || res.status === 504) {
-        queueForLater();
+        await queue({ offline: false, receiptNumber: null });
         return;
       }
       const body = (await res.json()) as { id?: string; message?: string };
@@ -318,7 +363,8 @@ export function PosClient({
     setReceipt(null);
     setReceiptBillId(null);
     setQueuedNotice(null);
-    router.refresh();
+    setOfflineDone(null);
+    if (navigator.onLine) router.refresh();
   }
 
   function printReceipt() {
@@ -353,30 +399,75 @@ export function PosClient({
     );
   }
 
+  if (offlineDone) {
+    return (
+      <div className="screen">
+        <div className="panel" style={{ textAlign: 'center' }}>
+          <div className="brand" style={{ justifyContent: 'center' }}>
+            <BrandMark />
+            <span>
+              T&nbsp;VANAMM <small>· Offline sale</small>
+            </span>
+          </div>
+          <p className="chip offline" style={{ display: 'inline-block' }}>
+            Saved offline — will sync
+          </p>
+          <h1 style={{ margin: '12px 0 4px' }}>₹{offlineDone.total}</h1>
+          <p className="muted">Receipt {offlineDone.receiptNumber}</p>
+          <p className="muted" style={{ fontSize: 13 }}>
+            The bill is stored on this terminal and sends automatically when the connection returns.
+            Check <strong>Recovery</strong> for its status.
+          </p>
+          <button onClick={() => window.print()}>Print</button>
+          <button className="ghost" style={{ marginTop: 10 }} onClick={newSale}>
+            New sale
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="statusbar">
         <span>
           <strong>{outletName}</strong>{' '}
-          <span className={`chip ${billSync.online ? 'online' : 'offline'}`}>
-            {billSync.online ? 'Online' : 'Offline'}
+          <span className={`chip ${offline.online ? 'online' : 'offline'}`}>
+            {offline.online ? 'Online' : 'Offline'}
           </span>
-          {billSync.syncing ? (
+          {!offline.online && offline.ready ? (
             <span className="chip" style={{ marginLeft: 6 }}>
-              Syncing…
-            </span>
-          ) : billSync.pending > 0 ? (
-            <span className="chip offline" style={{ marginLeft: 6 }}>
-              {billSync.pending} to send
+              {offline.receiptsLeft} receipts left
             </span>
           ) : null}
-          {billSync.failed > 0 ? (
+          {offline.priming ? (
+            <span className="chip" style={{ marginLeft: 6 }}>
+              arming…
+            </span>
+          ) : offline.online && !offline.ready ? (
+            <span className="chip" style={{ marginLeft: 6, color: 'var(--warning)' }}>
+              offline not armed
+            </span>
+          ) : null}
+          {offline.pending > 0 ? (
+            <span className="chip offline" style={{ marginLeft: 6 }}>
+              {offline.pending} to sync
+            </span>
+          ) : null}
+          {offline.failed > 0 ? (
             <span className="chip" style={{ marginLeft: 6, color: 'var(--danger)' }}>
-              {billSync.failed} failed
+              {offline.failed} failed
             </span>
           ) : null}
         </span>
-        <span className="muted">{employeeName}</span>
+        <span className="row" style={{ gap: 10 }}>
+          {offline.pending > 0 || offline.failed > 0 ? (
+            <Link href="/pos/recovery" className="link-btn">
+              Recovery
+            </Link>
+          ) : null}
+          <span className="muted">{employeeName}</span>
+        </span>
       </div>
       {queuedNotice ? (
         <p className="ok" style={{ margin: '8px 16px 0' }}>

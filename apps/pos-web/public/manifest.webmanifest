@@ -1,0 +1,14 @@
+{
+  "name": "T VANAMM Billing",
+  "short_name": "TVANAMM POS",
+  "description": "Store billing terminal",
+  "start_url": "/pos",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f7f5",
+  "theme_color": "#1c6b3f",
+  "icons": [
+    { "src": "/brand/tvanamm-logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

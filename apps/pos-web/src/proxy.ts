@@ -19,6 +19,10 @@ function contentSecurityPolicy(nonce: string): string {
     "img-src 'self' data: blob:",
     "font-src 'self'",
     "connect-src 'self'",
+    // Explicit so the terminal's service worker isn't caught by
+    // script-src's 'strict-dynamic' in production.
+    "worker-src 'self'",
+    "manifest-src 'self'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

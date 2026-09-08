@@ -13,6 +13,8 @@ export default tseslint.config(
       '**/next-env.d.ts',
       'vitest.workspace.ts',
       '**/vitest.config.ts',
+      // Static assets (service worker, etc.) are not linted as source.
+      'apps/*/public/**',
     ],
   },
   eslint.configs.recommended,
