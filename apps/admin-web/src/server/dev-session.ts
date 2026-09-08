@@ -5,8 +5,12 @@ import { insecureDevAuthEnabled } from '@/dev-auth-flags';
 
 export const DEV_COOKIE = 'jksh_dev';
 
-/** Server-enforced lifetime of a dev session, independent of cookie maxAge. */
-export const DEV_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
+/**
+ * Server-enforced lifetime of the signed admin session (dev bypass and MSG91
+ * widget both use it), independent of cookie maxAge. 30 days — sensitive
+ * actions still re-prompt OTP via the fresh-auth gate.
+ */
+export const DEV_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 /**
  * TEMPORARY admin login bypass: a fixed OTP, no SMS, no Supabase Auth. The gate
