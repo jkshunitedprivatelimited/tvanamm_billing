@@ -91,6 +91,12 @@ export {
   type ReconciliationReport,
 } from './relay';
 export {
+  getIntegrationHealth,
+  retryInboxDeadLetter,
+  type IntegrationHealth,
+  type DeadLetter,
+} from './integration-health';
+export {
   draftRecall,
   activateRecall,
   quarantineRecallLocation,

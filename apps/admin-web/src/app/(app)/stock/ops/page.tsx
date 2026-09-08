@@ -29,6 +29,11 @@ const SECTIONS = [
     title: 'Recalls',
     blurb: 'Draft, activate and close batch recalls.',
   },
+  {
+    href: '/stock/ops/integration',
+    title: 'Billing integration',
+    blurb: 'Queue depth, reconciliation and dead-letter recovery for sale events.',
+  },
 ];
 
 export default async function StockOpsHubPage() {
