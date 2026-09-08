@@ -611,6 +611,13 @@ export interface MasterMenuView {
     isRequired: boolean;
     addons: { id: string; name: string; price: string; gstRate: string }[];
   }[];
+  combos: {
+    id: string;
+    name: string;
+    price: string;
+    isAvailable: boolean;
+    components: { catalogItemId: string; name: string; quantity: number }[];
+  }[];
 }
 
 export async function listMasterMenu(
@@ -668,6 +675,38 @@ export async function listMasterMenu(
         where addon_group_id = any($1::uuid[]) and status <> 'archived' order by display_order`,
       [groups.rows.map((r) => r.id)],
     );
+    const combos = await client.query<{
+      id: string;
+      name: string;
+      price: string;
+      is_available: boolean;
+    }>(
+      `select id, name, price, is_available from billing.combos
+        where brand_id = $1 and owner_scope = 'master' and status <> 'archived' order by name`,
+      [brandId],
+    );
+    const comboComps = combos.rows.length
+      ? await client.query<{
+          combo_id: string;
+          catalog_item_id: string;
+          quantity: number;
+          item_name: string;
+        }>(
+          `select cc.combo_id, cc.catalog_item_id, cc.quantity, ci.name as item_name
+             from billing.combo_components cc
+             join billing.catalog_items ci on ci.id = cc.catalog_item_id
+            where cc.combo_id = any($1::uuid[])
+            order by cc.display_order`,
+          [combos.rows.map((c) => c.id)],
+        )
+      : {
+          rows: [] as {
+            combo_id: string;
+            catalog_item_id: string;
+            quantity: number;
+            item_name: string;
+          }[],
+        };
     return {
       categories: cats.rows.map((r) => ({
         id: r.id,
@@ -694,6 +733,19 @@ export async function listMasterMenu(
         addons: addons.rows
           .filter((a) => a.addon_group_id === g.id)
           .map((a) => ({ id: a.id, name: a.name, price: a.price, gstRate: a.gst_rate })),
+      })),
+      combos: combos.rows.map((c) => ({
+        id: c.id,
+        name: c.name,
+        price: c.price,
+        isAvailable: c.is_available,
+        components: comboComps.rows
+          .filter((cc) => cc.combo_id === c.id)
+          .map((cc) => ({
+            catalogItemId: cc.catalog_item_id,
+            name: cc.item_name,
+            quantity: cc.quantity,
+          })),
       })),
     };
   });

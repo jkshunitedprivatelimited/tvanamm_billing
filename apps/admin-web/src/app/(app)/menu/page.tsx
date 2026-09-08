@@ -1,18 +1,23 @@
-import { listMasterMenu, listOutlets } from '@jksh/identity';
+import { listMasterMenu, listOutlets, type MasterMenuView } from '@jksh/identity';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { MenuManager } from './MenuManager';
+import { CatalogExtras } from './CatalogExtras';
 
 const TVANAMM_BRAND = '01000000-0000-4000-8000-000000000010';
+const EMPTY_MASTER: MasterMenuView = {
+  categories: [],
+  items: [],
+  addonGroups: [],
+  combos: [],
+};
 
 export default async function MenuPage() {
   const actor = await requireAdminActor();
   const isCentral = actor.role === 'central_admin';
 
   const outlets = await listOutlets(db(), actor);
-  const master = isCentral
-    ? await listMasterMenu(db(), actor, TVANAMM_BRAND)
-    : { categories: [], items: [], addonGroups: [] };
+  const master = isCentral ? await listMasterMenu(db(), actor, TVANAMM_BRAND) : EMPTY_MASTER;
 
   return (
     <main>
@@ -28,6 +33,14 @@ export default async function MenuPage() {
         master={master}
         outlets={outlets.map((o) => ({ id: o.id, name: o.displayName, status: o.status }))}
       />
+      {isCentral ? (
+        <CatalogExtras
+          brandId={TVANAMM_BRAND}
+          addonGroups={master.addonGroups}
+          combos={master.combos}
+          items={master.items.map((i) => ({ id: i.id, name: i.name }))}
+        />
+      ) : null}
     </main>
   );
 }
