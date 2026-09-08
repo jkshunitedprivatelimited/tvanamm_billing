@@ -2,7 +2,52 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import type { WarehouseRow } from '@jksh/stock';
+import { DataTable, type Column } from '@/components/DataTable';
 import { apiPost } from '../api';
+
+const columns: Column<WarehouseRow>[] = [
+  {
+    key: 'code',
+    header: 'Code',
+    width: '140px',
+    nowrap: true,
+    sortValue: (w) => w.code,
+    render: (w) => <span className="mono">{w.code}</span>,
+  },
+  {
+    key: 'name',
+    header: 'Name',
+    width: 'minmax(180px, 1fr)',
+    nowrap: true,
+    sortValue: (w) => w.name,
+    render: (w) => w.name,
+  },
+  {
+    key: 'tz',
+    header: 'Timezone',
+    width: '140px',
+    render: (w) => <span className="muted">{w.timezone}</span>,
+  },
+  {
+    key: 'loc',
+    header: 'Locations',
+    width: '120px',
+    render: (w) => (
+      <span className="muted" title={w.locations.map((l) => l.kind).join(', ')}>
+        {w.locations.length} kinds
+      </span>
+    ),
+  },
+  {
+    key: 'active',
+    header: 'Active',
+    width: '90px',
+    sortValue: (w) => (w.isActive ? 1 : 0),
+    render: (w) => (
+      <span className={`pill ${w.isActive ? 'ok' : 'inactive'}`}>{w.isActive ? 'yes' : 'no'}</span>
+    ),
+  },
+];
 
 export function WarehousesClient({ rows }: { rows: WarehouseRow[] }) {
   const router = useRouter();
@@ -29,15 +74,11 @@ export function WarehousesClient({ rows }: { rows: WarehouseRow[] }) {
     <>
       <form className="card toolbar" onSubmit={create}>
         <label>
-          <div className="muted" style={{ fontSize: 12 }}>
-            Code
-          </div>
+          Code
           <input value={code} onChange={(e) => setCode(e.target.value)} required maxLength={40} />
         </label>
         <label>
-          <div className="muted" style={{ fontSize: 12 }}>
-            Name
-          </div>
+          Name
           <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={160} />
         </label>
         <button disabled={pending || !code.trim() || !name.trim()}>Create</button>
@@ -48,39 +89,13 @@ export function WarehousesClient({ rows }: { rows: WarehouseRow[] }) {
         ) : null}
       </form>
 
-      <div className="table-wrap" style={{ marginTop: 16 }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Name</th>
-              <th>Timezone</th>
-              <th>Locations</th>
-              <th>Active</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((w) => (
-              <tr key={w.id}>
-                <td className="mono">{w.code}</td>
-                <td>{w.name}</td>
-                <td className="muted">{w.timezone}</td>
-                <td className="muted" style={{ fontSize: 12 }}>
-                  {w.locations.map((l) => l.kind).join(', ') || '—'}
-                </td>
-                <td>{w.isActive ? 'yes' : 'no'}</td>
-              </tr>
-            ))}
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="muted">
-                  No warehouses yet.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(w) => w.id}
+        initialSort={{ key: 'code', dir: 'asc' }}
+        empty="No warehouses yet."
+      />
     </>
   );
 }

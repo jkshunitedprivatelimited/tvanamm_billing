@@ -214,3 +214,96 @@ export async function listOrdersForFulfilment(
     }));
   });
 }
+
+export interface PurchaseOrderDetail {
+  id: string;
+  poNumber: string;
+  status: string;
+  supplierId: string;
+  supplierName: string;
+  warehouseId: string;
+  warehouseCode: string;
+  expectedDate: string | null;
+  totalPaise: number;
+  lines: {
+    id: string;
+    itemId: string;
+    itemName: string;
+    baseUnit: string;
+    orderQtyBase: string;
+    receivedQtyBase: string;
+    unitPricePaise: number;
+    gstRate: string;
+  }[];
+}
+
+export async function getPurchaseOrder(
+  pool: StockPool,
+  actor: StockActor,
+  poId: string,
+): Promise<PurchaseOrderDetail | null> {
+  ensureStockAllowed(actor, 'stock.supplier.manage');
+  return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
+    const { rows } = await client.query<{
+      id: string;
+      po_number: string;
+      status: string;
+      supplier_id: string;
+      supplier_name: string;
+      warehouse_id: string;
+      warehouse_code: string;
+      expected_date: string | null;
+      total_paise: string;
+    }>(
+      `select p.id, p.po_number, p.status::text as status, p.supplier_id, s.name as supplier_name,
+              p.warehouse_id, w.code as warehouse_code, p.expected_date::text as expected_date,
+              p.total_paise
+         from stock.purchase_orders p
+         join stock.suppliers s on s.id = p.supplier_id
+         join stock.warehouses w on w.id = p.warehouse_id
+        where p.id = $1 and p.organization_id = $2`,
+      [poId, actor.organizationId],
+    );
+    const po = rows[0];
+    if (!po) return null;
+    const lines = await client.query<{
+      id: string;
+      item_id: string;
+      item_name: string;
+      base_unit: string;
+      order_qty_base: string;
+      received_qty_base: string;
+      unit_price_paise: string;
+      gst_rate: string;
+    }>(
+      `select l.id, l.item_id, i.name as item_name, i.base_unit,
+              l.order_qty_base, l.received_qty_base, l.unit_price_paise, l.gst_rate
+         from stock.purchase_order_lines l
+         join stock.items i on i.id = l.item_id
+        where l.purchase_order_id = $1
+        order by i.name`,
+      [poId],
+    );
+    return {
+      id: po.id,
+      poNumber: po.po_number,
+      status: po.status,
+      supplierId: po.supplier_id,
+      supplierName: po.supplier_name,
+      warehouseId: po.warehouse_id,
+      warehouseCode: po.warehouse_code,
+      expectedDate: po.expected_date,
+      totalPaise: Number(po.total_paise),
+      lines: lines.rows.map((l) => ({
+        id: l.id,
+        itemId: l.item_id,
+        itemName: l.item_name,
+        baseUnit: l.base_unit,
+        orderQtyBase: l.order_qty_base,
+        receivedQtyBase: l.received_qty_base,
+        unitPricePaise: Number(l.unit_price_paise),
+        gstRate: l.gst_rate,
+      })),
+    };
+  });
+}

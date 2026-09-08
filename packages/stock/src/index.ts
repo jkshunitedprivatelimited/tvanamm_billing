@@ -211,11 +211,13 @@ export {
   listRecipes,
   listRecalls,
   listOrdersForFulfilment,
+  getPurchaseOrder,
   type WarehouseRow,
   type SupplierRow,
   type RecipeRow,
   type RecallRow,
   type FulfilmentOrderRow,
+  type PurchaseOrderDetail,
 } from './reads';
 export {
   createSupplier,

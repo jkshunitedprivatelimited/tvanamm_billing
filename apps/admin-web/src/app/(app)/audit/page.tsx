@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AuditEventView } from '@jksh/identity';
+import { DataTable, type Column } from '@/components/DataTable';
 
 const GROUPS: { label: string; prefix: string }[] = [
   { label: 'All', prefix: '' },
@@ -14,6 +15,91 @@ const GROUPS: { label: string; prefix: string }[] = [
   { label: 'Attendance', prefix: 'attendance.' },
   { label: 'Expenses', prefix: 'expense.' },
   { label: 'Exports', prefix: 'billing.export.' },
+];
+
+/** "sale.refunded" -> "Sale refunded" */
+function pretty(action: string): string {
+  const s = action.replace(/[._]/g, ' ');
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function compactMeta(meta: Record<string, unknown>): string {
+  const entries = Object.entries(meta).filter(([k]) => k !== 'result' && k !== 'correlationId');
+  if (entries.length === 0) return '—';
+  return entries
+    .map(([k, v]) => {
+      const val =
+        v === null || v === undefined
+          ? ''
+          : typeof v === 'object'
+            ? JSON.stringify(v)
+            : typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+              ? String(v)
+              : '';
+      return `${k}: ${val}`;
+    })
+    .join('  ·  ');
+}
+
+const columns: Column<AuditEventView>[] = [
+  {
+    key: 'occurredAt',
+    header: 'When',
+    width: '170px',
+    nowrap: true,
+    sortValue: (e) => e.occurredAt,
+    render: (e) => new Date(e.occurredAt).toLocaleString(),
+  },
+  {
+    key: 'action',
+    header: 'Action',
+    width: 'minmax(180px, 1.3fr)',
+    nowrap: true,
+    sortValue: (e) => e.action,
+    render: (e) => (
+      <span title={e.action}>
+        {pretty(e.action)}{' '}
+        <span className="muted mono" style={{ fontSize: 10 }}>
+          {e.action}
+        </span>
+      </span>
+    ),
+  },
+  {
+    key: 'result',
+    header: 'Result',
+    width: '96px',
+    sortValue: (e) => e.result ?? '',
+    render: (e) => (
+      <span
+        className={`pill ${e.result === 'success' ? 'ok' : e.result === 'denied' || e.result === 'failure' ? 'danger' : ''}`}
+      >
+        {e.result ?? '—'}
+      </span>
+    ),
+  },
+  {
+    key: 'actor',
+    header: 'Actor',
+    width: '150px',
+    nowrap: true,
+    sortValue: (e) => e.actorName ?? '',
+    render: (e) => e.actorName ?? <span className="muted">system</span>,
+  },
+  {
+    key: 'outlet',
+    header: 'Outlet',
+    width: '130px',
+    nowrap: true,
+    render: (e) => e.outletName ?? '—',
+  },
+  {
+    key: 'detail',
+    header: 'Detail',
+    width: 'minmax(160px, 1.6fr)',
+    nowrap: true,
+    render: (e) => compactMeta(e.metadata),
+  },
 ];
 
 export default function AuditPage() {
@@ -67,8 +153,8 @@ export default function AuditPage() {
     <main>
       <h1>Audit log</h1>
       <p className="page-intro">
-        Every security- and money-relevant action, newest first. Franchise Owners see their own
-        franchise; Central and Accountant see the whole organisation.
+        Every security- and money-relevant action. Franchise Owners see their own franchise; Central
+        and Accountant see the whole organisation. Click a column header to sort.
       </p>
 
       <div className="cat-nav">
@@ -118,57 +204,13 @@ export default function AuditPage() {
 
       {err ? <p className="error">{err}</p> : null}
 
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Action</th>
-              <th>Result</th>
-              <th>Actor</th>
-              <th>Outlet</th>
-              <th>Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {events.map((e) => (
-              <tr key={e.id}>
-                <td className="muted" style={{ whiteSpace: 'nowrap' }}>
-                  {new Date(e.occurredAt).toLocaleString()}
-                </td>
-                <td className="mono" style={{ fontSize: 12 }}>
-                  {e.action}
-                </td>
-                <td>
-                  <span
-                    className={`pill ${
-                      e.result === 'success'
-                        ? 'ok'
-                        : e.result === 'denied' || e.result === 'failure'
-                          ? 'danger'
-                          : ''
-                    }`}
-                  >
-                    {e.result ?? '—'}
-                  </span>
-                </td>
-                <td>{e.actorName ?? <span className="muted">system</span>}</td>
-                <td className="muted">{e.outletName ?? '—'}</td>
-                <td className="mono" style={{ fontSize: 11, maxWidth: 340, overflow: 'hidden' }}>
-                  {Object.keys(e.metadata).length ? JSON.stringify(e.metadata) : '—'}
-                </td>
-              </tr>
-            ))}
-            {!loading && events.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="muted">
-                  No matching events.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={events}
+        rowKey={(e) => e.id}
+        initialSort={{ key: 'occurredAt', dir: 'desc' }}
+        empty={loading ? 'Loading…' : 'No matching events.'}
+      />
 
       <div style={{ marginTop: 12 }}>
         {loading ? (

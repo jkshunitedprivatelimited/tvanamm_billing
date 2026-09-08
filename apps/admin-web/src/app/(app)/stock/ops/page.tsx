@@ -15,6 +15,11 @@ const SECTIONS = [
     blurb: 'Onboard and approve suppliers before purchasing.',
   },
   {
+    href: '/stock/ops/purchase-orders',
+    title: 'Purchase orders',
+    blurb: 'Raise POs, walk them to ordered, and receive shipments into stock.',
+  },
+  {
     href: '/stock/ops/recipes',
     title: 'Recipes',
     blurb: 'Author recipes, publish immutable versions, link to Billing.',

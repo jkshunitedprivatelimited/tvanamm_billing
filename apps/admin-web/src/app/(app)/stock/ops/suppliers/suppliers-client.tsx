@@ -2,7 +2,12 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import type { SupplierRow } from '@jksh/stock';
+import { DataTable, type Column } from '@/components/DataTable';
 import { apiPost } from '../api';
+
+function statusOf(s: SupplierRow): string {
+  return !s.isActive ? 'inactive' : s.isApproved ? 'approved' : 'pending';
+}
 
 export function SuppliersClient({ rows }: { rows: SupplierRow[] }) {
   const router = useRouter();
@@ -34,19 +39,50 @@ export function SuppliersClient({ rows }: { rows: SupplierRow[] }) {
     startTransition(() => router.refresh());
   }
 
+  const columns: Column<SupplierRow>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      width: 'minmax(200px, 1fr)',
+      nowrap: true,
+      sortValue: (s) => s.name,
+      render: (s) => s.name,
+    },
+    {
+      key: 'gstin',
+      header: 'GSTIN',
+      width: '180px',
+      render: (s) => <span className="mono">{s.gstin ?? '—'}</span>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: '120px',
+      sortValue: (s) => statusOf(s),
+      render: (s) => <span className={`pill ${statusOf(s)}`}>{statusOf(s)}</span>,
+    },
+    {
+      key: 'action',
+      header: '',
+      width: '110px',
+      render: (s) =>
+        !s.isApproved && s.isActive ? (
+          <button className="secondary sm" onClick={() => void approve(s.id)} disabled={pending}>
+            Approve
+          </button>
+        ) : null,
+    },
+  ];
+
   return (
     <>
       <form className="card toolbar" onSubmit={create}>
         <label>
-          <div className="muted" style={{ fontSize: 12 }}>
-            Name
-          </div>
+          Name
           <input value={name} onChange={(e) => setName(e.target.value)} required maxLength={200} />
         </label>
         <label>
-          <div className="muted" style={{ fontSize: 12 }}>
-            GSTIN (optional)
-          </div>
+          GSTIN (optional)
           <input value={gstin} onChange={(e) => setGstin(e.target.value)} maxLength={20} />
         </label>
         <button disabled={pending || !name.trim()}>Create</button>
@@ -57,48 +93,13 @@ export function SuppliersClient({ rows }: { rows: SupplierRow[] }) {
         ) : null}
       </form>
 
-      <table style={{ marginTop: 12 }}>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>GSTIN</th>
-            <th>Status</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => {
-            const status = !s.isActive ? 'inactive' : s.isApproved ? 'approved' : 'pending';
-            return (
-              <tr key={s.id}>
-                <td>{s.name}</td>
-                <td className="mono">{s.gstin ?? '—'}</td>
-                <td>
-                  <span className={`pill ${status}`}>{status}</span>
-                </td>
-                <td>
-                  {!s.isApproved && s.isActive ? (
-                    <button
-                      className="secondary"
-                      onClick={() => void approve(s.id)}
-                      disabled={pending}
-                    >
-                      Approve
-                    </button>
-                  ) : null}
-                </td>
-              </tr>
-            );
-          })}
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={4} className="muted">
-                No suppliers yet.
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(s) => s.id}
+        initialSort={{ key: 'name', dir: 'asc' }}
+        empty="No suppliers yet."
+      />
     </>
   );
 }
