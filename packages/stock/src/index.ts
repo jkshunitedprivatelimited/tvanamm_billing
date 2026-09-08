@@ -200,6 +200,18 @@ export {
   type ReverseDocumentCommand,
 } from './warehouse-ops';
 export {
+  listWarehouses,
+  listSuppliers,
+  listRecipes,
+  listRecalls,
+  listOrdersForFulfilment,
+  type WarehouseRow,
+  type SupplierRow,
+  type RecipeRow,
+  type RecallRow,
+  type FulfilmentOrderRow,
+} from './reads';
+export {
   createSupplier,
   approveSupplier,
   createPurchaseOrder,
