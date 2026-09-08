@@ -204,6 +204,15 @@ export {
   type FinancialSummary,
 } from './reports';
 export {
+  getRetentionStatus,
+  exportBillsWorkbook,
+  workbookToCsv,
+  ACTIVE_WINDOW_DAYS,
+  type RetentionStatus,
+  type ExportBillsCommand,
+  type BillsWorkbook,
+} from './retention';
+export {
   pinLogin,
   loadOperatorContext,
   lockOperator,

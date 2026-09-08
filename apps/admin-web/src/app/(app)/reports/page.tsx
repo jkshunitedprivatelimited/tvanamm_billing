@@ -1,6 +1,7 @@
-import { getFinancialReport } from '@jksh/identity';
+import { getFinancialReport, getRetentionStatus } from '@jksh/identity';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
+import { RetentionPanel } from './RetentionPanel';
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
@@ -13,7 +14,10 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 export default async function ReportsPage() {
   const actor = await requireAdminActor();
-  const { combined, byOutlet } = await getFinancialReport(db(), actor, { kind: 'last7' });
+  const [{ combined, byOutlet }, retention] = await Promise.all([
+    getFinancialReport(db(), actor, { kind: 'last7' }),
+    getRetentionStatus(db(), actor),
+  ]);
 
   return (
     <main>
@@ -75,6 +79,8 @@ export default async function ReportsPage() {
       ) : (
         <p className="muted">No outlets in scope yet.</p>
       )}
+
+      <RetentionPanel status={retention} />
     </main>
   );
 }
