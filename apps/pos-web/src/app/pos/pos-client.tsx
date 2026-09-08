@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   PosMenuSnapshot,
@@ -10,6 +10,8 @@ import type {
 } from '@jksh/contracts';
 import { ReceiptView } from '../receipt-view';
 import { terminalPaperWidthMm } from '../terminal-prefs';
+import { enqueueBill } from '@/lib/bill-queue';
+import { useBillSync } from '@/lib/use-bill-sync';
 
 type MenuItem = PosMenuSnapshot['items'][number];
 type MenuAddon = MenuItem['addons'][number];
@@ -74,6 +76,34 @@ export function PosClient({
   const [error, setError] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ReceiptSnapshot | null>(null);
   const [receiptBillId, setReceiptBillId] = useState<string | null>(null);
+  const [queuedNotice, setQueuedNotice] = useState<string | null>(null);
+
+  // A queued bill has no receipt yet; when it finally reaches the server, show
+  // its receipt if the till is idle, otherwise just note it (reprint from
+  // History).
+  const showSyncedReceipt = useCallback(
+    (billId: string) => {
+      void (async () => {
+        try {
+          const r = await fetch(`/api/v1/bills/${billId}/receipt`);
+          if (!r.ok) return;
+          const snap = (await r.json()) as ReceiptSnapshot;
+          setReceipt((cur) => {
+            if (cur || cart.length > 0) {
+              setQueuedNotice(`A saved bill just synced (receipt ${snap.receiptNumber}).`);
+              return cur;
+            }
+            setReceiptBillId(billId);
+            return snap;
+          });
+        } catch {
+          /* it will be retried */
+        }
+      })();
+    },
+    [cart.length],
+  );
+  const billSync = useBillSync(showSyncedReceipt);
   const [showCustomer, setShowCustomer] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerMobile, setCustomerMobile] = useState('');
@@ -230,11 +260,35 @@ export function PosClient({
             }
           : {}),
       };
-      const res = await fetch('/api/v1/bills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(cmd),
-      });
+      const queueForLater = () => {
+        enqueueBill(cmd);
+        setQueuedNotice(
+          'No connection — bill saved. It sends automatically and the receipt prints once it does.',
+        );
+        clearSale();
+      };
+
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        queueForLater();
+        return;
+      }
+
+      let res: Response;
+      try {
+        res = await fetch('/api/v1/bills', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cmd),
+        });
+      } catch {
+        // fetch rejects only on a network failure — hold the bill and retry.
+        queueForLater();
+        return;
+      }
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        queueForLater();
+        return;
+      }
       const body = (await res.json()) as { id?: string; message?: string };
       if (!res.ok || !body.id) {
         setError(body.message ?? 'Checkout failed.');
@@ -249,15 +303,21 @@ export function PosClient({
     }
   }
 
-  function newSale() {
+  /** Reset the till for the next customer without leaving the sale screen. */
+  function clearSale() {
     setCart([]);
     setBillDiscount(null);
     setPayment(null);
-    setReceipt(null);
-    setReceiptBillId(null);
     setCustomerName('');
     setCustomerMobile('');
     setShowCustomer(false);
+  }
+
+  function newSale() {
+    clearSale();
+    setReceipt(null);
+    setReceiptBillId(null);
+    setQueuedNotice(null);
     router.refresh();
   }
 
@@ -297,10 +357,32 @@ export function PosClient({
     <>
       <div className="statusbar">
         <span>
-          <strong>{outletName}</strong> · Online
+          <strong>{outletName}</strong>{' '}
+          <span className={`chip ${billSync.online ? 'online' : 'offline'}`}>
+            {billSync.online ? 'Online' : 'Offline'}
+          </span>
+          {billSync.syncing ? (
+            <span className="chip" style={{ marginLeft: 6 }}>
+              Syncing…
+            </span>
+          ) : billSync.pending > 0 ? (
+            <span className="chip offline" style={{ marginLeft: 6 }}>
+              {billSync.pending} to send
+            </span>
+          ) : null}
+          {billSync.failed > 0 ? (
+            <span className="chip" style={{ marginLeft: 6, color: 'var(--danger)' }}>
+              {billSync.failed} failed
+            </span>
+          ) : null}
         </span>
         <span className="muted">{employeeName}</span>
       </div>
+      {queuedNotice ? (
+        <p className="ok" style={{ margin: '8px 16px 0' }}>
+          {queuedNotice}
+        </p>
+      ) : null}
       <div className="pos-layout">
         <div className="menu-pane">
           <div className="search-row">
