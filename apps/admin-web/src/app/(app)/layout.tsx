@@ -2,8 +2,12 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { requireAdminActor } from '@/server/auth';
 import { BrandMark } from '@/components/BrandMark';
+import { AskJksh } from '@/components/AskJksh';
+import { askJkshEnabled } from '@/server/gemini';
 import { AppNav, type NavItem } from './AppNav';
 import { LogoutButton } from './LogoutButton';
+
+const AI_ROLES = new Set(['central_admin', 'accountant', 'franchise_owner']);
 
 const ROLE_LABEL: Record<string, string> = {
   central_admin: 'Central Admin',
@@ -45,6 +49,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         </div>
       </div>
       {children}
+      {askJkshEnabled() && AI_ROLES.has(actor.role) ? <AskJksh role={actor.role} /> : null}
     </>
   );
 }
