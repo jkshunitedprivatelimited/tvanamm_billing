@@ -17,6 +17,23 @@ export default function StoreLoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /** The stored credential points at a terminal that no longer exists — wipe
+   *  every copy of it and send the user to activation. */
+  async function forgetTerminal() {
+    try {
+      localStorage.removeItem(CREDENTIAL_KEY);
+      localStorage.removeItem(OUTLET_KEY);
+    } catch {
+      /* ignore */
+    }
+    try {
+      await fetch('/api/v1/terminals/session', { method: 'DELETE' });
+    } catch {
+      /* ignore */
+    }
+    router.replace('/register');
+  }
+
   useEffect(() => {
     let stored: string | null = null;
     try {
@@ -72,14 +89,17 @@ export default function StoreLoginPage() {
         return;
       }
       if (body.outcome === 'rejected') {
+        if (body.reason === 'terminal_revoked' || body.reason === 'invalid') {
+          setError('This terminal is not registered any more. Redirecting to activation…');
+          void forgetTerminal();
+          return;
+        }
         setError(
           body.reason === 'locked'
             ? `Too many attempts. Try again in ${String(body.retryAfterSeconds ?? 60)}s.`
-            : body.reason === 'terminal_revoked'
-              ? 'This terminal is no longer active. Re-register it.'
-              : body.reason === 'outlet_inactive'
-                ? 'This outlet is not active.'
-                : 'Incorrect PIN.',
+            : body.reason === 'outlet_inactive'
+              ? 'This outlet is not active.'
+              : 'Incorrect PIN.',
         );
         return;
       }
@@ -172,6 +192,13 @@ export default function StoreLoginPage() {
           </button>
         </div>
         {error ? <p className="error">{error}</p> : null}
+        <button
+          className="ghost"
+          style={{ marginTop: 12, fontSize: 13 }}
+          onClick={() => void forgetTerminal()}
+        >
+          Re-register this terminal
+        </button>
       </div>
     </div>
   );
