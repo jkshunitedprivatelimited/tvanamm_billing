@@ -1,5 +1,6 @@
-/// <reference path="../../../pos-web/src/types/web-bluetooth.d.ts" />
+import '../../../pos-web/src/types/web-bluetooth.d.ts';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+const printMock = vi.hoisted(() => vi.fn());
 const state = vi.hoisted(() => ({
   config: { kind: 'bluetooth', deviceId: 'printer-1', deviceName: 'Test printer' },
 }));
@@ -9,7 +10,8 @@ vi.mock('../../../pos-web/src/lib/printer-store', () => ({
 }));
 beforeEach(() => {
   vi.resetModules();
-  vi.stubGlobal('window', { print: vi.fn(), dispatchEvent: vi.fn() });
+  printMock.mockClear();
+  vi.stubGlobal('window', { print: printMock, dispatchEvent: vi.fn() });
   vi.stubGlobal('navigator', {});
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -23,7 +25,7 @@ it('keeps a disconnected Bluetooth failure visible instead of opening the print 
   expect(r.ok).toBe(false);
   expect(r.via).toBe('bluetooth');
   expect(r.error).toContain('Reconnect');
-  expect(window.print).not.toHaveBeenCalled();
+  expect(printMock).not.toHaveBeenCalled();
 });
 it('shows a configured Bluetooth device as disconnected until a real connection exists', async () => {
   const { printerConnectionStatus } = await import('../../../pos-web/src/lib/printer');
