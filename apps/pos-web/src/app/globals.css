@@ -713,7 +713,14 @@ a.link-btn:hover {
 .receipt .item-name {
   flex: 1;
 }
+.printer-test-receipt {
+  display: none;
+}
+
 @media print {
+  .printer-test-receipt {
+    display: block;
+  }
   body * {
     visibility: hidden;
   }

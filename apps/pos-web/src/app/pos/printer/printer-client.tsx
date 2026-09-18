@@ -9,14 +9,16 @@ import {
   type PrinterConfig,
 } from '@/lib/printer-store';
 
-export function PrinterClient() {
+export function PrinterClient({ allowLocalNetwork = false }: { allowLocalNetwork?: boolean }) {
   const [config, setConfig] = useState<PrinterConfig>({ kind: 'browser' });
+  const [supportsBluetooth, setSupportsBluetooth] = useState(false);
   const [ip, setIp] = useState('');
   const [port, setPort] = useState('9100');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   useEffect(() => {
+    setSupportsBluetooth(bluetoothSupported());
     const current = readPrinterConfig();
     setConfig(current);
     if (current.kind === 'network') {
@@ -31,7 +33,13 @@ export function PrinterClient() {
     const result = await smartPrintTest(target);
     setBusy(false);
     if (result.via === target.kind && result.ok) {
-      setMsg({ text: 'Test ticket sent — check the printer.', ok: true });
+      setMsg({
+        text:
+          target.kind === 'browser'
+            ? 'Select your printer in the print dialog. If it is missing, add it in your device’s printer settings first.'
+            : 'Test ticket sent — check the printer.',
+        ok: true,
+      });
     } else {
       setMsg({
         text:
@@ -81,7 +89,7 @@ export function PrinterClient() {
       ? `Bluetooth · ${config.deviceName}`
       : config.kind === 'network'
         ? `WiFi · ${config.ip}:${String(config.port)}`
-        : 'Browser print dialog (no printer connected)';
+        : 'System printer — select your printer in the print dialog';
 
   return (
     <>
@@ -101,12 +109,12 @@ export function PrinterClient() {
         <strong>Bluetooth printer</strong>
         <p className="muted" style={{ fontSize: 12.5, margin: '4px 0 10px' }}>
           Works with printers that support Bluetooth Low Energy. Pair once here — the receipt prints
-          directly to it from then on, no dialog. Older thermal printers that only speak classic
-          Bluetooth (SPP) won’t show up; use WiFi below instead if yours doesn’t.
+          directly while connected. Classic Bluetooth printers need a compatible system driver or
+          the manufacturer’s printing app; they won’t appear in this Bluetooth list.
         </p>
-        {bluetoothSupported() ? (
+        {supportsBluetooth ? (
           <button disabled={busy} onClick={() => void connectBluetooth()}>
-            {busy ? 'Working…' : 'Pair Bluetooth printer'}
+            {busy ? 'Working…' : 'Connect Bluetooth printer'}
           </button>
         ) : (
           <p className="error">
@@ -116,40 +124,67 @@ export function PrinterClient() {
         )}
       </div>
 
-      <div className="card" style={{ marginTop: 12 }}>
-        <strong>WiFi printer</strong>
-        <p className="muted" style={{ fontSize: 12.5, margin: '4px 0 10px' }}>
-          Connect the printer to this outlet’s WiFi first (most thermal printers print their IP
-          address on a self-test ticket, or have a small screen/app to show it), then enter it here.
-        </p>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
-          <label style={{ flex: 1, minWidth: 140 }}>
-            <div className="muted" style={{ fontSize: 12 }}>
-              Printer IP address
-            </div>
-            <input
-              value={ip}
-              onChange={(e) => setIp(e.target.value)}
-              placeholder="192.168.1.50"
-              style={{ marginBottom: 0 }}
-            />
-          </label>
-          <label style={{ width: 100 }}>
-            <div className="muted" style={{ fontSize: 12 }}>
-              Port
-            </div>
-            <input
-              value={port}
-              onChange={(e) => setPort(e.target.value)}
-              placeholder="9100"
-              style={{ marginBottom: 0 }}
-            />
-          </label>
-          <button disabled={busy || !ip.trim()} onClick={() => void saveNetwork()}>
-            {busy ? 'Working…' : 'Save & test print'}
+      {(['USB', 'Wi-Fi'] as const).map((kind) => (
+        <section className="card" style={{ marginTop: 12 }} key={kind}>
+          <h2>{kind} printer</h2>
+          <p>
+            {kind === 'USB'
+              ? 'Connect the USB cable to your billing device and install the printer’s driver. On Android, USB printing requires a compatible OTG connection and print service.'
+              : 'Connect the printer and your billing device to the same Wi-Fi. Add the printer in your device’s printer settings or the manufacturer’s print service.'}
+          </p>
+          <p>
+            Select your thermal printer in Destination, choose its 58 mm or 80 mm paper size, and
+            turn off headers and footers.
+          </p>
+          <button
+            disabled={busy}
+            onClick={() => {
+              useBrowserDialog();
+              void testPrint({ kind: 'browser' });
+            }}
+          >
+            Select {kind} printer &amp; test
           </button>
+        </section>
+      ))}
+
+      {allowLocalNetwork ? (
+        <div className="card" style={{ marginTop: 12 }}>
+          <strong>Direct local-network printer</strong>
+          <p className="muted" style={{ fontSize: 12.5, margin: '4px 0 10px' }}>
+            Connect the printer to this outlet’s WiFi first (most thermal printers print their IP
+            address on a self-test ticket, or have a small screen/app to show it), then enter it
+            here.
+          </p>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
+            <label style={{ flex: 1, minWidth: 140 }}>
+              <div className="muted" style={{ fontSize: 12 }}>
+                Printer IP address
+              </div>
+              <input
+                value={ip}
+                onChange={(e) => setIp(e.target.value)}
+                placeholder="192.168.1.50"
+                style={{ marginBottom: 0 }}
+              />
+            </label>
+            <label style={{ width: 100 }}>
+              <div className="muted" style={{ fontSize: 12 }}>
+                Port
+              </div>
+              <input
+                value={port}
+                onChange={(e) => setPort(e.target.value)}
+                placeholder="9100"
+                style={{ marginBottom: 0 }}
+              />
+            </label>
+            <button disabled={busy || !ip.trim()} onClick={() => void saveNetwork()}>
+              {busy ? 'Working…' : 'Save & test print'}
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {config.kind !== 'browser' ? (
         <button
