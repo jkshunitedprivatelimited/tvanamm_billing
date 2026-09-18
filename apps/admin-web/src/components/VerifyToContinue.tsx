@@ -48,11 +48,11 @@ export function VerifyToContinue({
     }
   }
   return (
-    <section className="card" aria-label="Verify to activate">
-      <h3>Verify to activate</h3>
+    <section className="card" aria-label="Verify to continue">
+      <h3>Verify to continue</h3>
       <p className="muted">
-        Confirm with an OTP to your signed-in admin mobile. Your details stay here; approval
-        continues after verification.
+        Confirm with a code sent to your registered mobile number. Your details stay here, and your
+        action continues after verification.
       </p>
       {sent ? (
         <>
@@ -77,7 +77,7 @@ export function VerifyToContinue({
             disabled={busy || code.length < 4}
             onClick={() => void submit('verify')}
           >
-            {busy ? 'Verifying…' : 'Verify & activate'}
+            {busy ? 'Verifying…' : 'Verify & continue'}
           </button>{' '}
         </>
       ) : null}

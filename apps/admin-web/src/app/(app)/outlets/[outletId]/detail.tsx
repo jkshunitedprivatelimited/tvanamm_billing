@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { VerifyToContinue } from '@/components/VerifyToContinue';
 import type { EmployeeSummary, OutletSummary, Role, TerminalSummary } from '@jksh/contracts';
 
 const LIFECYCLE: Record<string, { action: string; label: string }[]> = {
@@ -29,12 +30,19 @@ export function OutletDetail({
   initialEmployees: EmployeeSummary[];
 }) {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const [requestBusy, setBusy] = useState(false);
+  const [pending, setPending] = useState<(() => Promise<void>) | null>(null);
+  const busy = requestBusy || pending !== null;
   const [error, setError] = useState<string | null>(null);
   const [code, setCode] = useState<string | null>(null);
   const isCentral = role === 'central_admin';
 
-  async function call(path: string, method: string, body?: unknown): Promise<boolean> {
+  async function call(
+    path: string,
+    method: string,
+    body?: unknown,
+    onSuccess?: (data: Record<string, unknown>) => void,
+  ): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
@@ -44,15 +52,25 @@ export function OutletDetail({
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
       if (!res.ok) {
-        const b = (await res.json()) as { message?: string; details?: { reason?: string } };
-        setError(
-          b.details?.reason === 'fresh_auth_required'
-            ? 'This needs a fresh sign-in. Sign out and back in, then retry.'
-            : (b.message ?? 'Request failed.'),
-        );
+        const b = (await res.json()) as {
+          error?: string;
+          message?: string;
+          details?: { reason?: string };
+        };
+        if (b.error === 'fresh_auth_required' || b.details?.reason === 'fresh_auth_required') {
+          setPending(() => async () => {
+            setPending(null);
+            await call(path, method, body, onSuccess);
+          });
+        } else setError(b.message ?? 'Request failed. Please try again.');
         return false;
       }
+      if (onSuccess) onSuccess((await res.json()) as Record<string, unknown>);
+      router.refresh();
       return true;
+    } catch {
+      setError('Could not connect. Please try again.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -60,7 +78,12 @@ export function OutletDetail({
 
   return (
     <>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {pending ? <VerifyToContinue onVerified={pending} onCancel={() => setPending(null)} /> : null}
 
       {isCentral ? (
         <div className="card">
@@ -100,18 +123,13 @@ export function OutletDetail({
         <button
           disabled={busy || outlet.status !== 'active'}
           onClick={() => {
-            void fetch(`/api/v1/outlets/${outlet.id}/terminals/enroll`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ label: 'Counter terminal' }),
-            }).then(async (res) => {
-              if (res.ok) {
-                setCode(((await res.json()) as { code: string }).code);
-                router.refresh();
-              } else {
-                setError(((await res.json()) as { message?: string }).message ?? 'Failed.');
-              }
-            });
+            setCode(null);
+            void call(
+              `/api/v1/outlets/${outlet.id}/terminals/enroll`,
+              'POST',
+              { label: 'Counter terminal' },
+              (data) => setCode(String(data.code)),
+            );
           }}
         >
           Issue activation code
@@ -194,7 +212,12 @@ function EmployeeSection({
   outletId: string;
   employees: EmployeeSummary[];
   busy: boolean;
-  onCall: (p: string, m: string, b?: unknown) => Promise<boolean>;
+  onCall: (
+    p: string,
+    m: string,
+    b?: unknown,
+    onSuccess?: (data: Record<string, unknown>) => void,
+  ) => Promise<boolean>;
 }) {
   const router = useRouter();
   const [fullName, setFullName] = useState('');
@@ -210,22 +233,17 @@ function EmployeeSection({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void fetch(`/api/v1/outlets/${outletId}/employees`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fullName, mobile, initialPin: pin }),
-          }).then(async (res) => {
-            if (res.ok) {
-              const b = (await res.json()) as { employeeCode: string };
-              setMsg(`Created ${b.employeeCode}`);
+          void onCall(
+            `/api/v1/outlets/${outletId}/employees`,
+            'POST',
+            { fullName, mobile, initialPin: pin },
+            (data) => {
+              setMsg(`Created ${String(data.employeeCode)}`);
               setFullName('');
               setMobile('+91');
               setPin('');
-              router.refresh();
-            } else {
-              setMsg(((await res.json()) as { message?: string }).message ?? 'Failed.');
-            }
-          });
+            },
+          );
         }}
       >
         <label htmlFor="en">Full name</label>
@@ -274,15 +292,18 @@ function EmployeeSection({
                     onSubmit={(ev) => {
                       ev.preventDefault();
                       if (!/^\d{4}$/.test(resetPin)) return;
-                      void onCall(`/api/v1/employees/${e.id}/reset-pin`, 'POST', {
-                        newPin: resetPin,
-                      }).then((ok) => {
-                        if (ok) {
+                      void onCall(
+                        `/api/v1/employees/${e.id}/reset-pin`,
+                        'POST',
+                        {
+                          newPin: resetPin,
+                        },
+                        () => {
                           setResetFor(null);
                           setResetPin('');
                           router.refresh();
-                        }
-                      });
+                        },
+                      );
                     }}
                   >
                     <input
