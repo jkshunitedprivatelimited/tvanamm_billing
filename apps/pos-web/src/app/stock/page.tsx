@@ -43,7 +43,7 @@ export default async function EmployeeStockPage() {
     <main className="pos stock-workspace" style={{ maxWidth: 900, margin: '0 auto', padding: 24 }}>
       <Link href="/pos">← Back to billing</Link>
       <h1>Stock & expenses</h1>
-      <p>Record purchases, daily expenses, wastage and stock counts in one place.</p>
+      <p>Record purchases, daily expenses and wastage in one place.</p>
       {content}
     </main>
   );

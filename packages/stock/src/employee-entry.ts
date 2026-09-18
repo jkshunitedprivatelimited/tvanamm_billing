@@ -10,7 +10,8 @@ export const employeeStockEntrySchema = z
   .object({
     id: z.uuid(),
     kind: z.enum(['purchase', 'wastage', 'count']),
-    itemId: z.uuid(),
+    itemId: z.union([z.uuid(), z.literal('other')]),
+    otherItemName: z.string().trim().min(1).max(120).optional(),
     quantity: z.string().regex(/^\d{1,8}(\.\d{1,6})?$/),
     unit: z.enum(['g', 'kg', 'ml', 'l', 'each']),
     reason: z.string().trim().min(1).max(500),
@@ -34,6 +35,10 @@ export const employeeStockEntrySchema = z
       .optional(),
   })
   .superRefine((v, ctx) => {
+    if (v.itemId === 'other' && (v.kind !== 'wastage' || !v.otherItemName))
+      ctx.addIssue({ code: 'custom', message: 'Enter the name of the wasted item' });
+    if (v.itemId !== 'other' && v.otherItemName)
+      ctx.addIssue({ code: 'custom', message: 'Choose a listed item or enter another item' });
     if (v.kind !== 'count' && Number(v.quantity) <= 0)
       ctx.addIssue({ code: 'custom', message: 'Enter a quantity greater than zero' });
     if (v.kind === 'purchase' && (!v.amount || Number(v.amount) <= 0 || !v.paymentSource))
@@ -90,19 +95,21 @@ export async function recordEmployeeStockEntry(
   const cmd = employeeStockEntrySchema.parse(input);
   await withStockActorContext(pool, stockSystemContext(), async (c) => {
     // Validate before persisting so a bad item or unit cannot leave an unrecoverable request.
-    const item = await c.query<{ supply_rule: string; is_batch_tracked: boolean }>(
-      'select supply_rule,is_batch_tracked from stock.items where id=$1 and organization_id=$2 and is_active',
-      [cmd.itemId, actor.organizationId],
-    );
-    if (!item.rows[0]) throw new StockError('validation', 'Choose an available stock item');
-    if (cmd.kind === 'purchase' && item.rows[0].supply_rule === 'jksh_required')
-      throw new StockError('forbidden', 'This item must be received through a supply order');
-    if (item.rows[0].is_batch_tracked)
-      throw new StockError(
-        'validation',
-        'This item needs a batch-specific entry in the stock workspace',
+    if (cmd.itemId !== 'other') {
+      const item = await c.query<{ supply_rule: string; is_batch_tracked: boolean }>(
+        'select supply_rule,is_batch_tracked from stock.items where id=$1 and organization_id=$2 and is_active',
+        [cmd.itemId, actor.organizationId],
       );
-    await toBaseQuantity(c, cmd.itemId, cmd.unit, cmd.quantity);
+      if (!item.rows[0]) throw new StockError('validation', 'Choose an available stock item');
+      if (cmd.kind === 'purchase' && item.rows[0].supply_rule === 'jksh_required')
+        throw new StockError('forbidden', 'This item must be received through a supply order');
+      if (item.rows[0].is_batch_tracked)
+        throw new StockError(
+          'validation',
+          'This item needs a batch-specific entry in the stock workspace',
+        );
+      await toBaseQuantity(c, cmd.itemId, cmd.unit, cmd.quantity);
+    }
     const settings = await c.query(
       'select 1 from stock.outlet_stock_settings where outlet_id=$1 and organization_id=$2',
       [outletId, actor.organizationId],
@@ -125,6 +132,41 @@ export async function recordEmployeeStockEntry(
     if (JSON.stringify(employeeStockEntrySchema.parse(req.command)) !== JSON.stringify(cmd))
       throw new StockError('conflict', 'Retry the original entry without changing its details');
     if (req.result) return req.result;
+    if (cmd.itemId === 'other') {
+      // Unlisted losses are recorded for the owner, never deducted from an unrelated item.
+      const result = {
+        id: cmd.id,
+        kind: cmd.kind,
+        itemName: cmd.otherItemName,
+        expenseId: null,
+        status: 'recorded',
+        stockUpdated: false,
+      };
+      await recordStockAudit(c, {
+        action: 'employee_stock.wastage',
+        actorRequest: 'operator',
+        employeeId,
+        organizationId: actor.organizationId,
+        outletId,
+        franchiseId: actor.franchiseId,
+        subjectType: 'employee_stock_entry',
+        subjectId: cmd.id,
+        data: {
+          employeeName,
+          itemName: cmd.otherItemName,
+          quantity: cmd.quantity,
+          unit: cmd.unit,
+          reason: cmd.reason,
+          wasteReason: cmd.wasteReason,
+          stockUpdated: false,
+        },
+      });
+      await c.query(
+        'update stock.employee_stock_entries set result=$2,completed_at=now() where id=$1',
+        [cmd.id, JSON.stringify(result)],
+      );
+      return result;
+    }
     const location = (
       await c.query<{ id: string; franchise_id: string | null }>(
         `select id,franchise_id from stock.stock_locations where organization_id=$1 and outlet_id=$2 and scope='outlet' and kind='sellable' and is_active`,

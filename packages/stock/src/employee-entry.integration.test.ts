@@ -164,6 +164,73 @@ describe.skipIf(!process.env.STOCK_DATABASE_URL)('Employee stock entries', () =>
     await approveCountAdjustments(pool, f.owner, count.id);
     expect(await f.balance()).toBe(8000);
   });
+  it('records unlisted wastage once, makes it visible to the owner, and leaves balances and expenses unchanged', async () => {
+    const f = await fixture();
+    const command = {
+      id: randomUUID(),
+      kind: 'wastage',
+      itemId: 'other',
+      otherItemName: 'Prepared lemon tea',
+      quantity: '2',
+      unit: 'each',
+      reason: 'Customer cancelled after preparation',
+      wasteReason: 'customer_cancelled',
+    };
+    await Promise.all([
+      recordEmployeeStockEntry(pool, f.actor, 'A', command, f.expense),
+      recordEmployeeStockEntry(pool, f.actor, 'A', command, f.expense),
+    ]);
+    expect(await f.balance()).toBe(0);
+    expect(f.expenses.size).toBe(0);
+    const rows = await listWastageForOutlet(pool, f.owner, f.outletId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      itemId: null,
+      itemName: 'Prepared lemon tea',
+      qtyBase: '2',
+      baseUnit: 'each',
+      employeeName: 'A',
+    });
+    await expect(
+      recordEmployeeStockEntry(
+        pool,
+        { ...f.actor, employeeId: randomUUID() },
+        'B',
+        command,
+        f.expense,
+      ),
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(
+      recordEmployeeStockEntry(pool, f.actor, 'A', { ...command, quantity: '3' }, f.expense),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    await expect(
+      listWastageForOutlet(pool, { ...f.owner, franchiseId: randomUUID() }, f.outletId),
+    ).rejects.toMatchObject({ code: 'forbidden' });
+    await expect(
+      recordEmployeeStockEntry(
+        pool,
+        f.actor,
+        'A',
+        { ...command, id: randomUUID(), otherItemName: '' },
+        f.expense,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      recordEmployeeStockEntry(
+        pool,
+        f.actor,
+        'A',
+        {
+          ...command,
+          id: randomUUID(),
+          kind: 'purchase',
+          amount: '50.00',
+          paymentSource: 'employee_paid',
+        },
+        f.expense,
+      ),
+    ).rejects.toThrow();
+  });
   it('keeps fractional per-millilitre cost for milk bought at 65 rupees per litre', async () => {
     const f = await fixture();
     await recordEmployeeStockEntry(

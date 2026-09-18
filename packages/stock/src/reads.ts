@@ -434,7 +434,7 @@ export async function listCountLines(
 
 export interface WastageRow {
   id: string;
-  itemId: string;
+  itemId: string | null;
   itemName: string;
   baseUnit: string;
   qtyBase: string;
@@ -469,7 +469,14 @@ export async function listWastageForOutlet(
          join stock.items i on i.id = w.item_id
          left join stock.employee_stock_entries e on e.id=w.id
         where w.outlet_id = $1
-        order by w.occurred_at desc
+        union all
+        select e.id, null::uuid, e.command->>'otherItemName', e.command->>'unit',
+          (e.command->>'quantity')::numeric, e.command->>'wasteReason', e.created_at,
+          e.employee_name, e.command->>'reason'
+        from stock.employee_stock_entries e
+        where e.outlet_id=$1 and e.command->>'kind'='wastage'
+          and e.command->>'itemId'='other' and e.result is not null
+        order by occurred_at desc
         limit 100`,
       [outletId],
     );

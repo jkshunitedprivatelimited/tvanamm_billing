@@ -165,14 +165,22 @@ export function PosClient({
   const [customerName, setCustomerName] = useState('');
   const [customerMobile, setCustomerMobile] = useState('');
 
+  const lastMenuRefresh = useRef(Date.now());
+
   // Pick up published menus while the till is idle. Keep an in-progress
   // sale on its existing menu version until the cashier finishes it.
   useEffect(() => {
     if (cart.length > 0 || busy || receipt || offlineDone) return;
     const refresh = () => {
-      if (navigator.onLine && document.visibilityState === 'visible') router.refresh();
+      if (
+        navigator.onLine &&
+        document.visibilityState === 'visible' &&
+        Date.now() - lastMenuRefresh.current >= 30_000
+      ) {
+        lastMenuRefresh.current = Date.now();
+        router.refresh();
+      }
     };
-    refresh();
     const timer = window.setInterval(refresh, 30_000);
     window.addEventListener('focus', refresh);
     window.addEventListener('online', refresh);
@@ -617,12 +625,12 @@ export function PosClient({
             </Link>
           ) : null}
           <span className="topnav billing-actions">
-            <a href="/stock">Stock & expenses</a>
-            <a href="/history">Bill history</a>
+            <Link href="/stock">Stock & expenses</Link>
+            <Link href="/history">Bill history</Link>
             <Link href="/pos/printer">Printer</Link>
-            <a href="/close" className="danger">
+            <Link href="/close" className="danger">
               Finish shift
-            </a>
+            </Link>
           </span>
           <SessionControls />
           <span className="muted">{employeeName}</span>

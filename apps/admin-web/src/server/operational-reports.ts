@@ -47,7 +47,15 @@ export async function getOperationalReports(
           [ids, from, to],
         );
         const wastage = await c.query<ReportRow>(
-          `select w.outlet_id::text,i.name as item,i.base_unit as unit,w.reason,sum(w.qty_base)::text as quantity from stock.wastage_events w join stock.items i on i.id=w.item_id and i.is_active where w.outlet_id=any($1::uuid[]) and (w.occurred_at at time zone 'Asia/Kolkata')::date between $2::date and $3::date group by w.outlet_id,i.name,i.base_unit,w.reason`,
+          `select w.outlet_id::text,i.name as item,i.base_unit as unit,w.reason,sum(w.qty_base)::text as quantity from stock.wastage_events w join stock.items i on i.id=w.item_id and i.is_active where w.outlet_id=any($1::uuid[]) and (w.occurred_at at time zone 'Asia/Kolkata')::date between $2::date and $3::date group by w.outlet_id,i.name,i.base_unit,w.reason
+          union all
+          select e.outlet_id::text, e.command->>'otherItemName', e.command->>'unit',
+            e.command->>'wasteReason',sum((e.command->>'quantity')::numeric)::text
+          from stock.employee_stock_entries e
+          where e.outlet_id=any($1::uuid[]) and e.command->>'kind'='wastage'
+            and e.command->>'itemId'='other' and e.result is not null
+            and (e.created_at at time zone 'Asia/Kolkata')::date between $2::date and $3::date
+          group by e.outlet_id,e.command->>'otherItemName',e.command->>'unit',e.command->>'wasteReason'`,
           [ids, from, to],
         );
         let suppliers: ReportRow[] | null = null;

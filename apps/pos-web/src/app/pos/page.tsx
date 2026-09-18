@@ -14,8 +14,6 @@ import { PosClient } from './pos-client';
 export default async function PosPage() {
   const actor = await requireOperator();
   const pool = db();
-  const me = await getOperatorSummary(pool, actor);
-  const outletName = me?.outletName ?? 'Outlet';
 
   if (!actor.outletId) {
     return (
@@ -28,7 +26,14 @@ export default async function PosPage() {
     );
   }
 
-  const window_ = await outletBillingWindow(pool, actor, actor.outletId);
+  const [me, window_, cashSession, shifts, menu] = await Promise.all([
+    getOperatorSummary(pool, actor),
+    outletBillingWindow(pool, actor, actor.outletId),
+    getOpenCashSession(pool, actor, actor.outletId),
+    listOpenShifts(pool, actor, actor.outletId),
+    getPublishedMenu(pool, actor, actor.outletId),
+  ]);
+  const outletName = me?.outletName ?? 'Outlet';
   if (window_.blocked) {
     return (
       <div className="screen">
@@ -44,17 +49,14 @@ export default async function PosPage() {
     );
   }
 
-  const cashSession = await getOpenCashSession(pool, actor, actor.outletId);
   if (!cashSession) {
     return <OpenRegister outletName={outletName} />;
   }
 
-  const shifts = await listOpenShifts(pool, actor, actor.outletId);
   if (!shifts.some((shift) => shift.employeeId === actor.employeeId)) {
     return <StartShift outletName={outletName} employeeName={me?.employeeName ?? 'Employee'} />;
   }
 
-  const menu = await getPublishedMenu(pool, actor, actor.outletId);
   if (!menu) {
     return (
       <div className="screen">
