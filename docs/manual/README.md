@@ -1,0 +1,30 @@
+# T VANAMM user manual
+
+Step-by-step guides for the business workspace and billing app. The same instructions are available from Help in the application. Each guide explains where to go, what the feature does and how to use it.
+
+## Choose your role
+
+- [Employee daily guide](employee.md)
+- [Franchise owner guide](franchise-owner.md)
+- [Central admin guide](central-admin.md)
+- [Accountant guide](accountant.md)
+
+## Daily responsibilities
+
+| Task | Who records it | Who reviews it |
+| --- | --- | --- |
+| Opening cash and sales | Working employee | Owner / accounts |
+| Milk and permitted local purchases | Employee who bought them | Owner |
+| Wastage | Employee who observed the loss | Owner |
+| Physical stock count | Employee who measured the stock | Another authorised reviewer |
+| Company-supplied goods | Outlet orders; receiving staff confirms arrival | Owner / supply team |
+| Shift expenses and closing cash | Working employee | Owner / accounts |
+| Recipe measurements and publication | Authorised central team | Authorised central team |
+
+## Stock and expense example
+
+An employee buys 5 litres of milk for ₹325 and records one Local purchase. Stock increases by 5 litres and a linked ₹325 expense is recorded. If 0.5 litres spills, the employee records 0.5 litres as wastage with a reason. Later, a physical count records the quantity actually remaining; it must not deduct that same spill again. Recipe-linked sales usage updates separately when configured and synced.
+
+## Maintaining this manual
+
+The source is `packages/ui/src/help.json`. After editing it, run `node scripts/generate-user-manual.mjs`, then format the generated Markdown. Do not put credentials, OTPs, PINs or API keys into the manual.

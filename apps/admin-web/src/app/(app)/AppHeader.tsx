@@ -20,6 +20,7 @@ export function AppHeader({ items, role }: { items: NavItem[]; role: string }) {
         <AppNav items={items} />
       </div>
       <div className="header-actions">
+        <Link href="/help">Help</Link>
         <NotificationBell />
         <span className="badge desktop-account">{role}</span>
         <div className="desktop-account">

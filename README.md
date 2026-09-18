@@ -97,3 +97,7 @@ Foundation and Identity, re-aligned to `docs/plans/billing-data-api-plan.md`:
 - 78 automated tests (unit + Postgres integration, verified against both a local
   Postgres and the dev Supabase project); `format:check`, lint, typecheck, both
   Next.js builds, and `npm audit --omit=dev --audit-level=high` pass.
+
+## User help
+
+Open **Help** in the business workspace or **Staff menu → Help & daily guide** in billing. See the [complete role-wise manual](docs/manual/README.md) for central admin, franchise owners, employees and accountants.

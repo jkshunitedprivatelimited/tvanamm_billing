@@ -1,0 +1,545 @@
+{
+  "employee": {
+    "title": "Employee daily guide",
+    "intro": "Use this guide at the billing counter. Your entries are recorded against your employee account and outlet.",
+    "sections": [
+      {
+        "title": "Start your day",
+        "where": "Billing → Sign in → Start shift",
+        "purpose": "Identify who is working and record the cash available before sales begin.",
+        "steps": [
+          "Sign in on the registered billing device with your own PIN and confirm your name.",
+          "If the store register is closed, count the money in the drawer and enter the opening cash when prompted.",
+          "Start your shift. If another employee already opened the register, use the existing shared register.",
+          "Open Staff menu to record attendance. A colleague can identify themselves with their own PIN without changing the cashier."
+        ],
+        "note": "Opening cash belongs to the shared register. Do not enter it again just because a second employee starts work."
+      },
+      {
+        "title": "Record milk or sugar bought locally",
+        "where": "Billing → Stock & purchases → Local purchase",
+        "purpose": "Add the supplies you bought and record their cost together.",
+        "steps": [
+          "Select an allowed local-purchase item, such as milk or sugar.",
+          "Enter the quantity and check the unit. For example, enter 5 litres for five litres of milk.",
+          "Enter the total amount paid, not the price of one litre or kilogram.",
+          "Select the actual payment source: cash drawer, outlet UPI, owner paid, or employee paid.",
+          "Add a purchase note, check the details, and save once.",
+          "Check the recent entries to confirm that the purchase was recorded."
+        ],
+        "note": "The purchase creates stock and one linked expense. Do not add the same payment again under Other expense. Tea powder must be ordered through the supply system; it is not available for local purchase. Employee-paid entries record money owed, not proof that reimbursement has been paid."
+      },
+      {
+        "title": "Make a sale",
+        "where": "Billing",
+        "purpose": "Record items sold and how the customer paid.",
+        "steps": [
+          "Search or select a menu category, then tap the items the customer wants.",
+          "Check quantities, add-ons and the bill total. Remove any accidental selections.",
+          "If needed, use Add bill discount and enter the required details. Add customer details only when needed.",
+          "Select the actual payment method and complete the required payment fields.",
+          "Confirm the sale, then print or reprint the receipt as needed. Use Bill history to find the completed bill."
+        ],
+        "note": "Billing can continue when stock has not been entered or is insufficient. A bill alone does not guarantee ingredient balances are accurate: stock deduction also needs a published, linked recipe and successful syncing. Do not confirm the same sale twice if its result is unclear; check Bill history first."
+      },
+      {
+        "title": "Record another expense",
+        "where": "Billing → Stock & purchases → Other expense",
+        "purpose": "Record spending that is not already saved as a local stock purchase.",
+        "steps": [
+          "Choose the expense category and enter the total amount.",
+          "Select the actual payment source.",
+          "Write a clear reason, such as delivery charge or cleaning expense.",
+          "Save and check the entry before continuing."
+        ],
+        "note": "Only cash-drawer expenses reduce the expected drawer balance. Do not duplicate a milk or sugar purchase already recorded under Local purchase."
+      },
+      {
+        "title": "Record wastage",
+        "where": "Billing → Stock & purchases → Record wastage",
+        "purpose": "Explain a known loss of stock, such as spilled milk or spoiled ingredients.",
+        "steps": [
+          "Select the item that was lost.",
+          "Enter only the quantity lost and check the unit.",
+          "Choose the reason and add details: for example, 0.5 litres of milk spilled during preparation.",
+          "Review and save. Check the recent entry."
+        ],
+        "note": "Wastage reduces stock; it does not record another purchase expense. Never enter the same loss twice. Batch-tracked goods need the batch-specific stock workspace."
+      },
+      {
+        "title": "Count what is physically left",
+        "where": "Billing → Stock & purchases → Count stock",
+        "purpose": "Compare the stock on the shelf with the recorded balance.",
+        "steps": [
+          "Physically count or measure the selected item.",
+          "Enter the quantity actually remaining, not the amount missing.",
+          "Add a note explaining the count and submit it.",
+          "Tell the owner that a count is ready to review. The balance changes after approval."
+        ],
+        "note": "Example: if the app shows 6 litres but you have 5 litres, enter 5. If a loss was already recorded as wastage, do not deduct it again. Counts are snapshots; wastage records a particular loss."
+      },
+      {
+        "title": "Finish your shift or close the store",
+        "where": "Billing → Finish",
+        "purpose": "Keep staff attendance and shared cash accurate.",
+        "steps": [
+          "Review your shift expenses. Add missing expenses or confirm that all expenses are recorded or that there were none.",
+          "Choose Finish my work when another employee will continue billing. This ends your own shift and attendance and signs you out; the store register stays open.",
+          "Choose Close store only when the shared register should close. Count the actual cash and enter it.",
+          "If the cash differs from the expected amount, enter a clear reason and complete the close.",
+          "Check that your work is finished before leaving the device."
+        ],
+        "note": "Each employee records their own attendance. Signing out or changing cashier is not the same as closing the store. Sync pending bills before switching or finishing when the app requires it."
+      },
+      {
+        "title": "Handle offline billing and retries",
+        "where": "Billing → Connection status / recovery",
+        "purpose": "Preserve sales if the internet is interrupted.",
+        "steps": [
+          "Use offline billing only when the device already has the required menu and offline access available.",
+          "Keep the same browser and device until saved bills have synced.",
+          "Reconnect, allow pending sales to sync, and review Bill history before retrying a sale.",
+          "If a stock entry reports a pending save, retry that saved request instead of creating a second entry.",
+          "Ask the owner for help if recovery or an unresolved error remains."
+        ],
+        "note": "Local purchases, wastage and counts require an internet connection. Do not clear browser storage while bills are pending. Printer setup is available from the billing printer settings."
+      },
+      {
+        "title": "Troubleshooting and support",
+        "where": "The screen where the issue occurred",
+        "purpose": "Resolve common issues without duplicating records.",
+        "steps": [
+          "If OTP delivery fails, check the mobile number and connection, then use the offered retry after the countdown. Never send an OTP to support.",
+          "If a report is empty, check the outlet, dates and whether offline bills have synced.",
+          "If a save has an unclear result, refresh or check history before submitting another entry.",
+          "If stock is wrong, check receipts, units, recipe links, counts and wastage before adjusting it.",
+          "For an unresolved issue, record the screen name, time, outlet, record reference and exact error. Share a screenshot with private information hidden."
+        ],
+        "note": "Use only the actions available to your role. An unavailable action can mean missing setup, missing access or a temporary connection problem; it does not mean you should create duplicate records."
+      }
+    ]
+  },
+  "franchise_owner": {
+    "title": "Franchise owner guide",
+    "intro": "Manage your own outlet: sales, team, menu, expenses and stock. Select the correct outlet whenever your account has more than one.",
+    "sections": [
+      {
+        "title": "Accept your invitation and set up the outlet",
+        "where": "Invitation link → Setup; then Overview",
+        "purpose": "Get access and provide the outlet details once.",
+        "steps": [
+          "Open the complete invitation link in your browser and verify the invited mobile number with the OTP.",
+          "Complete the requested outlet profile and submit it.",
+          "Check setup progress. An accepted invitation and a completed outlet activation are separate steps.",
+          "After activation, open your outlet and use Team & devices to set up employees and the billing device.",
+          "Confirm that a menu has been published before the team begins billing."
+        ],
+        "note": "An outlet count of zero during setup does not mean your invitation failed. Check whether outlet details are still awaiting activation. Do not share employee PINs or OTPs in help requests."
+      },
+      {
+        "title": "Review your outlet each day",
+        "where": "Outlet overview",
+        "purpose": "See sales and the tasks that need attention.",
+        "steps": [
+          "Choose Today, Last 7 days or Last 30 days.",
+          "Review net sales, completed bills, average bill and low-stock items.",
+          "Check the sales breakdown for cash, UPI, discounts and refunds.",
+          "Open the relevant task or report when something needs attention."
+        ],
+        "note": "Zero sales means no recorded sales for the selected scope and dates. It does not prove the outlet was closed. Check pending offline billing and filters if sales are missing."
+      },
+      {
+        "title": "Manage employees and billing devices",
+        "where": "Overview → Your outlet → Billing & team → Team & devices",
+        "purpose": "Maintain the people and devices allowed to work at your outlet.",
+        "steps": [
+          "Open the correct outlet and the Team & devices section.",
+          "Add or update employees using the available employee controls and assign their access.",
+          "Set up the billing device using the device registration flow shown on screen.",
+          "Review attendance in the Attendance section and investigate missing check-ins or check-outs.",
+          "Update or revoke access when someone leaves. Complete fresh verification if prompted."
+        ],
+        "note": "Employees should use their own identity. Multiple employees can work with one shared store register without opening cash being counted twice."
+      },
+      {
+        "title": "Change your outlet menu",
+        "where": "Menu → Your outlet",
+        "purpose": "Manage what customers can buy at your outlet.",
+        "steps": [
+          "Check the selected outlet.",
+          "Edit the item name, category, price or other fields available for your outlet.",
+          "Remove an item from sale when you no longer sell it; restore it when appropriate.",
+          "Save your changes, then publish the outlet menu.",
+          "Check the billing device after it receives the new menu."
+        ],
+        "note": "Your outlet changes do not edit other outlets or the master menu. Removing an item from sale keeps earlier bill records. Saved drafts are not yet the live billing menu."
+      },
+      {
+        "title": "Find sales, discounts and refunds",
+        "where": "Reports → Sales overview; outlet → Bills & refunds",
+        "purpose": "Understand sales and investigate adjustments.",
+        "steps": [
+          "Select the outlet and date range.",
+          "Review sales totals and payment breakdown.",
+          "Open the Discounts & refunds section or its shortcut in Sales overview to review the reason breakdown.",
+          "For a specific bill, open the outlet’s Bills & refunds section and locate the bill.",
+          "Use the permitted refund action with a reason when required; verify the resulting record."
+        ],
+        "note": "Discounts reduce the selling price; refunds return money against a completed sale. Net sales is not profit. Check the original payment method and applicable refund workflow before treating a refund record as a completed external transfer."
+      },
+      {
+        "title": "Use each report",
+        "where": "Reports",
+        "purpose": "Choose a report based on the question you need answered.",
+        "steps": [
+          "Use Sales overview for revenue, payments, discounts and refunds.",
+          "Use Top-selling items for quantities and revenue of items sold at your outlet.",
+          "Use Team for employee sales and attendance; use Cash reconciliation to compare expected cash with counted cash.",
+          "Use Expenses for recorded spending and payment sources.",
+          "Use Stock & wastage for stock movements and known losses; use Supply orders for ordering and delivery history.",
+          "Use Exports & records or the visible CSV download action to export the selected data."
+        ],
+        "note": "Keep the same date range when comparing reports. Empty records mean none were found in that period; uncounted stock is not a confirmed zero."
+      },
+      {
+        "title": "Review employee spending",
+        "where": "Your outlet → Expenses",
+        "purpose": "See who spent money, why, and how it was paid.",
+        "steps": [
+          "Review the employee, amount, date, payment source and reason.",
+          "Check linked milk or sugar purchases before approving or recording another expense.",
+          "Use the review actions available to approve or reverse an incorrect expense with an explanation.",
+          "If a linked stock purchase was wrong, review both the expense and physical stock correction."
+        ],
+        "note": "A linked purchase cannot be reversed as stock only. Money and quantity must both be reviewed. Employee-paid spending identifies reimbursement needs; it should not be counted as cash taken from the drawer."
+      },
+      {
+        "title": "Enter current stock and set alerts",
+        "where": "Stock & orders → Your outlet → Current stock & alerts",
+        "purpose": "Start stock tracking and decide when you want a low-stock warning.",
+        "steps": [
+          "Choose Enter current stock when items are available.",
+          "Enter the measured quantity of each item and check its unit.",
+          "Save the opening quantities and review the resulting balances.",
+          "Set a minimum stock level for the items you want to monitor.",
+          "Review low-stock warnings and order before supplies run out."
+        ],
+        "note": "Opening stock is optional. You can start tracking with the next confirmed delivery or local purchase. Billing continues either way. If Enter current stock is unavailable because there are no active items, the item catalogue needs setup first; do not invent quantities to enable it."
+      },
+      {
+        "title": "Order and receive supplies",
+        "where": "Stock & orders → Order stock / Orders & deliveries / Receive deliveries",
+        "purpose": "Order company supplies and add the quantity that actually arrives.",
+        "steps": [
+          "Choose the required items and quantities, then review prices and charges.",
+          "Place the order and complete payment through the available payment flow.",
+          "Check the order status in Orders & deliveries.",
+          "When supplies arrive, compare them with the delivery and record the received quantities.",
+          "Report shortages or damaged goods using the discrepancy controls.",
+          "Confirm receipt and check the stock balance."
+        ],
+        "note": "Placing or paying for an order does not add usable stock. Confirmed receipt adds it. Tea powder is company-supplied; employees cannot add it as a local purchase. If online payment is unavailable, keep the saved order and resolve payment setup before retrying."
+      },
+      {
+        "title": "Review counts, wastage and returns",
+        "where": "Stock & orders → Counts & wastage / Return stock",
+        "purpose": "Keep stock balances aligned with what is physically available.",
+        "steps": [
+          "Ask the working employee to record daily milk purchases and any known wastage from Billing → Stock & purchases.",
+          "When checking stock, have the employee submit the quantity actually remaining.",
+          "Open Counts & wastage to review the submitted count, employee details and explanation.",
+          "Approve an eligible count after checking the difference. A reviewer cannot approve their own count.",
+          "Use Return stock for supplies being returned and follow the available return process."
+        ],
+        "note": "Wastage records a known loss once. A count measures what remains. Do not deduct a previously recorded loss a second time. Automatic sales usage requires a linked, published recipe and successful sync."
+      },
+      {
+        "title": "Ask JKSH AI",
+        "where": "JKSH AI or Ask JKSH AI about these reports",
+        "purpose": "Ask questions about your own outlet data.",
+        "steps": [
+          "Choose the outlet and relevant dates when offered.",
+          "Ask a specific question, such as Which items sold most this week? or Which expenses increased?",
+          "Check the answer against the linked report or displayed figures.",
+          "Open the relevant feature yourself to make a business change."
+        ],
+        "note": "Owner AI is limited to your permitted outlet data. It does not publish recipes, change stock or grant access. If AI is unavailable, continue using the normal reports."
+      },
+      {
+        "title": "Troubleshooting and support",
+        "where": "The screen where the issue occurred",
+        "purpose": "Resolve common issues without duplicating records.",
+        "steps": [
+          "If OTP delivery fails, check the mobile number and connection, then use the offered retry after the countdown. Never send an OTP to support.",
+          "If a report is empty, check the outlet, dates and whether offline bills have synced.",
+          "If a save has an unclear result, refresh or check history before submitting another entry.",
+          "If stock is wrong, check receipts, units, recipe links, counts and wastage before adjusting it.",
+          "For an unresolved issue, record the screen name, time, outlet, record reference and exact error. Share a screenshot with private information hidden."
+        ],
+        "note": "Use only the actions available to your role. An unavailable action can mean missing setup, missing access or a temporary connection problem; it does not mean you should create duplicate records."
+      }
+    ]
+  },
+  "central_admin": {
+    "title": "Central admin guide",
+    "intro": "Manage the business across outlets, publish standards and oversee supply operations. Use outlet and date filters before comparing results.",
+    "sections": [
+      {
+        "title": "Onboard a franchise and activate its outlet",
+        "where": "All outlets",
+        "purpose": "Invite the owner and review the outlet details they provide.",
+        "steps": [
+          "Create an invitation with the requested franchise and owner information.",
+          "Share the complete invitation link through your normal communication channel.",
+          "Use Refresh progress to check acceptance and submitted outlet details.",
+          "Open Review details when the setup is ready for review.",
+          "Check the address, contact information and transport charge, then use Approve & activate.",
+          "Complete fresh OTP verification if prompted, then continue the approval.",
+          "Open the activated outlet to complete menu, employee and device setup."
+        ],
+        "note": "Owner verified means the invitation identity was verified; it does not itself create an active outlet. Avoid creating a duplicate branch while an existing setup is awaiting review."
+      },
+      {
+        "title": "Manage an existing outlet",
+        "where": "All outlets → Outlet → Billing & team",
+        "purpose": "Review an outlet’s sales, spending, staff and devices.",
+        "steps": [
+          "Choose the outlet by name.",
+          "Use Bills & refunds to inspect bills and permitted refund actions.",
+          "Use Expenses to review employee spending and reasons.",
+          "Use Attendance to review staff presence and shifts.",
+          "Use Team & devices to maintain employee access and registered billing devices.",
+          "Use the outlet’s Reports and Stock links for detailed investigation."
+        ],
+        "note": "Use Add branch for a branch you are creating directly, selecting the correct ownership and franchise. Check whether the branch already exists first."
+      },
+      {
+        "title": "Publish the menu",
+        "where": "Menu",
+        "purpose": "Maintain menu standards and deliver changes to billing.",
+        "steps": [
+          "Choose the master or outlet scope before editing.",
+          "Add or update categories, items, prices and the other available menu options.",
+          "Review the changes and save them.",
+          "Publish to the intended outlets and check any price-overwrite choices.",
+          "Confirm that the outlet billing menu received the publication."
+        ],
+        "note": "Draft edits are not live until published. Outlet-specific edits can differ from the master. Earlier bills keep their recorded item and price history."
+      },
+      {
+        "title": "Monitor business performance",
+        "where": "Business overview → Reports",
+        "purpose": "Find sales changes, low stock and outlets needing attention.",
+        "steps": [
+          "Choose the time period and outlet scope.",
+          "Review business totals and the outlet comparison where available.",
+          "Open sales, payment or stock details for an outlet needing attention.",
+          "Use Outlet health in Reports to compare current and previous sales and review readiness.",
+          "Check Activity history when you need to investigate a recorded business or account change."
+        ],
+        "note": "Business overview is for current decisions; activity history records changes. No recorded sales does not by itself mean a disconnected device or a closed store."
+      },
+      {
+        "title": "Choose the correct central report",
+        "where": "Reports",
+        "purpose": "Compare outlets and investigate money, staffing and supply costs.",
+        "steps": [
+          "Use Sales overview for gross and net sales, cash, UPI, discounts and refunds.",
+          "Use Outlet health for outlet comparisons and Top-selling items or Menu performance for item demand.",
+          "Use Team and Attendance where shown for employee sales and working time.",
+          "Use Cash reconciliation for drawer differences, Expenses for spending, and Discounts & refunds where shown for adjustments.",
+          "Use Stock & wastage for movements and losses; Supply orders for outlet replenishment; Purchases & suppliers for procurement.",
+          "Choose the period and scope, then download the appropriate CSV from the report or Exports & records."
+        ],
+        "note": "Revenue, expense totals and stock valuation are different measures. Net sales is not a complete profit calculation. Unsynced sales and incomplete stock records limit what a report can show."
+      },
+      {
+        "title": "Set up the supply catalogue",
+        "where": "Supply operations → Items & prices",
+        "purpose": "Define the stock items outlets can order or record.",
+        "steps": [
+          "Create or review each item with its name, unit and available item settings.",
+          "Use consistent base units, such as millilitres for milk and grams for sugar.",
+          "Set purchasing rules: milk and sugar may be bought locally; tea powder must remain company-supplied.",
+          "Check ordering packs and prices before making the item available.",
+          "Confirm the item appears in the intended outlet stock or ordering screen."
+        ],
+        "note": "Do not enter made-up opening balances. Batch-tracked goods need batch information and cannot use the employee quick-entry form."
+      },
+      {
+        "title": "Manage warehouses and suppliers",
+        "where": "Supply operations → Warehouses / Suppliers",
+        "purpose": "Maintain where supplies are held and who provides them.",
+        "steps": [
+          "Create warehouse records with the correct code and name.",
+          "Create supplier records with the required details.",
+          "Review and approve suppliers using the available controls.",
+          "Check the correct warehouse and supplier whenever creating a purchase."
+        ],
+        "note": "Use real business records. These are supply-management screens, not franchise-owner daily purchase screens."
+      },
+      {
+        "title": "Purchase stock for the warehouse",
+        "where": "Supply operations → Purchases",
+        "purpose": "Record procurement and the goods actually received.",
+        "steps": [
+          "Create a purchase order for the intended supplier and warehouse.",
+          "Add item quantities and review the purchase details.",
+          "Open the order and use its next available workflow action.",
+          "When the goods arrive, enter the supplier invoice and receipt details requested by the screen.",
+          "Record actual received quantities and any required batch details.",
+          "Check the updated order and warehouse stock."
+        ],
+        "note": "An order is a request to buy; receipt records arrival. Do not record the same goods again as a separate inward entry."
+      },
+      {
+        "title": "Fulfil outlet orders",
+        "where": "Supply operations → Outlet deliveries",
+        "purpose": "Move paid outlet orders through approval, stock allocation and dispatch.",
+        "steps": [
+          "Open the order and check the outlet, quantities and payment status.",
+          "Select the warehouse and approve the order when it is eligible.",
+          "Allocate the stock using the action shown for that order.",
+          "Dispatch the allocated goods and review the resulting delivery information.",
+          "Monitor partial dispatches and the outlet’s receipt or discrepancy."
+        ],
+        "note": "Dispatching goods does not mean the outlet received them. Partial deliveries remain distinguishable from complete deliveries."
+      },
+      {
+        "title": "Set stock baselines and review losses",
+        "where": "Stock control → Outlet → Current stock & alerts / Counts & wastage",
+        "purpose": "Establish real balances and investigate differences.",
+        "steps": [
+          "Enter measured current quantities if the outlet has an opening count.",
+          "Otherwise begin from the next confirmed receipt or local purchase.",
+          "Set minimum levels for alerts.",
+          "Review employee counts and their explanations before approving adjustments.",
+          "Review recorded wastage and returns, then investigate repeated losses."
+        ],
+        "note": "Billing remains available without stock. A physical count is the remaining quantity; wastage is a specific loss. Do not deduct the same loss twice."
+      },
+      {
+        "title": "Create and publish a recipe",
+        "where": "Supply operations → SOP standards / Recipes",
+        "purpose": "Define ingredient usage per serving so sales can update stock consistently.",
+        "steps": [
+          "Read SOP standards and identify any missing yields, spoon or scoop weights, or serving sizes.",
+          "Measure and confirm missing quantities before publication.",
+          "In Recipes, create a menu-item, add-on or prepared-base recipe and choose the relevant billing link when available.",
+          "Prepare the recipe version and enter ingredient quantities, units, yield and the required serving information.",
+          "Validate the version and publish only when its measurements are complete.",
+          "Publish the corresponding menu so billing uses the intended recipe version.",
+          "Check stock update status after sales to verify consumption is being processed."
+        ],
+        "note": "Published versions preserve history; prepare a new version for changes. SOP notes and AI drafts are not automatically live recipes. Unconfirmed measurements must not be guessed."
+      },
+      {
+        "title": "Use JKSH AI and recipe drafts",
+        "where": "JKSH AI",
+        "purpose": "Analyse business data and prepare editable SOP or recipe drafts.",
+        "steps": [
+          "Ask a focused question with the outlet and period you want to analyse.",
+          "For a recipe draft, provide the confirmed ingredients, measurements, yield and method you already have.",
+          "Review the generated draft and its missing-information notes.",
+          "Save the draft if useful, then reopen and edit it as needed.",
+          "Use the normal recipe review and publishing process once all required measurements are confirmed."
+        ],
+        "note": "AI draft creation does not publish a menu, change inventory or confirm missing measurements. Check figures against reports before acting."
+      },
+      {
+        "title": "Handle a stock recall",
+        "where": "Supply operations → Stock recalls",
+        "purpose": "Identify and control a specific batch that should no longer be used.",
+        "steps": [
+          "Confirm the affected item and batch from the supply records.",
+          "Create the recall with a clear reason.",
+          "Review the trace results and affected locations.",
+          "Use the available recall controls and coordinate removal or return of affected goods.",
+          "Complete the recall only after the required follow-up is resolved."
+        ],
+        "note": "A recall concerns an affected batch. Routine spills, spoilage and stock counts belong in the normal wastage and count workflows."
+      },
+      {
+        "title": "Check billing-to-stock updates",
+        "where": "Supply operations → Billing sync",
+        "purpose": "Resolve delayed or failed stock updates without re-entering sales.",
+        "steps": [
+          "Review pending updates, failures and the last check.",
+          "Use the available sync or retry action for eligible failed records.",
+          "Refresh to confirm that the records progressed.",
+          "If failures continue, check the linked recipe and raise the exact error with support."
+        ],
+        "note": "Do not create another bill to force stock deduction. Automatic processing also needs the background services to be running; hosting the web pages alone does not start those services."
+      },
+      {
+        "title": "Troubleshooting and support",
+        "where": "The screen where the issue occurred",
+        "purpose": "Resolve common issues without duplicating records.",
+        "steps": [
+          "If OTP delivery fails, check the mobile number and connection, then use the offered retry after the countdown. Never send an OTP to support.",
+          "If a report is empty, check the outlet, dates and whether offline bills have synced.",
+          "If a save has an unclear result, refresh or check history before submitting another entry.",
+          "If stock is wrong, check receipts, units, recipe links, counts and wastage before adjusting it.",
+          "For an unresolved issue, record the screen name, time, outlet, record reference and exact error. Share a screenshot with private information hidden."
+        ],
+        "note": "Use only the actions available to your role. An unavailable action can mean missing setup, missing access or a temporary connection problem; it does not mean you should create duplicate records."
+      }
+    ]
+  },
+  "accountant": {
+    "title": "Accountant guide",
+    "intro": "Review the financial records available to your account. Outlet scope is enforced by your access.",
+    "sections": [
+      {
+        "title": "Review daily money",
+        "where": "Reports → Sales overview",
+        "purpose": "Check the recorded sales and payment totals.",
+        "steps": [
+          "Select the outlet scope and date range.",
+          "Compare gross sales, discounts, refunds and net sales.",
+          "Review cash and UPI payments.",
+          "Open the relevant bill or adjustment details when investigating a difference."
+        ],
+        "note": "Net sales is not profit. A payment record is not a substitute for checking the bank or payment-provider settlement."
+      },
+      {
+        "title": "Review cash and expenses",
+        "where": "Reports → Cash reconciliation / Expenses",
+        "purpose": "Explain drawer differences and spending.",
+        "steps": [
+          "Compare opening cash, cash transactions, drawer expenses and counted closing cash.",
+          "Review variance reasons recorded during register closure.",
+          "Check each expense’s employee, reason and payment source.",
+          "Check linked local purchases before counting them as a second expense.",
+          "Use only the review actions your account permits."
+        ],
+        "note": "Owner-paid, employee-paid and UPI expenses are not cash removed from the drawer. Employee reimbursements need their own follow-up."
+      },
+      {
+        "title": "Export and investigate",
+        "where": "Reports → Exports & records; Business overview",
+        "purpose": "Prepare records for reconciliation and follow up on unusual entries.",
+        "steps": [
+          "Set the correct scope and dates before downloading.",
+          "Download the relevant CSV and retain the report period with your records.",
+          "Use business or activity records available to your account to investigate changes.",
+          "Ask JKSH AI a finance question, then verify the answer against the source report."
+        ],
+        "note": "Your role does not provide franchise setup, menu publication or recipe-draft creation access."
+      },
+      {
+        "title": "Troubleshooting and support",
+        "where": "The screen where the issue occurred",
+        "purpose": "Resolve common issues without duplicating records.",
+        "steps": [
+          "If OTP delivery fails, check the mobile number and connection, then use the offered retry after the countdown. Never send an OTP to support.",
+          "If a report is empty, check the outlet, dates and whether offline bills have synced.",
+          "If a save has an unclear result, refresh or check history before submitting another entry.",
+          "If stock is wrong, check receipts, units, recipe links, counts and wastage before adjusting it.",
+          "For an unresolved issue, record the screen name, time, outlet, record reference and exact error. Share a screenshot with private information hidden."
+        ],
+        "note": "Use only the actions available to your role. An unavailable action can mean missing setup, missing access or a temporary connection problem; it does not mean you should create duplicate records."
+      }
+    ]
+  }
+}

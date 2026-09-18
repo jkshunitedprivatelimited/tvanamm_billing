@@ -7,6 +7,7 @@ export function StaffMenu() {
     <details className="staff-menu">
       <summary>Staff menu</summary>
       <div className="staff-menu-content">
+        <a href="/help">Help &amp; daily guide</a>
         <SessionControls />
         <StaffAttendance />
       </div>

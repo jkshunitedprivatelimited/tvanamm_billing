@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     "./tokens.css": "./src/tokens.css",
-    "./base.css": "./src/base.css"
+    "./base.css": "./src/base.css",
+    "./help": "./src/help.json"
   },
   "scripts": {
     "typecheck": "true"
