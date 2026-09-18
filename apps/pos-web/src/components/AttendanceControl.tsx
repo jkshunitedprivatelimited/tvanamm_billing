@@ -84,7 +84,7 @@ export function AttendanceControl() {
         <a href="/close">Finish shift &amp; check out</a>
       ) : (
         <button className="ghost" onClick={() => void record()} disabled={loading || busy}>
-          {busy ? 'Saving…' : session ? 'Check out' : 'Check in'}
+          {busy ? 'Saving…' : 'Check in'}
         </button>
       )}
       {error || notice ? (

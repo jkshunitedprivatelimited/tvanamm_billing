@@ -117,7 +117,7 @@ export async function saveChefEntry(
     ).rows[0];
     if (!session || session.submitted_at)
       throw new IdentityError('forbidden', 'This collection is closed for editing.');
-    if (!(session.menu).some((i) => i.id === itemId))
+    if (!session.menu.some((i) => i.id === itemId))
       throw new IdentityError('forbidden', 'Item is not in this menu');
     const existing = (
       await c.query<{ revision: number }>(
@@ -165,7 +165,7 @@ export async function submitChefCollection(token: string) {
         .filter((r) => chefDraftSchema.safeParse(r.draft).success && r.draft.status === 'ready')
         .map((r) => r.item_id),
     );
-    if (!(s.menu).every((i) => ready.has(i.id)))
+    if (!s.menu.every((i) => ready.has(i.id)))
       throw new IdentityError(
         'validation',
         'Mark every menu item ready before submitting. You can save drafts and return later.',

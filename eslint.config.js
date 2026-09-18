@@ -6,6 +6,9 @@ import nextPlugin from '@next/eslint-plugin-next';
 export default tseslint.config(
   {
     ignores: [
+      'tmp/**',
+      'output/**',
+      '.vercel/**',
       '**/dist/**',
       '**/coverage/**',
       '**/node_modules/**',

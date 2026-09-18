@@ -9,3 +9,7 @@ docs/
 **/.next-production/
 .claude/
 .vercel/
+
+# Local diagnostics and generated artifacts
+tmp/
+output/

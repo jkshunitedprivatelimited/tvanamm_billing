@@ -245,6 +245,8 @@ describe.skipIf(!RUN)('Workforce attendance', () => {
     expect((await loadOperatorContext(pool, login.operatorToken))?.employeeId).toBe(
       cashier.employeeId,
     );
+    // Login now checks in the cashier; finish that attendance before the next fixture.
+    await checkOut(pool, cashier, {});
   });
 
   it('flags a session left open from a previous business day as missing_checkout, and applies late/grace correctly', async () => {
