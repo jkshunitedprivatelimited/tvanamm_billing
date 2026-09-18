@@ -888,3 +888,50 @@ a.link-btn:hover {
   margin-top: 8px;
   max-width: 600px;
 }
+
+.billing-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.billing-actions a,
+.staff-toolbar a,
+.printer-status a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--border, #d8ddd7);
+  border-radius: 8px;
+  background: white;
+  color: var(--green, #1b7047);
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+}
+.billing-actions a:hover,
+.staff-toolbar a:hover,
+.printer-status a:hover {
+  background: #edf5ef;
+}
+.billing-actions a.danger {
+  color: #a52a22;
+  border-color: #e9ccc8;
+}
+.print-recovery {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border, #d8ddd7);
+  border-radius: 12px;
+  background: white;
+}
+.printer-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 8px 16px;
+}

@@ -22,7 +22,7 @@ export function PrinterStatus() {
     };
   }, []);
   return (
-    <div className="no-print" style={{ fontSize: 13, padding: '8px 16px' }}>
+    <div className="no-print printer-status">
       <Link href="/pos/printer">Printer: {status}</Link>
       {ble && (status.includes('disconnected') || status.includes('needs attention')) ? (
         <button

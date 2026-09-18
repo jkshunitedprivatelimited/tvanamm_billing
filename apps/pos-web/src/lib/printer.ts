@@ -162,10 +162,8 @@ export interface PrintResult {
   error?: string;
 }
 
-/** Prints straight to the configured hardware printer; falls back to the
- *  browser's own print dialog (unchanged prior behaviour) if none is
- *  configured, or if the direct print fails for any reason — a jammed or
- *  disconnected printer must never block the cashier from moving on. */
+/** Sends to the configured printer. Direct-print failures are returned for
+ * explicit recovery; system-printer mode uses the browser print dialog. */
 export async function smartPrintReceipt(
   receipt: ReceiptSnapshot,
   paperWidthMm: 58 | 80,
@@ -211,7 +209,12 @@ async function smartPrintBytes(config: PrinterConfig, bytes: Uint8Array): Promis
   try {
     window.print();
   } catch {
-    /* ignore */
+    return {
+      ok: false,
+      via: 'browser',
+      error: 'Could not open the print dialog. Retry printing this saved bill.',
+    };
   }
+  // Browsers do not report whether the user printed or cancelled the dialog.
   return { ok: true, via: 'browser' };
 }

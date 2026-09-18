@@ -125,6 +125,8 @@ export function PosClient({
   const [offlineDone, setOfflineDone] = useState<{ receiptNumber: string; total: string } | null>(
     null,
   );
+  const [printing, setPrinting] = useState(false);
+  const printingRef = useRef(false);
   const [printerNotice, setPrinterNotice] = useState<string | null>(null);
   // Brief highlight on the tapped card so adding an item gives visible
   // feedback beyond the cart total changing off to the side.
@@ -392,26 +394,34 @@ export function PosClient({
         setError(body.message ?? 'Checkout failed.');
         return;
       }
-      const receiptRes = await fetch(`/api/v1/bills/${body.id}/receipt`);
-      const receiptBody = (await receiptRes.json()) as ReceiptSnapshot;
-      setReceipt(receiptBody);
-      setReceiptBillId(body.id);
+      try {
+        const receiptRes = await fetch(`/api/v1/bills/${body.id}/receipt`);
+        if (!receiptRes.ok) throw new Error('Receipt unavailable');
+        const receiptBody = (await receiptRes.json()) as ReceiptSnapshot;
+        setReceipt(receiptBody);
+        setReceiptBillId(body.id);
+      } catch {
+        newSale();
+        setQueuedNotice(
+          'Sale saved, but the receipt could not load. Open Bill history to print it. Do not bill the customer again.',
+        );
+      }
     } finally {
       setBusy(false);
     }
   }
 
   /** Reset the till for the next customer without leaving the sale screen. */
-  function clearSale() {
+  const clearSale = useCallback(() => {
     setCart([]);
     setBillDiscount(null);
     setPayment(null);
     setCustomerName('');
     setCustomerMobile('');
     setShowCustomer(false);
-  }
+  }, []);
 
-  function newSale() {
+  const newSale = useCallback(() => {
     clearSale();
     setReceipt(null);
     setReceiptBillId(null);
@@ -419,27 +429,59 @@ export function PosClient({
     setOfflineDone(null);
     setPrinterNotice(null);
     if (navigator.onLine) router.refresh();
-  }
+  }, [clearSale, router]);
 
-  const printOfflineTicket = useCallback(async (done: { receiptNumber: string; total: string }) => {
-    const outcome = await smartPrint(
-      buildOfflineTicketEscPos(done.receiptNumber, done.total, terminalPaperWidthMm()),
-    );
-    if (!outcome.ok) setPrinterNotice(outcome.error ?? 'Printer error — opened the print dialog.');
-  }, []);
+  const printOfflineTicket = useCallback(
+    async (done: { receiptNumber: string; total: string }) => {
+      if (printingRef.current) return;
+      printingRef.current = true;
+      setPrinting(true);
+      setPrinterNotice(null);
+      try {
+        const outcome = await smartPrint(
+          buildOfflineTicketEscPos(done.receiptNumber, done.total, terminalPaperWidthMm()),
+        );
+        if (!outcome.ok) setPrinterNotice(outcome.error ?? 'Could not print. Your sale is saved.');
+        else {
+          newSale();
+          setQueuedNotice(`Sale ${done.receiptNumber} saved offline. Ready for the next customer.`);
+        }
+      } catch {
+        setPrinterNotice('Could not print. Your sale is saved. Reconnect the printer and retry.');
+      } finally {
+        printingRef.current = false;
+        setPrinting(false);
+      }
+    },
+    [newSale],
+  );
 
   const printReceipt = useCallback(async () => {
-    if (!receipt) return;
-    const outcome = await smartPrintReceipt(receipt, terminalPaperWidthMm());
-    if (!outcome.ok) setPrinterNotice(outcome.error ?? 'Printer error — opened the print dialog.');
-    if (receiptBillId) {
-      void fetch(`/api/v1/bills/${receiptBillId}/print-attempts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ result: outcome.ok ? 'success' : 'failed' }),
-      });
+    if (!receipt || printingRef.current) return;
+    printingRef.current = true;
+    setPrinting(true);
+    setPrinterNotice(null);
+    try {
+      const outcome = await smartPrintReceipt(receipt, terminalPaperWidthMm());
+      if (receiptBillId) {
+        void fetch(`/api/v1/bills/${receiptBillId}/print-attempts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ result: outcome.ok ? 'success' : 'failed' }),
+        }).catch(() => undefined);
+      }
+      if (!outcome.ok) setPrinterNotice(outcome.error ?? 'Could not print. Your sale is saved.');
+      else {
+        newSale();
+        setQueuedNotice(`Sale ${receipt.receiptNumber} saved. Ready for the next customer.`);
+      }
+    } catch {
+      setPrinterNotice('Could not print. Your sale is saved. Reconnect the printer and retry.');
+    } finally {
+      printingRef.current = false;
+      setPrinting(false);
     }
-  }, [receipt, receiptBillId]);
+  }, [receipt, receiptBillId, newSale]);
 
   // Print fires the moment a receipt is ready — a rush-hour till shouldn't
   // need a tap just to print what it already has. Guarded by the bill/receipt
@@ -458,11 +500,23 @@ export function PosClient({
       <div className="screen no-print-bg">
         <div style={{ width: 380, maxWidth: '100%' }}>
           <ReceiptView receipt={receipt} paperWidthMm={terminalPaperWidthMm()} />
-          <div className="no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-            <button onClick={newSale}>New sale</button>
-            <button className="ghost" onClick={() => void printReceipt()}>
-              Print again
-            </button>
+          <div className="no-print print-recovery">
+            {printerNotice ? (
+              <>
+                <h2>Sale saved · printing needs attention</h2>
+                <div className="billing-actions">
+                  <button disabled={printing} onClick={() => void printReceipt()}>
+                    Retry print
+                  </button>
+                  <button className="ghost" disabled={printing} onClick={newSale}>
+                    Continue billing
+                  </button>
+                </div>
+                <p className="muted">You can print this saved bill later from Bill history.</p>
+              </>
+            ) : (
+              <p role="status">{printing ? 'Sending receipt to printer…' : 'Preparing receipt…'}</p>
+            )}
           </div>
           <PrinterStatus />
           {printerNotice ? (
@@ -497,14 +551,18 @@ export function PosClient({
             The bill is stored on this terminal and sends automatically when the connection returns.
             Check <strong>Recovery</strong> for its status.
           </p>
-          <button onClick={newSale}>New sale</button>
-          <button
-            className="ghost"
-            style={{ marginTop: 10 }}
-            onClick={() => void printOfflineTicket(offlineDone)}
-          >
-            Print again
-          </button>
+          {printerNotice ? (
+            <div className="billing-actions">
+              <button disabled={printing} onClick={() => void printOfflineTicket(offlineDone)}>
+                Retry print
+              </button>
+              <button className="ghost" disabled={printing} onClick={newSale}>
+                Continue billing
+              </button>
+            </div>
+          ) : (
+            <p role="status">Sending receipt to printer…</p>
+          )}
           <PrinterStatus />
           {printerNotice ? (
             <p className="error" style={{ marginTop: 10 }}>
@@ -558,7 +616,7 @@ export function PosClient({
               Recovery
             </Link>
           ) : null}
-          <span className="topnav">
+          <span className="topnav billing-actions">
             <a href="/stock">Stock & expenses</a>
             <a href="/history">Bill history</a>
             <Link href="/pos/printer">Printer</Link>
