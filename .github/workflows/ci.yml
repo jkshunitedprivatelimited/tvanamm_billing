@@ -15,7 +15,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: jksh
+          POSTGRES_DB: jksh_test
         ports:
           - 5432:5432
         options: >-
@@ -25,8 +25,10 @@ jobs:
           --health-retries 20
 
     env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/jksh
-      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/jksh
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/jksh_test
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/jksh_test
+      STOCK_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/jksh_stock_test
+      STOCK_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/jksh_stock_test
       IDENTITY_TOKEN_SECRET: ci-secret-min-32-characters-long-000000
       NEXT_PUBLIC_SUPABASE_URL: http://localhost:54321
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci
@@ -52,6 +54,12 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Create isolated stock test database
+        run: PGPASSWORD=postgres createdb -h localhost -U postgres jksh_stock_test
+
+      - name: Apply stock migrations
+        run: npm run stock:migrate
 
       - name: Apply migrations
         run: npm run db:migrate
