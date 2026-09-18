@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { insecureDevAuthEnabled } from '@/dev-auth-flags';
+import { localSessionAuthEnabled } from '@/dev-auth-flags';
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000')
   .split(',')
@@ -13,17 +13,23 @@ const isProd = process.env.NODE_ENV === 'production';
 /** Per-request nonce-based CSP so Next.js's inline bootstrap scripts are allowed
  *  without `'unsafe-inline'` in production. */
 function contentSecurityPolicy(nonce: string): string {
-  const msg91 = 'https://verify.msg91.com https://verify.phone91.com';
+  // Razorpay Checkout (Franchise Owner stock-order prepayment only) loads its
+  // own script, renders payment methods in an iframe from api.razorpay.com,
+  // and calls out to its own analytics/status endpoints.
+  const razorpayScript = 'https://checkout.razorpay.com';
+  const razorpayFrame = 'https://api.razorpay.com https://checkout.razorpay.com';
+  const razorpayConnect = 'https://api.razorpay.com https://lumberjack.razorpay.com';
   const scriptSrc = isProd
-    ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${msg91}`
-    : `script-src 'self' 'unsafe-eval' 'unsafe-inline' ${msg91}`;
+    ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' ${razorpayScript}`
+    : `script-src 'self' 'unsafe-eval' 'unsafe-inline' ${razorpayScript}`;
   return [
     "default-src 'self'",
     scriptSrc,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https://*.razorpay.com",
     "font-src 'self'",
-    `connect-src 'self' https://*.supabase.co https://control.msg91.com ${msg91}`,
+    `connect-src 'self' https://*.supabase.co ${razorpayConnect}`,
+    `frame-src ${razorpayFrame}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -59,9 +65,8 @@ export async function proxy(request: NextRequest) {
     process.env.SUPABASE_PUBLISHABLE_KEY ??
     process.env.SUPABASE_ANON_KEY ??
     '';
-  // Skip Supabase session refresh under the (fully gated) dev-auth bypass, or
-  // when Supabase is not configured at all.
-  if (!url || !key || insecureDevAuthEnabled()) {
+  // MSG91 widget sessions and development sessions are verified locally.
+  if (!url || !key || localSessionAuthEnabled()) {
     return response;
   }
 

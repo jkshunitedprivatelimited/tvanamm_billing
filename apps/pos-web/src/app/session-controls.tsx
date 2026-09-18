@@ -2,38 +2,45 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { listOutboxBills } from '@/lib/offline-store';
 
 export function SessionControls() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function call(path: string) {
+  async function lock() {
     setBusy(true);
-    void fetch(path, { method: 'POST' }).then(() => {
+    setError(null);
+    try {
+      const pending = (await listOutboxBills()).filter((b) => b.status !== 'synced');
+      if (pending.length > 0) {
+        setError('Wait for offline sales to sync before switching cashier.');
+        return;
+      }
+      const res = await fetch('/api/v1/operator-sessions/lock', { method: 'POST' });
+      if (!res.ok) throw new Error('Could not lock the terminal. Try again.');
       router.replace('/login');
       router.refresh();
-    });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Connect to the internet and try again.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <div style={{ maxWidth: 380 }}>
-      <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>
-        <button
-          className="ghost"
-          disabled={busy}
-          onClick={() => call('/api/v1/operator-sessions/lock')}
-        >
-          Lock terminal
-        </button>
-        <button disabled={busy} onClick={() => call('/api/v1/operator-sessions/logout')}>
-          End shift &amp; sign out
+      <div style={{ display: 'flex', gap: 12 }}>
+        <button className="ghost" disabled={busy} onClick={() => void lock()}>
+          Switch cashier
         </button>
       </div>
-      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-        Lock hides the till but keeps your shift open (unlock with your PIN). End shift closes your
-        shift for the day and signs you out — the terminal stays registered, the next person just
-        enters their PIN.
-      </p>
+      {error ? (
+        <p className="error" style={{ fontSize: 12, marginTop: 8 }}>
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -114,8 +114,9 @@ cancellation, refund, and shift is attributable to the employee who performed it
 
 ## Non-Human Actors
 
-- Payment Provider: sends verified payment and refund events.
 - Stock System: receives versioned sale, cancellation, and refund events.
+- Razorpay: sends verified payment/refund events only for Franchise Owner Stock
+  procurement orders; it is not part of Store customer Billing.
 - Registered Terminal: establishes trusted store/workstation context.
 - Printer: prints receipts but has no business permissions.
 - Background Worker: processes reports, notifications, retries, and outbox events.
@@ -172,7 +173,9 @@ Examples:
   bill line has been fully refunded.
 - A bill line quantity and bill amount can never be refunded more than once.
 - Refund processing is atomic and idempotent to prevent duplicate refunds.
-- Online refunds are reconciled with the payment provider.
+- UPI refunds are recorded only after the operator completes them through the
+  outlet's external banking method and enters the mandatory reference. Billing
+  V1 does not claim provider settlement or receive a provider webhook.
 - Cash refunds are included in shift cash reconciliation.
 - Billing publishes a `SaleRefunded` event with the exact refunded product lines
   and quantities for Stock.

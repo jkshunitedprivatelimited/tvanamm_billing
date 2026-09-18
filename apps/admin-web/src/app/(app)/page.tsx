@@ -1,5 +1,7 @@
 import Link from 'next/link';
-import { listFranchises, listOutlets } from '@jksh/identity';
+import { OwnerSetup } from './OwnerSetup';
+import { OwnerHome } from './OwnerHome';
+import { listFranchises, listOutlets, listOutletOnboarding } from '@jksh/identity';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { NewOutletForm } from './NewOutletForm';
@@ -22,17 +24,30 @@ export default async function OutletsPage() {
     );
   }
 
+  const onboarding = await listOutletOnboarding(db(), actor);
   const canCreate = actor.role === 'central_admin';
   const [outlets, franchises] = await Promise.all([
     listOutlets(db(), actor),
     canCreate ? listFranchises(db(), actor) : Promise.resolve([]),
   ]);
 
+  if (actor.role === 'franchise_owner') {
+    const setup = onboarding.find((row) => row.franchiseId === actor.scope.franchiseId);
+    if (outlets.length === 0 && setup) return <OwnerSetup setup={setup} />;
+    return <OwnerHome outlets={outlets} actor={actor} />;
+  }
+
   return (
     <main>
       <h1>{canCreate ? 'Central Admin' : 'Your outlets'}</h1>
+      {!canCreate ? (
+        <p className="page-intro">
+          Review sales, manage your outlet team and keep stock ready for service. Choose an outlet
+          to get started.
+        </p>
+      ) : null}
 
-      {canCreate ? <FranchisePanel franchises={franchises} /> : null}
+      {canCreate ? <FranchisePanel franchises={franchises} onboarding={onboarding} /> : null}
       {canCreate ? <NewOutletForm franchises={franchises} /> : null}
 
       <h2 style={{ marginTop: 24 }}>Outlets</h2>
@@ -52,8 +67,11 @@ export default async function OutletsPage() {
               {o.hasActiveTerminal ? 'Terminal registered' : 'No terminal'}
               {o.gstin ? ` · GSTIN ${o.gstin}` : ''}
             </div>
-            <div style={{ marginTop: 12 }}>
-              <Link href={`/outlets/${o.id}`}>Manage</Link>
+            <div className="outlet-actions">
+              <Link href={`/outlets/${o.id}`}>Billing & team</Link>
+              <Link href={`/reports?outletId=${o.id}`}>Reports</Link>
+              <Link href={`/stock/${o.id}`}>Stock</Link>
+              <Link href={`/stock/${o.id}/order`}>Order stock</Link>
             </div>
           </div>
         ))}

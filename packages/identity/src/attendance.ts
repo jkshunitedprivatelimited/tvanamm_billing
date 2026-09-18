@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
+import { applyContext, withActorContext, type Pool, type PoolClient } from '@jksh/db';
 import type {
   ActorContext,
   CheckInCommand,
@@ -22,6 +22,27 @@ function operatorContext(actor: ActorContext): { employeeId: string; outletId: s
     throw new IdentityError('forbidden', 'A store operator session is required');
   }
   return { employeeId: actor.employeeId, outletId: actor.outletId };
+}
+
+export async function getOwnOpenAttendance(
+  pool: Pool,
+  actor: ActorContext,
+): Promise<{ id: string; checkedInAt: string } | null> {
+  const { employeeId, outletId } = operatorContext(actor);
+  ensureAllowed(actor, 'identity.attendance.self', {
+    organizationId: actor.scope.organizationId,
+    ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
+    outletId,
+  });
+  return withActorContext(pool, contextForActor(actor), async (client) => {
+    const { rows } = await client.query<{ id: string; checked_in_at: Date }>(
+      `select id, checked_in_at from identity.attendance_sessions
+        where employee_id = $1 and outlet_id = $2 and status = 'open'`,
+      [employeeId, outletId],
+    );
+    const session = rows[0];
+    return session ? { id: session.id, checkedInAt: session.checked_in_at.toISOString() } : null;
+  });
 }
 
 /** Minutes since local midnight for an instant, in the outlet's IANA
@@ -57,65 +78,74 @@ export async function checkIn(
   cmd: CheckInCommand,
   meta: RequestMeta = {},
 ): Promise<{ id: string }> {
+  return withActorContext(pool, contextForActor(actor), (client) =>
+    checkInWithClient(client, actor, cmd, meta),
+  );
+}
+
+async function checkInWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  cmd: CheckInCommand,
+  meta: RequestMeta = {},
+): Promise<{ id: string }> {
   const { employeeId, outletId } = operatorContext(actor);
   ensureAllowed(actor, 'identity.attendance.self', {
     organizationId: actor.scope.organizationId,
     ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
     outletId,
   });
-  return withActorContext(pool, contextForActor(actor), async (client) => {
-    const existing = await client.query(
-      `select 1 from identity.attendance_sessions where employee_id = $1 and status = 'open'`,
-      [employeeId],
-    );
-    if (existing.rowCount) {
-      throw new IdentityError('conflict', 'Already checked in - check out first', {
-        details: { code: 'already_checked_in' },
-      });
-    }
-    const timezone = await outletTimezone(client, outletId);
-    const businessDate = businessDateString(new Date(), timezone);
-    const id = randomUUID();
-    const employee = await client.query<{
-      full_name: string;
-      organization_id: string;
-      franchise_id: string | null;
-    }>(
-      `select se.full_name, o.organization_id, o.franchise_id
+  const existing = await client.query(
+    `select 1 from identity.attendance_sessions where employee_id = $1 and status = 'open'`,
+    [employeeId],
+  );
+  if (existing.rowCount) {
+    throw new IdentityError('conflict', 'Already checked in - check out first', {
+      details: { code: 'already_checked_in' },
+    });
+  }
+  const timezone = await outletTimezone(client, outletId);
+  const businessDate = businessDateString(new Date(), timezone);
+  const id = randomUUID();
+  const employee = await client.query<{
+    full_name: string;
+    organization_id: string;
+    franchise_id: string | null;
+  }>(
+    `select se.full_name, o.organization_id, o.franchise_id
          from identity.store_employees se join billing.outlets o on o.id = se.outlet_id
         where se.id = $1`,
-      [employeeId],
-    );
-    if (!employee.rows[0]) throw new IdentityError('not_found', 'Employee not found');
-    await client.query(
-      `insert into identity.attendance_sessions
+    [employeeId],
+  );
+  if (!employee.rows[0]) throw new IdentityError('not_found', 'Employee not found');
+  await client.query(
+    `insert into identity.attendance_sessions
          (id, organization_id, franchise_id, outlet_id, employee_id, employee_name, terminal_id,
           business_date, checked_in_device_time)
        values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [
-        id,
-        employee.rows[0].organization_id,
-        employee.rows[0].franchise_id,
-        outletId,
-        employeeId,
-        employee.rows[0].full_name,
-        actor.terminalId ?? null,
-        businessDate,
-        cmd.deviceTime ?? null,
-      ],
-    );
-    await recordAudit(client, {
-      action: 'attendance.checked_in',
-      result: 'success',
-      actorEmployeeId: employeeId,
-      organizationId: employee.rows[0].organization_id,
-      franchiseId: employee.rows[0].franchise_id,
+    [
+      id,
+      employee.rows[0].organization_id,
+      employee.rows[0].franchise_id,
       outletId,
-      correlationId: meta.correlationId ?? randomUUID(),
-      metadata: { attendanceSessionId: id },
-    });
-    return { id };
+      employeeId,
+      employee.rows[0].full_name,
+      actor.terminalId ?? null,
+      businessDate,
+      cmd.deviceTime ?? null,
+    ],
+  );
+  await recordAudit(client, {
+    action: 'attendance.checked_in',
+    result: 'success',
+    actorEmployeeId: employeeId,
+    organizationId: employee.rows[0].organization_id,
+    franchiseId: employee.rows[0].franchise_id,
+    outletId,
+    correlationId: meta.correlationId ?? randomUUID(),
+    metadata: { attendanceSessionId: id },
   });
+  return { id };
 }
 
 export async function checkOut(
@@ -124,41 +154,50 @@ export async function checkOut(
   cmd: CheckOutCommand,
   meta: RequestMeta = {},
 ): Promise<{ id: string }> {
+  return withActorContext(pool, contextForActor(actor), (client) =>
+    checkOutWithClient(client, actor, cmd, meta),
+  );
+}
+
+async function checkOutWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  cmd: CheckOutCommand,
+  meta: RequestMeta = {},
+): Promise<{ id: string }> {
   const { employeeId } = operatorContext(actor);
-  return withActorContext(pool, contextForActor(actor), async (client) => {
-    const open = await client.query<{
-      id: string;
-      organization_id: string;
-      franchise_id: string | null;
-      outlet_id: string;
-    }>(
-      `select id, organization_id, franchise_id, outlet_id from identity.attendance_sessions
+  const open = await client.query<{
+    id: string;
+    organization_id: string;
+    franchise_id: string | null;
+    outlet_id: string;
+  }>(
+    `select id, organization_id, franchise_id, outlet_id from identity.attendance_sessions
         where employee_id = $1 and status = 'open'`,
-      [employeeId],
-    );
-    if (!open.rows[0]) {
-      throw new IdentityError('conflict', 'No open attendance session', {
-        details: { code: 'not_checked_in' },
-      });
-    }
-    await client.query(
-      `update identity.attendance_sessions
+    [employeeId],
+  );
+  if (!open.rows[0]) {
+    throw new IdentityError('conflict', 'No open attendance session', {
+      details: { code: 'not_checked_in' },
+    });
+  }
+  await client.query(
+    `update identity.attendance_sessions
           set status = 'closed', checked_out_at = now(), checked_out_device_time = $2
         where id = $1`,
-      [open.rows[0].id, cmd.deviceTime ?? null],
-    );
-    await recordAudit(client, {
-      action: 'attendance.checked_out',
-      result: 'success',
-      actorEmployeeId: employeeId,
-      organizationId: open.rows[0].organization_id,
-      franchiseId: open.rows[0].franchise_id,
-      outletId: open.rows[0].outlet_id,
-      correlationId: meta.correlationId ?? randomUUID(),
-      metadata: { attendanceSessionId: open.rows[0].id },
-    });
-    return { id: open.rows[0].id };
+    [open.rows[0].id, cmd.deviceTime ?? null],
+  );
+  await recordAudit(client, {
+    action: 'attendance.checked_out',
+    result: 'success',
+    actorEmployeeId: employeeId,
+    organizationId: open.rows[0].organization_id,
+    franchiseId: open.rows[0].franchise_id,
+    outletId: open.rows[0].outlet_id,
+    correlationId: meta.correlationId ?? randomUUID(),
+    metadata: { attendanceSessionId: open.rows[0].id },
   });
+  return { id: open.rows[0].id };
 }
 
 export async function correctAttendance(
@@ -427,4 +466,15 @@ export async function getEmployeeActivitySummary(
       lastActivityAt: b?.last_at?.toISOString() ?? null,
     };
   });
+}
+
+/** Used only after terminal-scoped PIN verification, within the same transaction. */
+export async function recordVerifiedStaffAttendance(
+  client: PoolClient,
+  actor: ActorContext,
+  action: 'check-in' | 'check-out',
+  meta: RequestMeta,
+): Promise<void> {
+  await applyContext(client, contextForActor(actor));
+  await (action === 'check-in' ? checkInWithClient : checkOutWithClient)(client, actor, {}, meta);
 }

@@ -1,11 +1,12 @@
 import { withActorContext, type Pool } from '@jksh/db';
-import type { ActorContext } from '@jksh/contracts';
+import { ACTIVITY_CATEGORIES, type ActivityCategory, type ActorContext } from '@jksh/contracts';
 import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 
 export interface AuditQuery {
   /** Match this action exactly, or — if it ends with "." — as a prefix. */
   action?: string;
+  category?: ActivityCategory;
   outletId?: string;
   from?: string; // YYYY-MM-DD (occurred_at date, inclusive)
   to?: string;
@@ -57,6 +58,10 @@ export async function listAuditEvents(
     return `$${String(params.length)}`;
   };
 
+  if (q.category) {
+    const prefixes = ACTIVITY_CATEGORIES[q.category].prefixes;
+    where.push(`e.action like any(${p(prefixes.map((prefix) => `${prefix}%`))}::text[])`);
+  }
   if (q.action) {
     if (q.action.endsWith('.')) where.push(`e.action like ${p(`${q.action}%`)}`);
     else where.push(`e.action = ${p(q.action)}`);

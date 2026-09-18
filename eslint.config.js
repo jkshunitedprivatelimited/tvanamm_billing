@@ -10,6 +10,7 @@ export default tseslint.config(
       '**/coverage/**',
       '**/node_modules/**',
       '**/.next/**',
+      '**/.next-production/**',
       '**/next-env.d.ts',
       'vitest.workspace.ts',
       '**/vitest.config.ts',

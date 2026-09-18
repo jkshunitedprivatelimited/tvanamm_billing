@@ -20,6 +20,8 @@ import {
   parseOperatorToken,
   parseTerminalCredential,
 } from './tokens';
+import { recordVerifiedStaffAttendance } from './attendance';
+import { IdentityError } from './errors';
 import { recordAudit } from './audit';
 import type { RequestMeta } from './admin-auth';
 
@@ -69,11 +71,12 @@ async function saveTerminalAttempt(
   );
 }
 
-export async function pinLogin(
+async function authenticatePin(
   pool: Pool,
   cmd: PinLoginCommand,
   meta: RequestMeta = {},
-): Promise<PinLoginOutput> {
+  attendance?: { employeeId: string; action: 'check-in' | 'check-out'; outletId: string },
+): Promise<PinLoginOutput | { attendanceRecorded: true }> {
   const secret = identityTokenSecret();
   const correlationId = meta.correlationId ?? randomUUID();
   const now = new Date();
@@ -108,6 +111,7 @@ export async function pinLogin(
       [term.outlet_id],
     );
     if (outlet.rows[0]?.status !== 'active') return reject('outlet_inactive');
+    if (attendance && attendance.outletId !== term.outlet_id) return reject('invalid');
 
     // ---- Terminal-wide brute-force gate (checked before any employee lookup).
     const termAttempt = await loadTerminalAttempt(client, term.id);
@@ -208,6 +212,9 @@ export async function pinLogin(
     const ok = await verifyPinHash(emp.pin_hash, cmd.pin);
     if (!ok) return fail('wrong_pin', { id: emp.id, state: empState });
 
+    if (attendance && emp.id !== attendance.employeeId)
+      return fail('employee_mismatch', { id: emp.id, state: empState });
+
     // Success: reset both counters.
     await saveTerminalAttempt(client, term.id, registerSuccess());
     await client.query(
@@ -215,6 +222,25 @@ export async function pinLogin(
          set failed_attempts = 0, last_failed_at = null, lock_time = null where id = $1`,
       [emp.id],
     );
+    if (attendance) {
+      const staffActor: ActorContext = {
+        kind: 'operator',
+        role: 'store_employee',
+        employeeId: emp.id,
+        scope: {
+          organizationId: term.organization_id,
+          ...(term.franchise_id ? { franchiseId: term.franchise_id } : {}),
+          outletId: term.outlet_id,
+        },
+        outletId: term.outlet_id,
+        terminalId: term.id,
+        sessionActive: true,
+        secondsSinceAuth: 0,
+      };
+      // PIN verification never changes the cashier's operator session.
+      await recordVerifiedStaffAttendance(client, staffActor, attendance.action, meta);
+      return { attendanceRecorded: true };
+    }
     // Switching operator ends any prior open context on this terminal.
     await client.query(
       `update identity.operator_sessions
@@ -267,6 +293,54 @@ export async function pinLogin(
       },
       operatorToken: minted.token,
     };
+  });
+}
+
+export async function pinLogin(
+  pool: Pool,
+  cmd: PinLoginCommand,
+  meta: RequestMeta = {},
+): Promise<PinLoginOutput> {
+  const result = await authenticatePin(pool, cmd, meta);
+  if ('attendanceRecorded' in result) throw new Error('Unexpected attendance result');
+  return result;
+}
+
+export async function recordStaffAttendance(
+  pool: Pool,
+  actor: ActorContext,
+  cmd: PinLoginCommand & { employeeId: string; action: 'check-in' | 'check-out' },
+  meta: RequestMeta = {},
+): Promise<void> {
+  if (actor.kind !== 'operator' || !actor.sessionActive || !actor.outletId) {
+    throw new IdentityError('forbidden', 'Sign in to use staff attendance');
+  }
+  const result = await authenticatePin(pool, cmd, meta, { ...cmd, outletId: actor.outletId });
+  if (!('attendanceRecorded' in result)) {
+    throw new IdentityError(
+      'forbidden',
+      'PIN could not be verified. Check the selected employee and try again later.',
+    );
+  }
+}
+
+export async function listOutletStaff(
+  pool: Pool,
+  actor: ActorContext,
+): Promise<{ id: string; name: string; checkedIn: boolean }[]> {
+  if (actor.kind !== 'operator' || !actor.sessionActive || !actor.outletId) {
+    throw new IdentityError('forbidden', 'Sign in to view staff');
+  }
+  // Deliberately limited roster: no PIN hashes, phone numbers or attendance history.
+  return withActorContext(pool, systemContext(), async (client) => {
+    const { rows } = await client.query<{ id: string; name: string; checkedIn: boolean }>(
+      `select e.id, e.full_name as name, exists (
+         select 1 from identity.attendance_sessions a where a.employee_id = e.id and a.status = 'open'
+       ) as "checkedIn" from identity.store_employees e
+       where e.outlet_id = $1 and e.status = 'active' order by e.full_name`,
+      [actor.outletId],
+    );
+    return rows;
   });
 }
 

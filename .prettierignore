@@ -5,3 +5,7 @@ package-lock.json
 
 docs/
 **/.next/
+
+**/.next-production/
+.claude/
+.vercel/

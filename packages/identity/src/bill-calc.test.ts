@@ -10,11 +10,13 @@ describe('calculateBill - money', () => {
         { unitPrice: '25.50', quantity: 1, addons: [] },
       ],
     });
-    expect(r.subtotal).toBe('60.50');
+    // An add-on's quantity is per unit of the item, same as the POS's own
+    // display total: 2 teas x (₹15 + 1 ginger @ ₹5) = ₹40, plus ₹25.50.
+    expect(r.subtotal).toBe('65.50');
     expect(r.discountTotal).toBe('0.00');
-    expect(r.preRoundTotal).toBe('60.50');
+    expect(r.preRoundTotal).toBe('65.50');
     expect(r.roundAdjustment).toBe('0.00');
-    expect(r.finalTotal).toBe('60.50');
+    expect(r.finalTotal).toBe('65.50');
     expect(r.isComplimentary).toBe(false);
   });
 

@@ -11,6 +11,13 @@ const KIT_KEY = 'offline_kit';
  */
 export interface OfflineKit {
   outletName: string;
+  /** The operator who was signed in when this kit was last primed - display
+   *  only (whose name to show, whose bills to attribute to while rendering).
+   *  Not a credential: an offline bill is still authorised solely by
+   *  `authToken`'s signed `employeeIds[]` list, checked server-side at sync
+   *  time (`assertOfflineAuthCovers`), not by anything read from here. */
+  employeeId: string;
+  employeeName: string;
   menu: PosMenuSnapshot;
   authToken: string;
   authExpiresAt: string;

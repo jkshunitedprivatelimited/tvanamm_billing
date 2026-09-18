@@ -93,6 +93,7 @@ export function PurchaseOrdersClient({
 
   // Receive draft (per PO-line id)
   const [rcv, setRcv] = useState<Record<string, RcvRow>>({});
+  const [invoiceNumber, setInvoiceNumber] = useState('');
 
   async function open(id: string) {
     if (openId === id) {
@@ -169,17 +170,34 @@ export function PurchaseOrdersClient({
       setBusy(false);
       return setMsg({ kind: 'error', text: 'Enter an accepted quantity on at least one line.' });
     }
+    if (!invoiceNumber.trim()) {
+      setBusy(false);
+      return setMsg({
+        kind: 'error',
+        text: 'Enter the supplier invoice number - without it nothing posts to stock.',
+      });
+    }
     const { ok, data } = await api('/api/v1/stock/receipts', {
       purchaseOrderId: po.id,
       warehouseId: po.warehouseId,
       receiptNumber: `GRN-${po.poNumber}-${Date.now().toString(36).toUpperCase()}`,
       idempotencyKey: `grn-${po.id}-${Date.now().toString(36)}`,
+      supplierInvoiceNumber: invoiceNumber.trim(),
       lines: rcvLines,
     });
     setBusy(false);
     if (!ok) return setMsg({ kind: 'error', text: errText(data) });
+    const status = (data as { status?: string }).status;
     setRcv({});
-    setMsg({ kind: 'ok', text: 'Shipment received into stock.' });
+    setInvoiceNumber('');
+    setMsg(
+      status === 'posted'
+        ? { kind: 'ok', text: 'Shipment received and posted to stock.' }
+        : {
+            kind: 'error',
+            text: `Saved as a ${status ?? 'draft'} - stock was NOT updated. Check the invoice number and try again.`,
+          },
+    );
     await open(po.id);
     await open(po.id);
     router.refresh();
@@ -400,6 +418,18 @@ export function PurchaseOrdersClient({
             </table>
           </div>
 
+          {CAN_RECEIVE.has(detail.status) ? (
+            <label style={{ display: 'block', marginTop: 12 }}>
+              Supplier invoice number (required to post the receipt into stock)
+              <input
+                value={invoiceNumber}
+                onChange={(e) => setInvoiceNumber(e.target.value)}
+                placeholder="e.g. INV-2026-0417"
+                style={{ width: 220 }}
+              />
+            </label>
+          ) : null}
+
           <div className="row wrap" style={{ gap: 8, marginTop: 12 }}>
             {(NEXT_ACTIONS[detail.status] ?? []).map((a) => (
               <button
@@ -412,7 +442,7 @@ export function PurchaseOrdersClient({
               </button>
             ))}
             {CAN_RECEIVE.has(detail.status) ? (
-              <button disabled={busy} onClick={() => void receive(detail)}>
+              <button disabled={busy || !invoiceNumber.trim()} onClick={() => void receive(detail)}>
                 Receive shipment
               </button>
             ) : null}

@@ -2,73 +2,53 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import type { RecipeRow } from '@jksh/stock';
+import { aiDraftSchema } from '@/server/ai-draft-schema';
 import { DataTable } from '@/components/DataTable';
 import { apiPost } from '../api';
-
-interface ItemOpt {
-  id: string;
-  name: string;
-}
+import { RecipeVersionEditor, type RecipeItemOption } from './recipe-version-editor';
 
 const KINDS = ['menu_item', 'addon', 'intermediate'] as const;
 
-export function RecipesClient({ rows, items }: { rows: RecipeRow[]; items: ItemOpt[] }) {
+export function RecipesClient({
+  rows,
+  items,
+  menuItems,
+  addons,
+}: {
+  rows: RecipeRow[];
+  items: RecipeItemOption[];
+  menuItems: { id: string; name: string }[];
+  addons: { id: string; name: string }[];
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [kind, setKind] = useState<(typeof KINDS)[number]>('menu_item');
   const [billingMenuItemId, setBillingMenuItemId] = useState('');
   const [billingAddonId, setBillingAddonId] = useState('');
+  const [outputItemId, setOutputItemId] = useState('');
 
   const [openRecipe, setOpenRecipe] = useState<string | null>(null);
-  const [servingQtyBase, setServingQtyBase] = useState('');
-  const [servingUnit, setServingUnit] = useState('ml');
-  const [batchYieldBase, setBatchYieldBase] = useState('');
-  const [componentsJson, setComponentsJson] = useState(
-    '[\n  { "componentType": "fixed", "itemId": "", "qtyBase": "0" }\n]',
-  );
-
   async function createRecipe(e: React.FormEvent) {
     e.preventDefault();
+    if (saving) return;
+    setSaving(true);
     setMsg(null);
     const body: Record<string, unknown> = { name: name.trim(), kind };
-    if (billingMenuItemId.trim()) body.billingMenuItemId = billingMenuItemId.trim();
-    if (billingAddonId.trim()) body.billingAddonId = billingAddonId.trim();
+    if (kind === 'menu_item' && billingMenuItemId.trim())
+      body.billingMenuItemId = billingMenuItemId.trim();
+    if (kind === 'addon' && billingAddonId.trim()) body.billingAddonId = billingAddonId.trim();
+    if (kind === 'intermediate' && outputItemId) body.outputItemId = outputItemId;
     const r = await apiPost('/api/v1/stock/recipes', body);
+    setSaving(false);
     if (r.ok) {
       setName('');
       setBillingMenuItemId('');
       setBillingAddonId('');
       setMsg('Recipe created as draft.');
-      startTransition(() => router.refresh());
-    } else {
-      setMsg(`Failed: ${r.error}`);
-    }
-  }
-
-  async function publish(e: React.FormEvent) {
-    e.preventDefault();
-    if (!openRecipe) return;
-    setMsg(null);
-    let components: unknown;
-    try {
-      components = JSON.parse(componentsJson);
-    } catch {
-      setMsg('Components is not valid JSON.');
-      return;
-    }
-    const body: Record<string, unknown> = {
-      servingQtyBase: servingQtyBase.trim(),
-      servingUnit: servingUnit.trim(),
-      components,
-    };
-    if (batchYieldBase.trim()) body.batchYieldBase = batchYieldBase.trim();
-    const r = await apiPost(`/api/v1/stock/recipes/${openRecipe}/versions`, body);
-    if (r.ok) {
-      setMsg('Version published.');
-      setOpenRecipe(null);
       startTransition(() => router.refresh());
     } else {
       setMsg(`Failed: ${r.error}`);
@@ -98,32 +78,58 @@ export function RecipesClient({ rows, items }: { rows: RecipeRow[]; items: ItemO
             <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
               {KINDS.map((k) => (
                 <option key={k} value={k}>
-                  {k}
+                  {{ menu_item: 'Menu item', addon: 'Add-on', intermediate: 'Prepared base' }[k]}
                 </option>
               ))}
             </select>
           </label>
-          <label>
-            <div className="muted" style={{ fontSize: 12 }}>
-              Billing menu item id
-            </div>
-            <input
-              value={billingMenuItemId}
-              onChange={(e) => setBillingMenuItemId(e.target.value)}
-              placeholder="optional"
-            />
-          </label>
-          <label>
-            <div className="muted" style={{ fontSize: 12 }}>
-              Billing addon id
-            </div>
-            <input
-              value={billingAddonId}
-              onChange={(e) => setBillingAddonId(e.target.value)}
-              placeholder="optional"
-            />
-          </label>
-          <button disabled={pending || !name.trim()}>Create</button>
+          {kind === 'menu_item' ? (
+            <label>
+              Menu item (optional)
+              <select
+                value={billingMenuItemId}
+                onChange={(e) => setBillingMenuItemId(e.target.value)}
+              >
+                <option value="">Link after standardization</option>
+                {menuItems.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {kind === 'addon' ? (
+            <label>
+              Menu add-on (optional)
+              <select value={billingAddonId} onChange={(e) => setBillingAddonId(e.target.value)}>
+                <option value="">Link after standardization</option>
+                {addons.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {kind === 'intermediate' ? (
+            <label>
+              Prepared stock item
+              <select
+                required
+                value={outputItemId}
+                onChange={(e) => setOutputItemId(e.target.value)}
+              >
+                <option value="">Choose prepared output</option>
+                {items.map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <button disabled={pending || saving || !name.trim()}>Create</button>
         </div>
         {msg ? (
           <p className="muted" style={{ marginTop: 8 }}>
@@ -171,7 +177,11 @@ export function RecipesClient({ rows, items }: { rows: RecipeRow[]; items: ItemO
             nowrap: true,
             render: (r) => (
               <span className="mono" style={{ fontSize: 11 }}>
-                {r.billingMenuItemId ?? r.billingAddonId ?? '—'}
+                {menuItems.find((i) => i.id === r.billingMenuItemId)?.name ??
+                  addons.find((i) => i.id === r.billingAddonId)?.name ??
+                  (r.billingMenuItemId || r.billingAddonId
+                    ? 'Linked outside current master menu'
+                    : 'Not linked')}
               </span>
             ),
           },
@@ -185,7 +195,7 @@ export function RecipesClient({ rows, items }: { rows: RecipeRow[]; items: ItemO
                 onClick={() => setOpenRecipe(openRecipe === r.id ? null : r.id)}
                 disabled={pending}
               >
-                {openRecipe === r.id ? 'Cancel' : 'Publish version'}
+                {openRecipe === r.id ? 'Close editor' : 'Prepare version'}
               </button>
             ),
           },
@@ -196,72 +206,72 @@ export function RecipesClient({ rows, items }: { rows: RecipeRow[]; items: ItemO
         empty="No recipes yet."
       />
 
+      {openRecipe &&
+      aiDraftSchema.safeParse(rows.find((r) => r.id === openRecipe)?.sopDraft).success ? (
+        <section className="card">
+          <h2>Saved SOP draft</h2>
+          <p>
+            Use these notes to fill the measured recipe below. Confirm each quantity and match it to
+            a stock item before publishing.
+          </p>
+          <DraftNotes value={rows.find((r) => r.id === openRecipe)?.sopDraft} />
+          <a href="/ai">Edit draft in JKSH AI →</a>
+        </section>
+      ) : null}
       {openRecipe ? (
-        <form className="card" onSubmit={publish} style={{ marginTop: 12 }}>
-          <strong>Publish a new immutable version</strong>
-          <div
-            style={{ display: 'flex', gap: 8, alignItems: 'end', marginTop: 8, flexWrap: 'wrap' }}
-          >
-            <label>
-              <div className="muted" style={{ fontSize: 12 }}>
-                Serving qty (base)
-              </div>
-              <input
-                value={servingQtyBase}
-                onChange={(e) => setServingQtyBase(e.target.value)}
-                required
-                placeholder="80"
-              />
-            </label>
-            <label>
-              <div className="muted" style={{ fontSize: 12 }}>
-                Serving unit
-              </div>
-              <input
-                value={servingUnit}
-                onChange={(e) => setServingUnit(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              <div className="muted" style={{ fontSize: 12 }}>
-                Measured batch yield (base, optional)
-              </div>
-              <input
-                value={batchYieldBase}
-                onChange={(e) => setBatchYieldBase(e.target.value)}
-                placeholder="1000"
-              />
-            </label>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <div className="muted" style={{ fontSize: 12 }}>
-              Components JSON (componentType, itemId, qtyBase; optional alternativeGroup, isDefault,
-              processLossPct)
-            </div>
-            <textarea
-              value={componentsJson}
-              onChange={(e) => setComponentsJson(e.target.value)}
-              rows={8}
-              style={{ width: '100%', fontFamily: 'monospace', fontSize: 12 }}
-            />
-          </div>
-          <details style={{ marginTop: 6 }}>
-            <summary className="muted" style={{ fontSize: 12 }}>
-              Item ids
-            </summary>
-            <ul className="mono" style={{ fontSize: 11 }}>
-              {items.map((i) => (
-                <li key={i.id}>
-                  {i.id} — {i.name}
-                </li>
-              ))}
-            </ul>
-          </details>
-          <button style={{ marginTop: 8 }} disabled={pending}>
-            Publish version
-          </button>
-        </form>
+        <RecipeVersionEditor
+          key={openRecipe}
+          recipeId={openRecipe}
+          recipeName={rows.find((r) => r.id === openRecipe)?.name ?? 'Recipe'}
+          items={items}
+          onPublished={() => {
+            setMsg('Verified recipe version published.');
+            setOpenRecipe(null);
+            startTransition(() => router.refresh());
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function DraftNotes({ value }: { value: unknown }) {
+  const parsed = aiDraftSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const d = parsed.data;
+  return (
+    <>
+      <p>
+        Serving: {d.serving ?? 'Needs measurement'} · Batch yield:{' '}
+        {d.batchYield ?? 'Needs measurement'}
+      </p>
+      <ul>
+        {d.ingredients.map((i, n) => (
+          <li key={n}>
+            {i.name}: {i.quantity ?? '?'} {i.unit ?? ''} ({i.basis.replaceAll('_', ' ')})
+          </li>
+        ))}
+      </ul>
+      <ol>
+        {d.steps.map((s, i) => (
+          <li key={i}>{s}</li>
+        ))}
+      </ol>
+      <h3>Quality checks</h3>
+      <ul>
+        {d.checks.map((s, i) => (
+          <li key={i}>{s}</li>
+        ))}
+      </ul>
+      {d.missingMeasurements.length ? (
+        <>
+          <h3>Confirm before publishing</h3>
+          <ul>
+            {d.missingMeasurements.map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ul>
+        </>
       ) : null}
     </>
   );

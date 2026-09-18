@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import type { FulfilmentOrderRow } from '@jksh/stock';
@@ -18,8 +19,10 @@ function rupees(paise: number): string {
 export function FulfilmentClient({
   orders,
   warehouses,
+  outlets,
 }: {
   orders: FulfilmentOrderRow[];
+  outlets: { id: string; name: string }[];
   warehouses: Wh[];
 }) {
   const router = useRouter();
@@ -38,6 +41,15 @@ export function FulfilmentClient({
 
   const columns: Column<FulfilmentOrderRow>[] = [
     {
+      key: 'outlet',
+      header: 'Outlet',
+      render: (o) => (
+        <strong>
+          {outlets.find((outlet) => outlet.id === o.outletId)?.name ?? 'Outlet unavailable'}
+        </strong>
+      ),
+    },
+    {
       key: 'order',
       header: 'Order',
       width: 'minmax(140px,1fr)',
@@ -50,7 +62,7 @@ export function FulfilmentClient({
       header: 'Status',
       width: '150px',
       sortValue: (o) => o.status,
-      render: (o) => <span className={`pill ${o.status}`}>{o.status.replace('_', ' ')}</span>,
+      render: (o) => <span className={`pill ${o.status}`}>{o.status.replaceAll('_', ' ')}</span>,
     },
     { key: 'lines', header: 'Lines', width: '70px', align: 'right', render: (o) => o.lines },
     {
@@ -73,7 +85,7 @@ export function FulfilmentClient({
         >
           {warehouses.map((w) => (
             <option key={w.id} value={w.id}>
-              {w.code}
+              {w.name}
             </option>
           ))}
         </select>
@@ -127,6 +139,17 @@ export function FulfilmentClient({
     },
   ];
 
+  if (!orders.length)
+    return (
+      <section className="empty-workspace">
+        <h2>No orders waiting for delivery</h2>
+        <p>
+          Paid orders from your outlets will appear here. Set up your real items, prices and
+          warehouse to begin supplying them.
+        </p>
+        <Link href="/stock/ops/catalog">Set up items &amp; prices →</Link>
+      </section>
+    );
   return (
     <div className="card">
       {warehouses.length === 0 ? (

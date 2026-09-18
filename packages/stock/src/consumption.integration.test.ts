@@ -153,6 +153,39 @@ afterAll(async () => {
   if (RUN) await pool.end();
 });
 
+describe.skipIf(!RUN)('SOP publication integrity', () => {
+  it('serializes immutable versions and rejects unresolved ingredient references', async () => {
+    const recipe = await createRecipe(pool, sys, {
+      organizationId: ORG,
+      kind: 'menu_item',
+      name: `SOP verification ${randomUUID()}`,
+    });
+    const command = {
+      servingQtyBase: '85',
+      servingUnit: 'ml',
+      batchYieldBase: '850',
+      components: [{ componentType: 'fixed' as const, itemId: teaPowderId, qtyBase: '3' }],
+    };
+    const versions = await Promise.all([
+      publishRecipeVersion(pool, sys, recipe.id, command),
+      publishRecipeVersion(pool, sys, recipe.id, command),
+    ]);
+    expect(versions.map((v) => v.version).sort()).toEqual([1, 2]);
+    await expect(
+      publishRecipeVersion(pool, sys, recipe.id, {
+        ...command,
+        components: [{ componentType: 'fixed', itemId: randomUUID(), qtyBase: '3' }],
+      }),
+    ).rejects.toThrow(/active item/);
+    await expect(
+      publishRecipeVersion(pool, sys, recipe.id, {
+        ...command,
+        components: [{ componentType: 'fixed', itemId: teaPowderId, qtyBase: '0' }],
+      }),
+    ).rejects.toThrow(/greater than zero/);
+  });
+});
+
 describe.skipIf(!RUN)('assertRecipePublished (Billing link guard)', () => {
   it('accepts a real published version and rejects unknown / wrong-kind ones', async () => {
     const ref = await assertRecipePublished(pool, recipeId, 1);
@@ -309,5 +342,107 @@ describe.skipIf(!RUN)('Stock local inward', () => {
       [li.id],
     );
     expect(row.rows[0]!.valuation_state).toBe('costed');
+  });
+});
+
+describe.skipIf(!RUN)('Optional opening stock', () => {
+  async function fixture() {
+    const item = await createItem(pool, sys, {
+      organizationId: ORG,
+      sku: `OPEN-${randomUUID()}`,
+      name: 'Opening test',
+      itemType: 'raw_material',
+      dimension: 'mass',
+      baseUnit: 'g',
+    });
+    const recipe = await createRecipe(pool, sys, {
+      organizationId: ORG,
+      name: 'Opening recipe',
+      kind: 'menu_item',
+    });
+    await publishRecipeVersion(pool, sys, recipe.id, {
+      servingQtyBase: '1',
+      servingUnit: 'each',
+      components: [{ componentType: 'fixed', itemId: item.id, qtyBase: '2' }],
+    });
+    const payload = {
+      billId: randomUUID(),
+      outletId: OUTLET,
+      receiptNumber: 'OPEN',
+      businessDate: '2026-09-18',
+      finalTotal: '10.00',
+      lines: [
+        {
+          billLineId: randomUUID(),
+          catalogItemId: randomUUID(),
+          quantity: 1,
+          stockRecipeId: recipe.id,
+          stockRecipeVersion: 1,
+          addons: [],
+        },
+      ],
+    };
+    return { item, payload };
+  }
+  it('skips sales before setup and starts automatically at the first receipt, including delayed events', async () => {
+    const { item, payload } = await fixture();
+    const early = await ingestSale('SaleCompleted', payload);
+    await processSaleCompleted(pool, early);
+    expect(await outletOnHand(item.id)).toBe(0);
+    const delayed = await ingestSale('SaleCompleted', { ...payload, billId: randomUUID() });
+    await postMovements(pool, [
+      {
+        organizationId: ORG,
+        stockLocationId: outletLoc,
+        itemId: item.id,
+        quantity: '10',
+        movementType: 'receipt',
+        sourceDocType: 'test',
+        idempotencyKey: randomUUID(),
+      },
+    ]);
+    await processSaleCompleted(pool, delayed);
+    expect(await outletOnHand(item.id)).toBe(10);
+    await processSaleCompleted(
+      pool,
+      await ingestSale('SaleCompleted', {
+        ...payload,
+        billId: randomUUID(),
+        committedAt: '2020-01-01T00:00:00.000Z',
+      }),
+    );
+    expect(await outletOnHand(item.id)).toBe(10);
+    await processSaleCompleted(
+      pool,
+      await ingestSale('SaleCompleted', { ...payload, billId: randomUUID() }),
+    );
+    expect(await outletOnHand(item.id)).toBe(8);
+  });
+  it('saves an opening count once under concurrent requests and rejects a different franchise', async () => {
+    const { saveOpeningStock } = await import('./opening-stock');
+    const { item } = await fixture();
+    const input = { lines: [{ itemId: item.id, quantity: '12' }] };
+    const results = await Promise.allSettled([
+      saveOpeningStock(pool, sys, OUTLET, input),
+      saveOpeningStock(pool, sys, OUTLET, input),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(await outletOnHand(item.id)).toBe(12);
+    await expect(
+      saveOpeningStock(
+        pool,
+        { ...sys, request: 'admin', role: 'franchise_owner', franchiseId: randomUUID() },
+        OUTLET,
+        input,
+      ),
+    ).rejects.toThrow(/franchise/);
+  });
+  it('accepts a counted zero and continues processing sales with a shortage', async () => {
+    const { saveOpeningStock } = await import('./opening-stock');
+    const { item, payload } = await fixture();
+    await saveOpeningStock(pool, sys, OUTLET, { lines: [{ itemId: item.id, quantity: '0' }] });
+    const result = await processSaleCompleted(pool, await ingestSale('SaleCompleted', payload));
+    expect(result.negativeExceptions).toBe(1);
+    expect(await outletOnHand(item.id)).toBe(-2);
   });
 });

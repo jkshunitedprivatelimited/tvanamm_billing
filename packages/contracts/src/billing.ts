@@ -70,11 +70,19 @@ const createBillCommandShape = z.object({
   terminalReceiptNumber: receiptNumberSchema.optional(),
   /** offline only: the signed bundle issued while the terminal was last online */
   offlineAuthBundle: z.string().min(1).optional(),
+  /** offline only: which of the bundle's covered employees actually rang up
+   *  this sale on the device - the bill is attributed to this employee, not
+   *  to whoever is logged in when the terminal later syncs. */
+  offlineEmployeeId: z.uuid().optional(),
 });
 
 export const createBillCommandSchema = createBillCommandShape.refine(
-  (v) => !v.offline || (!!v.terminalReceiptNumber && !!v.offlineAuthBundle),
-  { message: 'An offline bill needs a pre-allocated receipt number and an offline authorization' },
+  (v) =>
+    !v.offline || (!!v.terminalReceiptNumber && !!v.offlineAuthBundle && !!v.offlineEmployeeId),
+  {
+    message:
+      'An offline bill needs a pre-allocated receipt number, an offline authorization, and the employee who rang it up',
+  },
 );
 export type CreateBillCommand = z.infer<typeof createBillCommandShape>;
 

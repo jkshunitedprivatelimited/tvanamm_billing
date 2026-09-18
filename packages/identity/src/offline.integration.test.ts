@@ -76,6 +76,7 @@ function offlineBillCmd(overrides: Record<string, unknown> = {}) {
     lines: [{ catalogItemId: itemId, quantity: 1, addons: [] }],
     terminalOccurredAt: new Date().toISOString(),
     offline: true,
+    offlineEmployeeId: employeeId,
     ...overrides,
   };
 }
@@ -356,6 +357,111 @@ describe.skipIf(!RUN)('Billing V1 Stage 4A - offline billing backend', () => {
     });
     expect(r3.results[0]!.ok).toBe(false);
     expect(r3.results[0]!.errorCode).toBe('offline_auth_invalid');
+  }, 30_000);
+
+  it('attributes an offline bill to the employee who rang it up, not whoever syncs it', async () => {
+    // Registering a terminal revokes the outlet's previously active one (one
+    // live terminal at a time), so this also becomes the shared terminal for
+    // whatever runs after - same pattern as the "terminal is replaced" test.
+    const owner = await adminActor(ownerPhone);
+    const code = await issueActivationCode(pool, owner, {
+      outletId,
+      label: 'Attribution test',
+      expiresInMinutes: 60,
+    });
+    const term = await registerTerminal(pool, {
+      code: code.code,
+      deviceLabel: 'Attribution iPad',
+      paperWidthMm: 80,
+    });
+    terminalCredential = term.terminalCredential;
+    terminalId = term.terminalId;
+    const secondPin = String(7000 + (Date.now() % 2000));
+    const second = await createEmployee(pool, owner, {
+      outletId,
+      fullName: 'Offline Priya',
+      mobile: `+9186${S.slice(-8).padStart(8, '0')}`,
+      initialPin: secondPin,
+    });
+
+    const loginA = await pinLogin(pool, { terminalCredential: term.terminalCredential, pin });
+    if (loginA.result.outcome !== 'resolved' || !loginA.operatorToken) {
+      throw new Error('employee A pin login failed');
+    }
+    const opA = await loadOperatorContext(pool, loginA.operatorToken);
+    if (!opA) throw new Error('no operator A');
+    await startShift(pool, opA, {});
+
+    // Employee A is on shift and issues the bundle/receipt while ringing up
+    // the sale; the bill claims employee A.
+    const auth = await issueOfflineAuth(pool, opA);
+    const block = await reserveReceiptBlock(pool, opA, { count: 1 });
+    const cmd = offlineBillCmd({
+      terminalReceiptNumber: block.numbers[0],
+      offlineAuthBundle: auth.token,
+      offlineEmployeeId: employeeId,
+    });
+
+    // But employee B is the one whose session actually calls sync later (e.g.
+    // a shift handover happened before the terminal reconnected).
+    const loginB = await pinLogin(pool, {
+      terminalCredential: term.terminalCredential,
+      pin: secondPin,
+    });
+    if (loginB.result.outcome !== 'resolved' || !loginB.operatorToken) {
+      throw new Error('employee B pin login failed');
+    }
+    const opB = await loadOperatorContext(pool, loginB.operatorToken);
+    if (!opB) throw new Error('no operator B');
+    expect(opB.employeeId).toBe(second.employeeId);
+    expect(opB.employeeId).not.toBe(employeeId);
+
+    const res = await syncOfflineBills(pool, opB, { bills: [cmd] });
+    expect(res.results[0]!.ok).toBe(true);
+    const stored = await pool.query<{ employee_id: string }>(
+      `select employee_id from billing.bills where id = $1`,
+      [res.results[0]!.billId],
+    );
+    expect(stored.rows[0]!.employee_id).toBe(employeeId);
+    expect(stored.rows[0]!.employee_id).not.toBe(second.employeeId);
+  }, 30_000);
+
+  it('rejects an offline bill claiming an employee the bundle does not cover', async () => {
+    // Another dedicated fresh terminal, same reason as above.
+    const owner = await adminActor(ownerPhone);
+    const code = await issueActivationCode(pool, owner, {
+      outletId,
+      label: 'Not-covered test',
+      expiresInMinutes: 60,
+    });
+    const term = await registerTerminal(pool, {
+      code: code.code,
+      deviceLabel: 'Not-covered iPad',
+      paperWidthMm: 80,
+    });
+    terminalCredential = term.terminalCredential;
+    terminalId = term.terminalId;
+    const login = await pinLogin(pool, { terminalCredential: term.terminalCredential, pin });
+    if (login.result.outcome !== 'resolved' || !login.operatorToken) {
+      throw new Error('pin login failed');
+    }
+    const op = await loadOperatorContext(pool, login.operatorToken);
+    if (!op) throw new Error('no operator');
+    await startShift(pool, op, {});
+
+    const auth = await issueOfflineAuth(pool, op);
+    const block = await reserveReceiptBlock(pool, op, { count: 1 });
+    const res = await syncOfflineBills(pool, op, {
+      bills: [
+        offlineBillCmd({
+          terminalReceiptNumber: block.numbers[0],
+          offlineAuthBundle: auth.token,
+          offlineEmployeeId: randomUUID(), // not in the bundle's employeeIds
+        }),
+      ],
+    });
+    expect(res.results[0]!.ok).toBe(false);
+    expect(res.results[0]!.errorCode).toBe('offline_auth_invalid');
   }, 30_000);
 
   it('caps an offline discount at the bundle policy and allows a discount within it', async () => {

@@ -53,6 +53,9 @@ export async function postMovement(
   client: StockPoolClient,
   input: MovementInput,
 ): Promise<MovementResult> {
+  await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    `stock-start:${input.stockLocationId}:${input.itemId}`,
+  ]);
   const existing = await client.query<{
     id: string;
     stock_location_id: string;
@@ -164,6 +167,13 @@ export async function postMovement(
       input.notes ?? null,
     ],
   );
+
+  if (Number(input.quantity) > 0) {
+    await client.query(
+      `insert into stock.item_tracking_starts (stock_location_id,item_id) values ($1,$2) on conflict do nothing`,
+      [input.stockLocationId, input.itemId],
+    );
+  }
 
   const balance = await client.query<{ on_hand: string }>(
     `insert into stock.stock_balances

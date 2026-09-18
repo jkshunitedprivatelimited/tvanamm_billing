@@ -18,6 +18,7 @@ function stockPoolConfig(connectionString: string): PoolConfig {
   return {
     connectionString,
     max: 5,
+    keepAlive: true,
     idleTimeoutMillis: 30_000,
     connectionTimeoutMillis: 10_000,
     ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),

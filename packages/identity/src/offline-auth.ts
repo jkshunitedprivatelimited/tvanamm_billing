@@ -127,7 +127,28 @@ export function parseOfflineAuthBundle(secret: string, token: string): OfflineAu
  * vouches for, and its claimed occurrence time must fall inside the
  * authorized window - a bundle never legitimizes a bill claimed to have
  * happened before it was issued or more than 24h after.
+ *
+ * `terminalOccurredAt` is a client-supplied clock and cannot be trusted on
+ * its own: a device could keep minting offline bills for days past its real
+ * 24h authorization and simply backdate each one to look like it happened
+ * early in the window. So expiry is also checked against the actual time
+ * this function runs (`now`, real server time by default) - a bundle that
+ * has genuinely expired is refused regardless of what the bill claims,
+ * closing that replay path. (This still allows a bill made near the end of
+ * a real offline stretch to sync shortly after reconnecting - it does not
+ * shrink the legitimate 24h window, only stops it being reusable forever.)
  */
+/** How much later than `expiresAt` a sync of an already-queued offline bill
+ *  may still land. A device that stays disconnected past the 24h selling
+ *  window (a real outage, not a clock trick) must still be able to sync
+ *  every bill it legitimately made *inside* that window once it reconnects -
+ *  only `terminalOccurredAt` (checked below, tightly bound to
+ *  [issuedAt, expiresAt]) decides whether a given bill was actually made in
+ *  time; this only bounds how late the *sync call itself* may arrive, so a
+ *  leaked/stale bundle can't be replayed forever to backdate brand new
+ *  bills. */
+const SYNC_GRACE_MS = 30 * 24 * 3_600_000; // 30 days, matching the refund window's order of magnitude
+
 export function assertOfflineAuthCovers(
   bundle: OfflineAuthBundle,
   claim: {
@@ -138,6 +159,7 @@ export function assertOfflineAuthCovers(
     menuChecksum: string;
     terminalOccurredAt: string;
   },
+  now: Date = new Date(),
 ): { ok: true } | { ok: false; reason: string } {
   if (bundle.outletId !== claim.outletId || bundle.terminalId !== claim.terminalId) {
     return { ok: false, reason: 'offline authorization does not match this outlet/terminal' };
@@ -147,6 +169,9 @@ export function assertOfflineAuthCovers(
   }
   if (bundle.menuVersion !== claim.menuVersion || bundle.menuChecksum !== claim.menuChecksum) {
     return { ok: false, reason: 'offline authorization does not match the priced menu snapshot' };
+  }
+  if (now.getTime() > new Date(bundle.expiresAt).getTime() + SYNC_GRACE_MS) {
+    return { ok: false, reason: 'offline authorization has actually expired' };
   }
   const occurred = new Date(claim.terminalOccurredAt).getTime();
   if (

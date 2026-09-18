@@ -24,9 +24,9 @@ export function IntegrationClient() {
     try {
       const res = await fetch('/api/v1/stock/integration-health');
       if (res.ok) setHealth((await res.json()) as IntegrationHealth);
-      else setMsg('Could not load integration health.');
+      else setMsg('Could not load stock update status.');
     } catch {
-      setMsg('Could not load integration health.');
+      setMsg('Could not load stock update status.');
     } finally {
       setLoading(false);
     }
@@ -47,9 +47,13 @@ export function IntegrationClient() {
         reconciliation?: unknown;
         message?: string;
       };
-      setMsg(res.ok ? 'Relay + reconcile complete.' : (body.message ?? 'Relay failed.'));
+      setMsg(
+        res.ok
+          ? 'Stock update check completed.'
+          : (body.message ?? 'Could not complete the stock update check.'),
+      );
     } catch {
-      setMsg('Relay request failed.');
+      setMsg('Could not reach the stock update service.');
     } finally {
       setRunning(false);
       await load();
@@ -64,7 +68,11 @@ export function IntegrationClient() {
       body: '{}',
     });
     const body = (await res.json().catch(() => ({}))) as { message?: string };
-    setMsg(res.ok ? 'Re-queued and reprocessed.' : (body.message ?? 'Retry failed.'));
+    setMsg(
+      res.ok
+        ? 'Update retried. Review the latest status below.'
+        : (body.message ?? 'Retry failed.'),
+    );
     await load();
   }
 
@@ -75,9 +83,9 @@ export function IntegrationClient() {
     <>
       <div className="card">
         <div className="spread">
-          <strong>Queue depth</strong>
+          <strong>Updates awaiting processing</strong>
           <button className="secondary sm" onClick={runRelay} disabled={running}>
-            {running ? 'Running…' : 'Run relay + reconcile'}
+            {running ? 'Running…' : 'Check stock updates'}
           </button>
         </div>
         {msg ? <p className="notice">{msg}</p> : null}
@@ -85,51 +93,60 @@ export function IntegrationClient() {
           className="grid"
           style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', marginTop: 10 }}
         >
-          <Stat label="Billing outbox pending" value={health.billingOutbox.pending} />
-          <Stat label="Billing outbox dead-letter" value={health.billingOutbox.deadLetter} bad />
-          <Stat label="Stock inbox unprocessed" value={health.stockInbox.unprocessed} />
-          <Stat label="Stock inbox dead-lettered" value={health.stockInbox.deadLettered} bad />
-          <Stat label="Stock outbox undelivered" value={health.stockOutbox.undelivered} />
-          <Stat label="Stock outbox dead-letter" value={health.stockOutbox.deadLettered} bad />
+          <Stat label="Bills awaiting transfer" value={health.billingOutbox.pending} />
+          <Stat
+            label="Bill transfers needing attention"
+            value={health.billingOutbox.deadLetter}
+            bad
+          />
+          <Stat label="Stock deductions pending" value={health.stockInbox.unprocessed} />
+          <Stat label="Deductions needing attention" value={health.stockInbox.deadLettered} bad />
+          <Stat label="Outgoing updates pending" value={health.stockOutbox.undelivered} />
+          <Stat
+            label="Outgoing updates needing attention"
+            value={health.stockOutbox.deadLettered}
+            bad
+          />
         </div>
         {health.billingOutbox.oldestPendingAt ? (
           <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-            Oldest pending Billing event:{' '}
+            Oldest waiting bill update:{' '}
             {new Date(health.billingOutbox.oldestPendingAt).toLocaleString()}
           </p>
         ) : null}
       </div>
 
       <div className="card">
-        <strong>Last reconciliation</strong>
+        <strong>Last consistency check</strong>
         {health.lastReconciliation ? (
-          <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 0 }}>
             {new Date(health.lastReconciliation.startedAt).toLocaleString()} ·{' '}
-            {health.lastReconciliation.discrepancies} discrepancy(ies) ·{' '}
-            <span className="mono" style={{ fontSize: 11 }}>
-              {JSON.stringify(health.lastReconciliation.report)}
-            </span>
-          </p>
+            {health.lastReconciliation.discrepancies} differences found ·{' '}
+            <details>
+              <summary>Technical details</summary>
+              <pre>{JSON.stringify(health.lastReconciliation.report, null, 2)}</pre>
+            </details>
+          </div>
         ) : (
           <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>
-            No reconciliation run recorded yet.
+            No consistency check has run yet.
           </p>
         )}
       </div>
 
-      <h2 className="section-label">Dead-lettered inbound events</h2>
+      <h2 className="section-label">Failed stock deductions</h2>
       {health.deadLetters.length === 0 ? (
-        <p className="ok">None — the pipeline is clean.</p>
+        <p className="ok">No failed stock deductions. Pending updates, if any, are shown above.</p>
       ) : (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Event</th>
-                <th>Source id</th>
+                <th>Update type</th>
+                <th>Reference</th>
                 <th className="num">Attempts</th>
                 <th>Last error</th>
-                <th>Dead-lettered</th>
+                <th>Failed at</th>
                 <th />
               </tr>
             </thead>
@@ -149,7 +166,7 @@ export function IntegrationClient() {
                   <td className="muted">{new Date(d.deadLetteredAt).toLocaleString()}</td>
                   <td>
                     <button className="secondary sm" onClick={() => void retry(d.id)}>
-                      Re-queue
+                      Retry update
                     </button>
                   </td>
                 </tr>

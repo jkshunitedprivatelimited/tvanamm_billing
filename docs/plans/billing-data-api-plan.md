@@ -138,7 +138,14 @@ Only Central Admin can create, suspend, close, or reactivate outlets.
 
 A catalog item records whether it originates from Central master or one selected
 outlet. Field-level outlet overrides preserve customized name, image, category,
-add-ons, GST-inclusive price, and availability.
+add-ons, GST-inclusive price, and availability. Central provides a recommended
+price; Franchise Owners set final GST-inclusive prices for explicitly selected
+owned outlets. V1 has no product variants.
+
+Franchise-created items use a Central-approved GST/HSN profile. Central and
+Franchise Owners can author scoped combos from existing items. Combo value and
+discount are proportionally allocated to immutable component sale lines; Stock
+consumes the component recipe versions.
 
 ### Publication records
 
@@ -156,8 +163,12 @@ many authoring tables during checkout.
 
 ### Stock recipe reference
 
-Published menu lines may include optional Stock recipe ID/version and offline
-sale allowance. Missing recipe means `not_stock_tracked`, not unsellable.
+Recipes are optional. A Franchise-created item may become sellable immediately
+in explicitly selected owned outlet(s); without a recipe it is marked
+`not_stock_tracked` and causes no automatic ingredient consumption. Packaged
+resale items can use a one-to-one stock mapping. Offline Stock allowance
+exhaustion warns and records an exception but does not independently pause
+Billing.
 
 ## 6. Shift and Cash Schema
 

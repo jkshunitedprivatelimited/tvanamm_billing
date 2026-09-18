@@ -1,11 +1,9 @@
 import type { ReactNode } from 'react';
-import Link from 'next/link';
 import { requireAdminActor } from '@/server/auth';
-import { BrandMark } from '@/components/BrandMark';
 import { AskJksh } from '@/components/AskJksh';
-import { askJkshEnabled } from '@/server/gemini';
-import { AppNav, type NavItem } from './AppNav';
-import { LogoutButton } from './LogoutButton';
+
+import type { NavItem } from './AppNav';
+import { AppHeader } from './AppHeader';
 
 const AI_ROLES = new Set(['central_admin', 'accountant', 'franchise_owner']);
 
@@ -22,38 +20,36 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     actor.role === 'accountant'
       ? [
           { href: '/reports', label: 'Reports' },
-          { href: '/audit', label: 'Audit' },
+          { href: '/audit', label: 'Business overview' },
         ]
       : [
-          { href: '/', label: 'Outlets' },
+          { href: '/', label: actor.role === 'franchise_owner' ? 'Overview' : 'All outlets' },
           ...(actor.role === 'central_admin' || actor.role === 'franchise_owner'
             ? [
                 { href: '/menu', label: 'Menu' },
                 { href: '/reports', label: 'Reports' },
-                { href: '/stock', label: 'Stock' },
-                { href: '/audit', label: 'Audit' },
+                {
+                  href: '/stock',
+                  label: actor.role === 'franchise_owner' ? 'Stock & orders' : 'Stock control',
+                },
+                {
+                  href: '/audit',
+                  label: actor.role === 'franchise_owner' ? 'Outlet overview' : 'Business overview',
+                },
               ]
             : []),
-          ...(actor.role === 'central_admin' ? [{ href: '/stock/ops', label: 'Stock ops' }] : []),
+          ...(actor.role === 'central_admin'
+            ? [{ href: '/stock/ops', label: 'Supply operations' }]
+            : []),
         ];
+
+  if (AI_ROLES.has(actor.role)) items.push({ href: '/ai', label: 'JKSH AI' });
 
   return (
     <>
-      <div className="topbar">
-        <Link href="/" className="brand">
-          <BrandMark />
-          <span>
-            T&nbsp;VANAMM <small>· JKSH</small>
-          </span>
-        </Link>
-        <div className="row">
-          <AppNav items={items} />
-          <span className="badge">{ROLE_LABEL[actor.role] ?? actor.role}</span>
-          <LogoutButton />
-        </div>
-      </div>
+      <AppHeader items={items} role={ROLE_LABEL[actor.role] ?? actor.role} />
       {children}
-      {askJkshEnabled() && AI_ROLES.has(actor.role) ? <AskJksh role={actor.role} /> : null}
+      {AI_ROLES.has(actor.role) ? <AskJksh /> : null}
     </>
   );
 }

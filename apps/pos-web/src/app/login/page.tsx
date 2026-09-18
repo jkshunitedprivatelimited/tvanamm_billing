@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BrandMark } from '@/components/BrandMark';
 
 const CREDENTIAL_KEY = 'jksh_terminal_credential';
 const OUTLET_KEY = 'jksh_terminal_outlet';
+const HOLD_MS = 1800;
 
 export default function StoreLoginPage() {
   const router = useRouter();
@@ -16,6 +17,19 @@ export default function StoreLoginPage() {
   const [confirmName, setConfirmName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Owner-only escape hatch: hold the logo for ~2s to reveal a confirmation,
+  // never a plain button. Cashiers scanning the screen for the next digit
+  // should never see (or accidentally tap) a way to deregister the device.
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function startHold() {
+    holdTimer.current = setTimeout(() => setShowResetConfirm(true), HOLD_MS);
+  }
+  function cancelHold() {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  }
 
   /** The stored credential points at a terminal that no longer exists — wipe
    *  every copy of it and send the user to activation. */
@@ -89,7 +103,13 @@ export default function StoreLoginPage() {
         return;
       }
       if (body.outcome === 'rejected') {
-        if (body.reason === 'terminal_revoked' || body.reason === 'invalid') {
+        // Only an explicit revoke is a reliable "this device is dead" signal —
+        // auto-forget on it. A generic `invalid` also covers an ordinary wrong
+        // PIN (the server deliberately doesn't distinguish the two, so a typo
+        // can't be used to probe whether a terminal exists), so it must never
+        // wipe a working registration — that would strand the terminal after
+        // one mistyped PIN.
+        if (body.reason === 'terminal_revoked') {
           setError('This terminal is not registered any more. Redirecting to activation…');
           void forgetTerminal();
           return;
@@ -159,10 +179,54 @@ export default function StoreLoginPage() {
     );
   }
 
+  if (showResetConfirm) {
+    return (
+      <div className="screen">
+        <div className="panel">
+          <div className="brand">
+            <BrandMark />
+            <span>
+              T&nbsp;VANAMM <small>· Billing</small>
+            </span>
+          </div>
+          <h1>Re-register this terminal?</h1>
+          <p className="muted" style={{ margin: '8px 0 20px' }}>
+            This removes {outletName || 'this outlet'}&rsquo;s registration from this device and
+            asks for a fresh activation code. Only do this if your owner or manager told you to —
+            not to fix a forgotten or incorrect PIN.
+          </p>
+          <button
+            className="ghost"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void forgetTerminal();
+            }}
+          >
+            Yes, remove this device&rsquo;s registration
+          </button>
+          <button
+            style={{ marginTop: 10 }}
+            onClick={() => setShowResetConfirm(false)}
+            disabled={busy}
+          >
+            Cancel — take me back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="screen">
       <div className="panel">
-        <div className="brand">
+        <div
+          className="brand"
+          onPointerDown={startHold}
+          onPointerUp={cancelHold}
+          onPointerLeave={cancelHold}
+          style={{ userSelect: 'none' }}
+        >
           <BrandMark />
           <span>
             T&nbsp;VANAMM <small>· Billing</small>
@@ -192,13 +256,6 @@ export default function StoreLoginPage() {
           </button>
         </div>
         {error ? <p className="error">{error}</p> : null}
-        <button
-          className="ghost"
-          style={{ marginTop: 12, fontSize: 13 }}
-          onClick={() => void forgetTerminal()}
-        >
-          Re-register this terminal
-        </button>
       </div>
     </div>
   );

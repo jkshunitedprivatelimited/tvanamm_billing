@@ -386,20 +386,35 @@ export async function upsertOutletItemOverride(
     outletId: cmd.outletId,
   });
   return withActorContext(pool, contextForActor(actor), async (client) => {
-    const item = await client.query<{ id: string; owner_scope: string; price: string }>(
-      `select id, owner_scope, price from billing.catalog_items where id = $1`,
-      [cmd.catalogItemId],
-    );
+    const item = await client.query<{
+      id: string;
+      owner_scope: string;
+      price: string;
+      brand_id: string;
+    }>(`select id, owner_scope, price, brand_id from billing.catalog_items where id = $1`, [
+      cmd.catalogItemId,
+    ]);
     if (!item.rows[0]) throw new IdentityError('not_found', 'Item not found');
     if (item.rows[0].owner_scope !== 'master') {
       throw new IdentityError('validation', 'Overrides apply only to master items');
     }
     // Outlet must be visible under RLS (own outlet / Central).
-    const outlet = await client.query(`select 1 from billing.outlets where id = $1`, [
-      cmd.outletId,
-    ]);
+    const outlet = await client.query<{ brand_id: string }>(
+      `select brand_id from billing.outlets where id = $1`,
+      [cmd.outletId],
+    );
     if (outlet.rowCount === 0) throw new IdentityError('not_found', 'Outlet not found');
 
+    if (outlet.rows[0]?.brand_id !== item.rows[0].brand_id)
+      throw new IdentityError('validation', 'Item does not belong to this outlet’s brand');
+    if (cmd.categoryId) {
+      const category = await client.query(
+        `select 1 from billing.categories where id=$1 and brand_id=$2 and status <> 'archived' and (owner_scope='master' or outlet_id=$3)`,
+        [cmd.categoryId, item.rows[0].brand_id, cmd.outletId],
+      );
+      if (!category.rowCount)
+        throw new IdentityError('validation', 'Choose a category available to this outlet');
+    }
     const existing = await client.query<{ id: string; price: string | null }>(
       `select id, price from billing.outlet_item_overrides
         where outlet_id = $1 and catalog_item_id = $2 for update`,
@@ -602,6 +617,12 @@ export interface MasterMenuView {
     gstRate: string;
     isAvailable: boolean;
     addonGroupIds: string[];
+    /** Only ever set by the admin-web layer when it reshapes
+     *  `OutletMenuPricingView` into this same shape for the shared menu UI —
+     *  `listMasterMenu` itself never populates it. Lets the owner's item row
+     *  show "master: ₹25" next to their own overridden price. */
+    referencePrice?: string;
+    ownerScope?: string;
   }[];
   addonGroups: {
     id: string;
@@ -747,6 +768,115 @@ export async function listMasterMenu(
             quantity: cc.quantity,
           })),
       })),
+    };
+  });
+}
+
+export interface OutletMenuPricingView {
+  categories: { id: string; name: string; displayOrder: number }[];
+  items: {
+    catalogItemId: string;
+    name: string;
+    ownerScope: string;
+    categoryId: string | null;
+    masterPrice: string;
+    masterGstRate: string;
+    masterIsAvailable: boolean;
+    /** null = this field isn't overridden; the outlet uses the master value. */
+    outletPrice: string | null;
+    outletGstRate: string | null;
+    outletIsAvailable: boolean | null;
+    availabilityNote: string | null;
+  }[];
+}
+
+/**
+ * The read a Franchise Owner needs to price their own outlet: the master
+ * catalog and outlet-owned items with effective names/categories/reference prices alongside
+ * whatever outlet-level overrides already exist, so the UI can show the
+ * effective price and let the owner change just their own outlet's row via
+ * `upsertOutletItemOverride`/`pauseOutletItem`. Deliberately a separate,
+ * narrower function from `listMasterMenu`: that one is gated by
+ * `catalog.menu.manage.master` (editing the shared catalog, Central only);
+ * this one is gated by `catalog.price.configure.outlet` (the same capability
+ * the write already requires), so an owner can see items to price without
+ * ever being able to manage the master catalog itself.
+ */
+export async function listOutletMenuForPricing(
+  pool: Pool,
+  actor: ActorContext,
+  outletId: string,
+): Promise<OutletMenuPricingView> {
+  ensureAllowed(actor, 'catalog.price.configure.outlet', {
+    organizationId: actor.scope.organizationId,
+    ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
+    outletId,
+  });
+  return withActorContext(pool, contextForActor(actor), async (client) => {
+    const outlet = await client.query<{ brand_id: string }>(
+      `select brand_id from billing.outlets where id = $1`,
+      [outletId],
+    );
+    const brandId = outlet.rows[0]?.brand_id;
+    if (!brandId) throw new IdentityError('not_found', 'Outlet not found');
+
+    const cats = await client.query<{ id: string; name: string; display_order: number }>(
+      `select id, name, display_order from billing.categories
+        where brand_id = $1 and (owner_scope = 'master' or outlet_id=$2) and status <> 'archived'
+        order by display_order, name`,
+      [brandId, outletId],
+    );
+    const items = await client.query<{
+      id: string;
+      name: string;
+      owner_scope: string;
+      category_id: string | null;
+      price: string;
+      gst_rate: string;
+      is_available: boolean;
+    }>(
+      `select id, name, owner_scope, category_id, price, gst_rate, is_available from billing.catalog_items
+        where brand_id = $1 and (owner_scope = 'master' or outlet_id=$2) and status <> 'archived'
+        order by name`,
+      [brandId, outletId],
+    );
+    const overrides = await client.query<{
+      catalog_item_id: string;
+      name: string | null;
+      category_id: string | null;
+      price: string | null;
+      gst_rate: string | null;
+      is_available: boolean | null;
+      availability_note: string | null;
+    }>(
+      `select catalog_item_id, name, category_id, price, gst_rate, is_available, availability_note
+         from billing.outlet_item_overrides
+        where outlet_id = $1 and catalog_item_id = any($2::uuid[])`,
+      [outletId, items.rows.map((r) => r.id)],
+    );
+
+    return {
+      categories: cats.rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        displayOrder: r.display_order,
+      })),
+      items: items.rows.map((r) => {
+        const o = overrides.rows.find((ov) => ov.catalog_item_id === r.id);
+        return {
+          catalogItemId: r.id,
+          name: o?.name ?? r.name,
+          ownerScope: r.owner_scope,
+          categoryId: o?.category_id ?? r.category_id,
+          masterPrice: r.price,
+          masterGstRate: r.gst_rate,
+          masterIsAvailable: r.is_available,
+          outletPrice: o?.price ?? null,
+          outletGstRate: o?.gst_rate ?? null,
+          outletIsAvailable: o?.is_available ?? null,
+          availabilityNote: o?.availability_note ?? null,
+        };
+      }),
     };
   });
 }

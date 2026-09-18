@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { identityTokenSecret } from '@jksh/config';
-import { insecureDevAuthEnabled } from '@/dev-auth-flags';
+import { insecureDevAuthEnabled, msg91WidgetAuthEnabled } from '@/dev-auth-flags';
 
 export const DEV_COOKIE = 'jksh_dev';
 
@@ -64,10 +64,18 @@ interface DevSession {
   issuedAt: number;
 }
 
+// A cookie minted with the fixed development OTP must not survive switching
+// to real SMS verification, even when the deployment keeps the same secret.
+function sessionPurpose(): string {
+  return msg91WidgetAuthEnabled() ? 'msg91' : 'dev';
+}
+
 export function signDevSession(accountId: string, phone: string): string {
   const issuedAt = Date.now();
   const body = `${accountId}.${Buffer.from(phone).toString('base64url')}.${String(issuedAt)}`;
-  const sig = createHmac('sha256', identityTokenSecret()).update(`dev:${body}`).digest('base64url');
+  const sig = createHmac('sha256', identityTokenSecret())
+    .update(`${sessionPurpose()}:${body}`)
+    .digest('base64url');
   return `${body}.${sig}`;
 }
 
@@ -79,7 +87,9 @@ export function readDevSession(value: string | undefined): DevSession | null {
   const [accountId, phoneB64, iat, sig] = parts as [string, string, string, string];
   const body = `${accountId}.${phoneB64}.${iat}`;
   const expected = Buffer.from(
-    createHmac('sha256', identityTokenSecret()).update(`dev:${body}`).digest('base64url'),
+    createHmac('sha256', identityTokenSecret())
+      .update(`${sessionPurpose()}:${body}`)
+      .digest('base64url'),
   );
   const provided = Buffer.from(sig);
   if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) return null;

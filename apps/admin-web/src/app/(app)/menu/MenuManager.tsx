@@ -12,7 +12,7 @@ interface OutletRow {
 
 async function req(
   url: string,
-  method: 'POST' | 'PATCH',
+  method: 'POST' | 'PATCH' | 'PUT',
   body: unknown,
 ): Promise<{ ok: boolean; data: unknown }> {
   const res = await fetch(url, {
@@ -36,11 +36,16 @@ export function MenuManager({
   brandId,
   master,
   outlets,
+  initialOwnerOutletId,
 }: {
   role: string;
   brandId: string;
   master: MasterMenuView;
   outlets: OutletRow[];
+  /** Which outlet's pricing `master` was already fetched for (server-side,
+   *  from the `?outlet=` search param) — seeds the selector so it matches
+   *  what's on screen instead of silently defaulting to outlets[0]. */
+  initialOwnerOutletId?: string;
 }) {
   const router = useRouter();
   const isCentral = role === 'central_admin';
@@ -73,7 +78,16 @@ export function MenuManager({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [overwritePrice, setOverwritePrice] = useState(false);
   const [targets, setTargets] = useState<string[]>([]);
-  const [outletForFo, setOutletForFo] = useState(outlets[0]?.id ?? '');
+  const [outletForFo, setOutletForFo] = useState(initialOwnerOutletId ?? outlets[0]?.id ?? '');
+
+  /** Switching outlets for a Franchise Owner re-fetches that outlet's own
+   *  pricing (server-side, via the `?outlet=` param) rather than just
+   *  changing the publish target — the item list on screen must match. */
+  function selectOwnerOutlet(id: string) {
+    setBusy(true);
+    setOutletForFo(id);
+    router.push(`/menu?outlet=${id}`);
+  }
 
   const categories = useMemo(
     () => [...master.categories].sort((a, b) => a.displayOrder - b.displayOrder),
@@ -145,10 +159,26 @@ export function MenuManager({
   async function patchItem(id: string, body: Record<string, unknown>) {
     setBusy(true);
     setMsg(null);
-    const { ok, data } = await req(`/api/v1/catalog/items/${id}`, 'PATCH', body);
+    const { ok, data } =
+      isCentral || master.items.find((i) => i.id === id)?.ownerScope === 'outlet'
+        ? await req(`/api/v1/catalog/items/${id}`, 'PATCH', body)
+        : await req(`/api/v1/catalog/items/${id}/outlet-override`, 'PUT', {
+            outletId: outletForFo,
+            ...body,
+          });
     setBusy(false);
-    if (!ok) return setMsg({ kind: 'error', text: errText(data) });
+    if (!ok) {
+      setMsg({ kind: 'error', text: errText(data) });
+      return false;
+    }
+    setMsg({
+      kind: 'ok',
+      text: isCentral
+        ? 'Saved. Publish to update the selected outlets.'
+        : 'Saved for this outlet only. Publish to update billing.',
+    });
     router.refresh();
+    return true;
   }
 
   async function publish(e: React.SyntheticEvent) {
@@ -190,7 +220,7 @@ export function MenuManager({
         </div>
         <form onSubmit={publish} className="row wrap" style={{ gap: 8 }}>
           {!isCentral && (
-            <select value={outletForFo} onChange={(e) => setOutletForFo(e.target.value)}>
+            <select value={outletForFo} onChange={(e) => selectOwnerOutlet(e.target.value)}>
               {outlets.map((o) => (
                 <option key={o.id} value={o.id}>
                   {o.name}
@@ -251,7 +281,7 @@ export function MenuManager({
 
       {msg ? <p className={msg.kind}>{msg.text}</p> : null}
 
-      {!isCentral ? null : (
+      {(isCentral || outlets.length > 0) && (
         <>
           {/* ---- Toolbar: search + add ---------------------------------- */}
           <div className="card menu-toolbar">
@@ -268,12 +298,14 @@ export function MenuManager({
                 : `${String(master.items.length)} items`}
             </span>
             <span className="grow" />
-            <button type="button" className="secondary sm" onClick={() => setAdding((v) => !v)}>
-              {adding ? 'Close' : '+ Add item'}
-            </button>
+            {isCentral ? (
+              <button type="button" className="secondary sm" onClick={() => setAdding((v) => !v)}>
+                {adding ? 'Close' : '+ Add item'}
+              </button>
+            ) : null}
           </div>
 
-          {adding && (
+          {isCentral && adding && (
             <div className="card">
               <form onSubmit={addItem} className="toolbar">
                 <label>
@@ -358,7 +390,14 @@ export function MenuManager({
                 {isOpen && (
                   <div className="menu-rows">
                     {g.items.map((it) => (
-                      <ItemRow key={it.id} item={it} busy={busy} onPatch={patchItem} />
+                      <ItemRow
+                        key={`${outletForFo}:${it.id}:${it.name}:${it.price}:${it.categoryId ?? 'none'}:${String(it.isAvailable)}`}
+                        item={it}
+                        busy={busy}
+                        categories={categories}
+                        outletOnly={!isCentral}
+                        onPatch={patchItem}
+                      />
                     ))}
                   </div>
                 )}
@@ -368,7 +407,13 @@ export function MenuManager({
           {grouped.length === 0 && (
             <div className="empty-state">
               <h3>No items {query ? 'match your search' : 'yet'}</h3>
-              <p>{query ? 'Try a different term.' : 'Use “Add item” to build the menu.'}</p>
+              <p>
+                {query
+                  ? 'Try a different term.'
+                  : isCentral
+                    ? 'Use “Add item” to build the menu.'
+                    : 'Central hasn’t published any master items yet — check back once they have.'}
+              </p>
             </div>
           )}
         </>
@@ -380,50 +425,123 @@ export function MenuManager({
 function ItemRow({
   item,
   busy,
+  categories,
+  outletOnly,
   onPatch,
 }: {
   item: MasterMenuView['items'][number];
   busy: boolean;
-  onPatch: (id: string, body: Record<string, unknown>) => void;
+  categories: MasterMenuView['categories'];
+  outletOnly: boolean;
+  onPatch: (id: string, body: Record<string, unknown>) => Promise<boolean>;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(item.price);
-  const dirty = price.trim() !== item.price;
+  const [categoryId, setCategoryId] = useState(item.categoryId ?? '');
+  const [removing, setRemoving] = useState(false);
   return (
-    <div className="menu-row">
-      <span className="menu-row-name">{item.name}</span>
-      <span className="menu-row-price">
-        ₹
-        <input
-          inputMode="decimal"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && dirty) onPatch(item.id, { price: price.trim() });
-          }}
-        />
-        {dirty && (
-          <button
-            type="button"
-            className="sm"
-            disabled={busy}
-            onClick={() => onPatch(item.id, { price: price.trim() })}
-          >
-            Save
+    <div className="card" style={{ margin: 0, borderRadius: 0, boxShadow: 'none' }}>
+      <div className="row" style={{ justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <strong>{item.name}</strong>
+          <p className="muted" style={{ margin: '4px 0' }}>
+            ₹{item.price} · GST {item.gstRate}% ·{' '}
+            {item.isAvailable ? 'Available' : 'Removed from sale'}
+          </p>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="secondary sm" disabled={busy} onClick={() => setEditing(!editing)}>
+            {editing ? 'Cancel' : 'Edit item'}
           </button>
-        )}
-      </span>
-      <span className="muted" style={{ fontSize: 12 }}>
-        GST {item.gstRate}%
-      </span>
-      <button
-        type="button"
-        className={item.isAvailable ? 'ghost sm' : 'secondary sm'}
-        disabled={busy}
-        onClick={() => onPatch(item.id, { isAvailable: !item.isAvailable })}
-        title="Toggle availability"
-      >
-        {item.isAvailable ? 'Available' : 'Hidden'}
-      </button>
+          <button
+            className="ghost sm"
+            disabled={busy}
+            onClick={() => {
+              if (item.isAvailable) setRemoving(true);
+              else void onPatch(item.id, { isAvailable: true });
+            }}
+          >
+            {item.isAvailable ? 'Remove from sale' : 'Restore item'}
+          </button>
+        </div>
+      </div>
+      {removing ? (
+        <div className="notice">
+          <p>
+            Remove {item.name} from {outletOnly ? 'this outlet’s' : 'the master'} menu? Past bills
+            are kept. You can restore the item later. Publish afterward to update billing.
+          </p>
+          <div className="row" style={{ gap: 12 }}>
+            <button
+              disabled={busy}
+              onClick={() =>
+                void onPatch(item.id, { isAvailable: false }).then((ok) => {
+                  if (ok) setRemoving(false);
+                })
+              }
+            >
+              Remove from sale
+            </button>
+            <button className="secondary" disabled={busy} onClick={() => setRemoving(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {editing ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void onPatch(item.id, {
+              name: name.trim(),
+              price: price.trim(),
+              categoryId: categoryId || null,
+            }).then((ok) => {
+              if (ok) setEditing(false);
+            });
+          }}
+        >
+          <div className="grid" style={{ marginTop: 16 }}>
+            <label>
+              Item name
+              <input
+                required
+                maxLength={160}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <label>
+              Price ₹
+              <input
+                required
+                inputMode="decimal"
+                pattern="[0-9]+([.][0-9]{1,2})?"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
+            </label>
+            <label>
+              Category
+              <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+                <option value="">{outletOnly ? 'Use original category' : 'Uncategorised'}</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <p className="muted">
+            {outletOnly
+              ? 'Changes apply only to this outlet. Publish when ready.'
+              : 'Publish when ready to update outlets.'}
+          </p>
+          <button disabled={busy || !name.trim() || !price.trim()}>Save changes</button>
+        </form>
+      ) : null}
     </div>
   );
 }

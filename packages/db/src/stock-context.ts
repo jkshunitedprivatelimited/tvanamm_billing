@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from 'pg';
+import { connectStockClient } from './stock-connect';
 
 /**
  * Per-transaction authorization context for the Stock database. Mirrors the
@@ -60,7 +61,7 @@ export async function withStockActorContext<T>(
   ctx: StockDbContext,
   fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
-  const client = await pool.connect();
+  const client = await connectStockClient(() => pool.connect());
   try {
     await client.query('begin');
     await applyStockContext(client, ctx);

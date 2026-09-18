@@ -786,8 +786,10 @@ export async function listPurchaseOrders(
       total_paise: string;
     }>(
       `select id, po_number, status, supplier_id, total_paise
-         from stock.purchase_orders
-        where ($1::uuid is null or warehouse_id = $1)
+         from stock.purchase_orders p
+        where exists (select 1 from stock.warehouses w where w.id=p.warehouse_id and w.is_active)
+          and exists (select 1 from stock.suppliers s where s.id=p.supplier_id and s.is_active)
+          and ($1::uuid is null or warehouse_id = $1)
           and ($2::text is null or status = $2::stock.po_status)
         order by created_at desc
         limit $3`,

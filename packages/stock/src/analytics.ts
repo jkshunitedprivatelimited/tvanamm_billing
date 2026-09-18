@@ -394,22 +394,28 @@ export async function getCentralOversight(
          from stock.stock_balances b
          join stock.item_valuation v
            on v.item_id = b.item_id and v.organization_id = b.organization_id
-        where b.organization_id = $1 and b.on_hand > 0`,
+        where b.organization_id = $1 and b.on_hand > 0
+          and exists (select 1 from stock.items i where i.id = b.item_id and i.is_active)
+          and exists (select 1 from stock.stock_locations l where l.id = b.stock_location_id and l.is_active)`,
       [organizationId],
     );
     const negs = await client.query<{ n: string }>(
       `select count(*) as n from stock.negative_stock_exceptions e
          join stock.sale_consumptions s on s.id = e.sale_consumption_id
-        where s.organization_id = $1 and e.resolved_at is null`,
+        where s.organization_id = $1 and e.resolved_at is null
+          and exists (select 1 from stock.outlet_stock_settings o where o.outlet_id=s.outlet_id and o.tracking_enabled)`,
       [organizationId],
     );
     const flags = await client.query<{ n: string }>(
-      `select count(*) as n from stock.anomaly_flags where organization_id = $1 and status = 'open'`,
+      `select count(*) as n from stock.anomaly_flags f where organization_id = $1 and status = 'open'
+          and (f.outlet_id is null or exists (select 1 from stock.outlet_stock_settings o where o.outlet_id=f.outlet_id and o.tracking_enabled))
+          and (f.warehouse_id is null or exists (select 1 from stock.warehouses w where w.id=f.warehouse_id and w.is_active))`,
       [organizationId],
     );
     const wastage = await client.query<{ n: string }>(
-      `select count(*) as n from stock.wastage_events
-        where organization_id = $1 and occurred_at >= now() - interval '30 days'`,
+      `select count(*) as n from stock.wastage_events e
+        where organization_id = $1 and occurred_at >= now() - interval '30 days'
+          and exists (select 1 from stock.stock_locations l where l.id=e.stock_location_id and l.is_active)`,
       [organizationId],
     );
     const outlets = await client.query<{ n: string }>(
@@ -418,7 +424,8 @@ export async function getCentralOversight(
       [organizationId],
     );
     const recalls = await client.query<{ n: string }>(
-      `select count(*) as n from stock.recalls where organization_id = $1 and status <> 'closed'`,
+      `select count(*) as n from stock.recalls r where organization_id = $1 and status <> 'closed'
+          and exists (select 1 from stock.items i where i.id=r.item_id and i.is_active)`,
       [organizationId],
     );
     return {

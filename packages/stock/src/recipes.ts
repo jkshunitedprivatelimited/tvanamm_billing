@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { publishRecipeVersionSchema } from '@jksh/contracts';
 import { withStockActorContext, stockSystemContext, type StockPool } from '@jksh/db';
 import { ensureStockAllowed, stockContextForActor, type StockActor } from './authorize';
 import { StockError } from './errors';
@@ -153,16 +154,36 @@ export async function publishRecipeVersion(
   cmd: PublishRecipeVersionCommand,
 ): Promise<{ recipeId: string; version: number }> {
   ensureStockAllowed(actor, 'stock.recipe.manage');
-  if (cmd.components.length === 0) {
-    throw new StockError('validation', 'A recipe version needs at least one component');
-  }
+  const validation = publishRecipeVersionSchema.safeParse(cmd);
+  if (!validation.success)
+    throw new StockError(
+      'validation',
+      validation.error.issues[0]?.message ?? 'Invalid recipe measurements',
+    );
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
     const recipe = await client.query<{ current_version: number; organization_id: string }>(
-      'select current_version, organization_id from stock.recipes where id = $1',
+      'select current_version, organization_id from stock.recipes where id = $1 for update',
       [recipeId],
     );
     const r = recipe.rows[0];
     if (!r) throw new StockError('not_found', 'Recipe not found');
+    if (r.organization_id !== actor.organizationId)
+      throw new StockError('forbidden', 'Recipe is outside your organization');
+    const itemIds = [
+      ...new Set([
+        ...cmd.components.map((c) => c.itemId),
+        ...(cmd.preparedBaseItemId ? [cmd.preparedBaseItemId] : []),
+      ]),
+    ];
+    const validItems = await client.query(
+      'select id from stock.items where id = any($1::uuid[]) and organization_id = $2 and is_active for share',
+      [itemIds, r.organization_id],
+    );
+    if (validItems.rows.length !== itemIds.length)
+      throw new StockError(
+        'validation',
+        'Every ingredient must be an active item in this organization',
+      );
     const version = r.current_version + 1;
 
     const checksum = createHash('sha256')

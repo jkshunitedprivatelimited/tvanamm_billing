@@ -19,7 +19,8 @@
     "react-dom": "^19.0.0",
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.10",
-    "@jksh/ui": "*"
+    "@jksh/ui": "*",
+    "@jksh/stock": "*"
   },
   "devDependencies": {
     "@types/react": "^19.0.7",

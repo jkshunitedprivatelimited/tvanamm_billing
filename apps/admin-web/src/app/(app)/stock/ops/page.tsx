@@ -5,6 +5,16 @@ export const dynamic = 'force-dynamic';
 
 const SECTIONS = [
   {
+    href: '/stock/ops/sop',
+    title: 'SOP review & measurements',
+    blurb: 'Review revised serving standards and resolve measurement gaps by category.',
+  },
+  {
+    href: '/stock/ops/catalog',
+    title: 'Items & supply catalogue',
+    blurb: 'Manage materials, packaging, order packs and owner prices.',
+  },
+  {
     href: '/stock/ops/warehouses',
     title: 'Warehouses',
     blurb: 'Warehouses and their stock locations.',
@@ -17,16 +27,16 @@ const SECTIONS = [
   {
     href: '/stock/ops/purchase-orders',
     title: 'Purchase orders',
-    blurb: 'Raise POs, walk them to ordered, and receive shipments into stock.',
+    blurb: 'Order supplies from vendors and record deliveries into stock.',
   },
   {
     href: '/stock/ops/recipes',
     title: 'Recipes',
-    blurb: 'Author recipes, publish immutable versions, link to Billing.',
+    blurb: 'Set ingredient quantities and serving sizes for accurate stock use.',
   },
   {
     href: '/stock/ops/fulfilment',
-    title: 'Fulfilment queue',
+    title: 'Outlet deliveries',
     blurb: 'Approve, allocate and dispatch paid outlet orders.',
   },
   {
@@ -37,7 +47,7 @@ const SECTIONS = [
   {
     href: '/stock/ops/integration',
     title: 'Billing integration',
-    blurb: 'Queue depth, reconciliation and dead-letter recovery for sale events.',
+    blurb: 'Check that completed sales update stock and review failed updates.',
   },
 ];
 
@@ -46,7 +56,7 @@ export default async function StockOpsHubPage() {
   if (actor.role !== 'central_admin') {
     return (
       <main>
-        <h1>Stock operations</h1>
+        <h1>Supply operations</h1>
         <div className="card">
           <p className="muted">This workspace is operated by Central.</p>
         </div>
@@ -56,10 +66,9 @@ export default async function StockOpsHubPage() {
 
   return (
     <main>
-      <h1>Stock operations</h1>
+      <h1>Supply operations</h1>
       <p className="page-intro">
-        Central-run warehouse and supply desk — master data, procurement, recipes, order fulfilment
-        and recalls for every TVANAMM outlet.
+        Manage supplies, purchases, outlet deliveries and recipe standards across your outlets.
       </p>
       <div className="grid">
         {SECTIONS.map((s) => (

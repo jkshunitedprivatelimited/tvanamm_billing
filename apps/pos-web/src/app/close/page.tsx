@@ -1,7 +1,6 @@
-import { getOperatorSummary, getOpenCashSession, listOpenShifts } from '@jksh/identity';
+import { getOperatorSummary, getOpenCashSession, listExpenses } from '@jksh/identity';
 import { requireOperator } from '@/server/auth';
 import { db } from '@/server/pool';
-import { SessionControls } from '../session-controls';
 import { CloseRegister } from './close-client';
 
 export default async function ClosePage() {
@@ -9,8 +8,10 @@ export default async function ClosePage() {
   const pool = db();
   const me = await getOperatorSummary(pool, actor);
   const cashSession = actor.outletId ? await getOpenCashSession(pool, actor, actor.outletId) : null;
-  const shifts = actor.outletId ? await listOpenShifts(pool, actor, actor.outletId) : [];
-  const myShift = shifts.find((s) => s.employeeId === actor.employeeId) ?? null;
+
+  const expenses = actor.outletId
+    ? await listExpenses(pool, actor, { outletId: actor.outletId, currentEmployeeShiftOnly: true })
+    : [];
 
   return (
     <main className="pos">
@@ -18,10 +19,16 @@ export default async function ClosePage() {
       <p className="muted">Signed in as {me?.employeeName ?? 'operator'}</p>
       <a href="/pos">&larr; Back to billing</a>
       <div className="panel" style={{ margin: '20px 0', width: 'auto' }}>
-        <CloseRegister cashSession={cashSession} myShiftId={myShift?.id ?? null} />
+        <CloseRegister cashSession={cashSession} expenses={expenses} />
       </div>
-      <h2 style={{ fontSize: 15 }}>Terminal</h2>
-      <SessionControls />
+      <div className="row" style={{ gap: 16, marginTop: 16 }}>
+        <a href="/expenses" className="link-btn">
+          Record an expense
+        </a>
+        <a href="/pos/printer" className="link-btn">
+          Printer settings
+        </a>
+      </div>
     </main>
   );
 }

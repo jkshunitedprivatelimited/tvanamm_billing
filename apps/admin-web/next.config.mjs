@@ -15,6 +15,8 @@ const securityHeaders = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // Production checks must not overwrite the running dev server's assets.
+  distDir: isProd ? '.next-production' : '.next',
   agentRules: false,
   transpilePackages: ['@jksh/config', '@jksh/contracts', '@jksh/db', '@jksh/identity'],
   serverExternalPackages: ['pg', '@node-rs/argon2'],

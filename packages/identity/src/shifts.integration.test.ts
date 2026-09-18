@@ -12,10 +12,12 @@ import { migrate } from '@jksh/db/migrate';
 import type { ActorContext } from '@jksh/contracts';
 import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth';
 import { issueActivationCode, registerTerminal } from './terminal';
+import { checkIn, getOwnOpenAttendance } from './attendance';
 import { createEmployee } from './employee';
 import { pinLogin, loadOperatorContext } from './store-auth';
 import {
   openCashSession,
+  finishWork,
   closeCashSession,
   getOpenCashSession,
   startShift,
@@ -139,6 +141,7 @@ describe.skipIf(!RUN)('Billing V1 Stage 2 - shifts + cash session', () => {
 
   afterAll(async () => {
     try {
+      await pool.query(`delete from identity.attendance_sessions where outlet_id = $1`, [outletId]);
       await pool.query(`delete from billing.cash_sessions where outlet_id = $1`, [outletId]);
       await pool.query(`delete from billing.employee_shifts where outlet_id = $1`, [outletId]);
       await pool.query(`delete from identity.operator_sessions where outlet_id = $1`, [outletId]);
@@ -182,7 +185,9 @@ describe.skipIf(!RUN)('Billing V1 Stage 2 - shifts + cash session', () => {
 
   it('allows multiple open employee shifts, resuming rather than duplicating', async () => {
     const a = await loginAs(pinA);
-    const s1 = await startShift(pool, a, {});
+    const shifts = await Promise.all(Array.from({ length: 8 }, () => startShift(pool, a, {})));
+    const s1 = shifts[0]!;
+    expect(new Set(shifts.map((shift) => shift.id)).size).toBe(1);
     const s1again = await startShift(pool, a, {});
     expect(s1again.id).toBe(s1.id); // resume, not a new shift
     const b = await loginAs(pinB);
@@ -240,6 +245,53 @@ describe.skipIf(!RUN)('Billing V1 Stage 2 - shifts + cash session', () => {
       /Denied|row-level security|not found/,
     );
     await endShift(pool, await loginAs(pinA), s2.id);
+  });
+
+  it('finishes only my shift and attendance while keeping the shared register open', async () => {
+    const a = await loginAs(pinA);
+    const cash = await openCashSession(pool, a, { openingCash: '500.00' });
+    const mine = await startShift(pool, a, {});
+    await checkIn(pool, a, {});
+    const b = await loginAs(pinB);
+    const colleague = await startShift(pool, b, {});
+    await checkIn(pool, b, {});
+    const current = await loginAs(pinA);
+    expect(await finishWork(pool, current)).toEqual({ cashSession: null });
+    expect(await getOwnOpenAttendance(pool, current)).toBeNull();
+    const open = await listOpenShifts(pool, current, outletId);
+    expect(open.some((shift) => shift.id === mine.id)).toBe(false);
+    expect(open.some((shift) => shift.id === colleague.id)).toBe(true);
+    expect((await getOpenCashSession(pool, current, outletId))?.id).toBe(cash.id);
+    await expect(finishWork(pool, current)).resolves.toEqual({ cashSession: null });
+    const coworker = await loginAs(pinB);
+    expect(await getOwnOpenAttendance(pool, coworker)).not.toBeNull();
+    await finishWork(pool, coworker);
+  });
+
+  it('closes the register and my work together, rolling back when cash validation fails', async () => {
+    const a = await loginAs(pinA);
+    const cash = (await getOpenCashSession(pool, a, outletId))!;
+    const shift = await startShift(pool, a, {});
+    await checkIn(pool, a, {});
+    await expect(
+      finishWork(pool, a, { sessionId: cash.id, command: { countedCash: '400.00' } }),
+    ).rejects.toThrow(/reason is required/);
+    expect(await getOwnOpenAttendance(pool, a)).not.toBeNull();
+    expect((await listOpenShifts(pool, a, outletId)).some((row) => row.id === shift.id)).toBe(true);
+    expect((await getOpenCashSession(pool, a, outletId))?.id).toBe(cash.id);
+    const result = await finishWork(pool, a, {
+      sessionId: cash.id,
+      command: { countedCash: '500.00' },
+    });
+    expect(result.cashSession?.status).toBe('closed');
+    expect(await getOpenCashSession(pool, a, outletId)).toBeNull();
+    expect(await getOwnOpenAttendance(pool, a)).toBeNull();
+    expect(await listOpenShifts(pool, a, outletId)).toHaveLength(0);
+    const retry = await finishWork(pool, a, {
+      sessionId: cash.id,
+      command: { countedCash: '500.00' },
+    });
+    expect(retry.cashSession?.id).toBe(cash.id);
   });
 
   it('blocks billing while a prior business-date shift or cash session is still open', async () => {

@@ -6,11 +6,16 @@
 - TVANAMM and T Leaf are brands under JKSH.
 - Billing is enabled for TVANAMM first.
 - An outlet is either `jksh_owned` or `franchise_owned`.
+- Every outlet has exactly one immutable primary brand after creation. Changing
+  primary brand requires a controlled migration/new outlet rather than rewriting
+  historical bills, receipts, menus, recipes, or Stock scope.
 - JKSH/Central has its own operational outlet in addition to customer franchise
   outlets.
 - Only Central Admin can create an outlet.
 - Franchise Owners can own and access multiple assigned outlets but cannot create
   them.
+- One owner account may hold outlet memberships across multiple JKSH brands; each
+  outlet card shows its brand clearly.
 - Accountant has financial access across every JKSH-owned and franchise-owned
   outlet.
 - JKSH-owned outlet employees use the same Store Employee ID, four-digit PIN,

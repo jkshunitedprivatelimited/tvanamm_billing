@@ -9,11 +9,16 @@ export async function POST(request: Request) {
   try {
     const actor = await currentOperator();
     if (!actor?.outletId) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
-    const cmd = recordExpenseCommandSchema.parse({
+    const parsed = recordExpenseCommandSchema.safeParse({
       ...(await request.json()),
       outletId: actor.outletId,
     });
-    return NextResponse.json(await recordExpense(db(), actor, cmd, requestMeta(request)));
+    if (!parsed.success)
+      return NextResponse.json(
+        { message: 'Enter a valid amount, category and reason for this expense.' },
+        { status: 400 },
+      );
+    return NextResponse.json(await recordExpense(db(), actor, parsed.data, requestMeta(request)));
   } catch (error) {
     return jsonError(error);
   }

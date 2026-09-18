@@ -8,6 +8,8 @@
 begin;
 
 truncate
+  audit.events,
+  outbox.events,
   billing.addon_groups,
   billing.addons,
   billing.bill_discounts,
@@ -47,6 +49,7 @@ truncate
   billing.receipt_sequences,
   billing.refund_lines,
   billing.refunds,
+  billing.retention_exports,
   billing.tax_profiles,
   identity.account_profiles,
   identity.activation_attempts,

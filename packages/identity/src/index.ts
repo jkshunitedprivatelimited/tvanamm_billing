@@ -122,13 +122,16 @@ export {
   pauseOutletItem,
   linkStockRecipe,
   listMasterMenu,
+  listOutletMenuForPricing,
   type LinkStockRecipeCommand,
   type MasterMenuView,
+  type OutletMenuPricingView,
 } from './catalog';
 export { createTaxProfile, updateTaxProfile, listTaxProfiles } from './tax-profile';
 export { createCombo, updateCombo } from './combo';
 export {
   checkIn,
+  getOwnOpenAttendance,
   checkOut,
   correctAttendance,
   setOutletSchedule,
@@ -140,6 +143,7 @@ export {
   reviewExpense,
   createExpenseCategory,
   setExpenseThreshold,
+  getExpenseThreshold,
   listExpenses,
   getExpenseReport,
 } from './expense';
@@ -167,6 +171,7 @@ export {
 export {
   openCashSession,
   closeCashSession,
+  finishWork,
   getOpenCashSession,
   startShift,
   endShift,
@@ -198,10 +203,20 @@ export { createRefund, listRefunds } from './refunds';
 export { recordPrintAttempt, getReceiptSnapshot } from './receipts';
 export {
   getFinancialReport,
+  getRefundReasonBreakdown,
+  getDiscountReasonBreakdown,
+  getEmployeeSalesBreakdown,
+  getTopSellingItems,
+  listCashSessionsForRange,
   resolveDateRange,
   type ReportRange,
   type ReportRangeKind,
+  type ReportFilter,
   type FinancialSummary,
+  type ReasonBreakdown,
+  type EmployeeSalesRow,
+  type TopItemRow,
+  type CashSessionRow,
 } from './reports';
 export {
   getRetentionStatus,
@@ -220,6 +235,8 @@ export {
 } from './audit-read';
 export {
   pinLogin,
+  recordStaffAttendance,
+  listOutletStaff,
   loadOperatorContext,
   lockOperator,
   endOperatorSession,
@@ -228,3 +245,10 @@ export {
   type PinLoginOutput,
   type OperatorSummary,
 } from './store-auth';
+export * from './stock-notifications';
+export {
+  inviteOutletOwner,
+  listOutletOnboarding,
+  submitOutletOnboarding,
+  approveOutletOnboarding,
+} from './onboarding';

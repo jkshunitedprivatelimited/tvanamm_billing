@@ -11,9 +11,15 @@ import type { ActorContext } from '@jksh/contracts';
 import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth';
 import { issueActivationCode, registerTerminal } from './terminal';
 import { createEmployee } from './employee';
-import { pinLogin, loadOperatorContext } from './store-auth';
+import {
+  pinLogin,
+  loadOperatorContext,
+  recordStaffAttendance,
+  listOutletStaff,
+} from './store-auth';
 import {
   checkIn,
+  getOwnOpenAttendance,
   checkOut,
   correctAttendance,
   setOutletSchedule,
@@ -159,15 +165,85 @@ describe.skipIf(!RUN)('Workforce attendance', () => {
 
   it('checks in, rejects a duplicate check-in, then checks out', async () => {
     const op = await operator();
+    expect(await getOwnOpenAttendance(pool, op)).toBeNull();
     const { id } = await checkIn(pool, op, {});
     expect(id).toBeTruthy();
+    expect(await getOwnOpenAttendance(pool, op)).toEqual({
+      id,
+      checkedInAt: expect.any(String),
+    });
+    expect(await getOwnOpenAttendance(pool, { ...op, employeeId: randomUUID() })).toBeNull();
     await expect(checkIn(pool, op, {})).rejects.toThrow(/already_checked_in|Already checked in/);
     await checkOut(pool, op, {});
+    expect(await getOwnOpenAttendance(pool, op)).toBeNull();
     // A fresh check-in is allowed once the previous session is closed.
     const second = await checkIn(pool, op, {});
     expect(second.id).not.toBe(id);
     await checkOut(pool, op, {});
   }, 30_000);
+
+  it('records a colleague attendance with their PIN without switching the cashier', async () => {
+    const login = await pinLogin(pool, { terminalCredential, pin });
+    const cashier = (await loadOperatorContext(pool, login.operatorToken))!;
+    const owner = await adminActor(ownerPhone);
+    const colleaguePin = pin === '8264' ? '8265' : '8264';
+    await createEmployee(pool, owner, {
+      outletId,
+      fullName: 'Kitchen colleague',
+      mobile: '+9186' + S.slice(-8).padStart(8, '0'),
+      initialPin: colleaguePin,
+    });
+    const colleague = (await listOutletStaff(pool, cashier)).find(
+      (person) => person.name === 'Kitchen colleague',
+    )!;
+    expect(colleague.checkedIn).toBe(false);
+    await recordStaffAttendance(pool, cashier, {
+      terminalCredential,
+      pin: colleaguePin,
+      employeeId: colleague.id,
+      action: 'check-in',
+    });
+    expect(
+      (await listOutletStaff(pool, cashier)).find((person) => person.id === colleague.id)
+        ?.checkedIn,
+    ).toBe(true);
+    expect((await loadOperatorContext(pool, login.operatorToken))?.employeeId).toBe(
+      cashier.employeeId,
+    );
+    expect(await getOwnOpenAttendance(pool, cashier)).toBeNull();
+    await recordStaffAttendance(pool, cashier, {
+      terminalCredential,
+      pin: colleaguePin,
+      employeeId: colleague.id,
+      action: 'check-out',
+    });
+    expect(
+      (await listOutletStaff(pool, cashier)).find((person) => person.id === colleague.id)
+        ?.checkedIn,
+    ).toBe(false);
+    await expect(
+      recordStaffAttendance(pool, cashier, {
+        terminalCredential,
+        pin,
+        employeeId: colleague.id,
+        action: 'check-in',
+      }),
+    ).rejects.toThrow(/PIN could not/);
+    expect(
+      (await listOutletStaff(pool, cashier)).find((person) => person.id === colleague.id)
+        ?.checkedIn,
+    ).toBe(false);
+    await expect(
+      recordStaffAttendance(
+        pool,
+        { ...cashier, outletId: randomUUID() },
+        { terminalCredential, pin: colleaguePin, employeeId: colleague.id, action: 'check-in' },
+      ),
+    ).rejects.toThrow(/PIN could not/);
+    expect((await loadOperatorContext(pool, login.operatorToken))?.employeeId).toBe(
+      cashier.employeeId,
+    );
+  });
 
   it('flags a session left open from a previous business day as missing_checkout, and applies late/grace correctly', async () => {
     const owner = await adminActor(ownerPhone);

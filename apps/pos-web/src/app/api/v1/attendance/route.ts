@@ -1,9 +1,19 @@
 import { NextResponse } from 'next/server';
 import { checkInCommandSchema } from '@jksh/contracts';
-import { checkIn } from '@jksh/identity';
+import { checkIn, getOwnOpenAttendance } from '@jksh/identity';
 import { db } from '@/server/pool';
 import { jsonError, requestMeta } from '@/server/http';
 import { currentOperator } from '@/server/auth';
+
+export async function GET() {
+  try {
+    const actor = await currentOperator();
+    if (!actor) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+    return NextResponse.json({ session: await getOwnOpenAttendance(db(), actor) });
+  } catch (error) {
+    return jsonError(error);
+  }
+}
 
 export async function POST(request: Request) {
   try {

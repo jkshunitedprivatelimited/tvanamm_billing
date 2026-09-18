@@ -72,7 +72,13 @@ Constraints:
 
 - GST-inclusive decimal prices only;
 - no product variants in V1;
+- Central recommended prices with Franchise Owner final GST-inclusive prices by
+  selected outlet(s);
+- Central-approved GST/HSN profiles for outlet-created items;
 - add-on min/max/required rules validated in DB/API;
+- free, fixed-price, and included add-ons;
+- Central- or Franchise-created combos composed from existing sale items, with
+  proportional value/tax allocation and no duplicate recipe;
 - outlet-owned items cannot leak to another outlet/franchise;
 - live POS reads only a complete published outlet menu version;
 - drafts cannot become visible without explicit publication.
@@ -83,7 +89,8 @@ Constraints:
 - Franchise Owner CRUD for selected-outlet private items and allowed overrides.
 - Preview publication changes and affected outlets.
 - Publish Central changes to all or selected outlets.
-- Publish Franchise Owner changes only to the selected outlet.
+- Publish Franchise Owner changes only to explicitly selected owned outlet(s),
+  never implicitly to every outlet they own.
 - Retry failed publication targets idempotently.
 - Copy an outlet item to a new Central master draft.
 - Fetch compact POS menu snapshot/diff by version.
@@ -97,6 +104,8 @@ Constraints:
 - Central force-overwrite selections shown field by field; preserve outlet
   overrides by default.
 - Availability and `Out of stock` management.
+- Employee active-outlet pause, owner scoped pause, and Central global oversight;
+  ingredient shortage warns but does not automatically pause an item.
 
 ### Tests
 
@@ -116,6 +125,8 @@ Add:
 
 - employee shifts;
 - shared outlet cash sessions;
+- immutable outlet expenses with payment source, review, reversal, and optional
+  evidence;
 - optional denomination counts;
 - force-close metadata and linked adjustments;
 - indexes for outlet/business-date/open-state queries.
@@ -128,6 +139,9 @@ Rules:
 - only one open cash session per outlet;
 - first authorized employee opens it and enters opening cash;
 - any logged-in employee may close it with counted cash;
+- a shared-drawer expense reduces expected Cash immediately and remains
+  highlighted for owner review; other expense payment sources do not affect the
+  drawer;
 - non-zero variance requires a reason;
 - closing employee is recorded permanently;
 - closed shifts/cash sessions cannot be edited or reopened;
@@ -170,6 +184,8 @@ Rules:
 - Cash or UPI as one payment method per positive-total bill;
 - no split payment, credit, dynamic QR, or payment-gateway claim;
 - complimentary confirmation for a zero-total bill.
+- hold/resume multiple unpaid same-day carts, retaining creator history and
+  automatically discarding at outlet business-day end without creating a bill.
 
 ### Authoritative calculation
 
@@ -430,7 +446,8 @@ unavailable using the last approved cached contract.
 - Verify secret rotation and incident procedure.
 - Test supported tablet/browser/printer combinations at a real TVANAMM outlet.
 - Pilot with test data, then controlled real transactions.
-- Obtain explicit JKSH approval before calling the scope Billing V1 frozen.
+- Obtain explicit JKSH approval before locking a specific Billing V1 release
+  candidate; keep later roadmap planning open.
 
 ## Required CI Gates
 

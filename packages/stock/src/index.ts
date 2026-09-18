@@ -154,6 +154,7 @@ export {
   dispatchStockOrder,
   recordOutletInward,
   resolveDiscrepancy,
+  closeStockOrder,
   getDispatch,
   type GstInvoice,
   type GstInvoiceLine,
@@ -212,13 +213,38 @@ export {
   listRecalls,
   listOrdersForFulfilment,
   getPurchaseOrder,
+  listLocalInwardsForOutlet,
+  listDiscrepanciesForOutlet,
+  getOutletSellableLocation,
+  listStockCountsForOutlet,
+  listCountLines,
+  listWastageForOutlet,
+  listOrdersAwaitingClose,
   type WarehouseRow,
   type SupplierRow,
   type RecipeRow,
   type RecallRow,
   type FulfilmentOrderRow,
   type PurchaseOrderDetail,
+  type LocalInwardRow,
+  type DiscrepancyRow,
+  type StockCountRow,
+  type CountLineRow,
+  type WastageRow,
+  type CloseableOrderRow,
 } from './reads';
+export {
+  requestReturn,
+  decideReturn,
+  collectReturn,
+  receiveReturn,
+  resolveReturn,
+  listOwnerReturns,
+  type RequestReturnCommand,
+  type DecideReturnCommand,
+  type ResolveReturnCommand,
+  type OwnerReturnRow,
+} from './returns';
 export {
   createSupplier,
   approveSupplier,
@@ -242,3 +268,16 @@ export {
   type RecordSupplierPaymentCommand,
   type InitiateSupplierReturnCommand,
 } from './procurement';
+export * from './low-stock';
+
+export { listOutletOrders } from './reads';
+export { listPendingDeliveries, type PendingDelivery } from './reads';
+export { listSupplyCatalogForCentral } from './reads';
+export { saveOpeningStock } from './opening-stock';
+export {
+  employeeStockEntrySchema,
+  recordEmployeeStockEntry,
+  listEmployeeStockEntries,
+  type EmployeeStockEntry,
+  type EntryExpense,
+} from './employee-entry';

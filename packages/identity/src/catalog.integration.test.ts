@@ -8,7 +8,12 @@ import { createPool, type Pool } from '@jksh/db';
 import { migrate } from '@jksh/db/migrate';
 import type { ActorContext } from '@jksh/contracts';
 import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth';
-import { createCatalogItem, updateCatalogItem, upsertOutletItemOverride } from './catalog';
+import {
+  createCatalogItem,
+  updateCatalogItem,
+  upsertOutletItemOverride,
+  listOutletMenuForPricing,
+} from './catalog';
 import {
   createAndApplyPublication,
   getPublishedMenu,
@@ -428,5 +433,77 @@ describe.skipIf(!RUN)('Billing V1 Stage 1 - catalog + publication', () => {
         gstRate: '18',
       }),
     ).rejects.toThrow(/Denied/);
+  });
+  it('shows outlet names, publishes removal/restoration only to that outlet and keeps master history', async () => {
+    const admin = await actorFor(adminPhone);
+    const ownerA = await actorFor(ownerAPhone);
+    const ownerB = await actorFor(ownerBPhone);
+    const item = await createCatalogItem(pool, admin, {
+      brandId: brand,
+      name: `Scoped Tea ${S}`,
+      price: '25.00',
+      gstRate: '5',
+      isAvailable: true,
+      offlineSaleAllowed: true,
+      addonGroupIds: [],
+    });
+    await createAndApplyPublication(pool, admin, {
+      brandId: brand,
+      scope: 'master',
+      overwritePrice: false,
+      forcedFields: [],
+      notes: `stage1-${S}`,
+    });
+    const old = await getPublishedMenu(pool, admin, outletA);
+    await upsertOutletItemOverride(pool, ownerA, {
+      outletId: outletA,
+      catalogItemId: item.id,
+      name: `Owner Tea ${S}`,
+      price: '30.00',
+      isAvailable: false,
+    });
+    const own = (await listOutletMenuForPricing(pool, ownerA, outletA)).items.find(
+      (i) => i.catalogItemId === item.id,
+    );
+    expect(own?.name).toBe(`Owner Tea ${S}`);
+    expect(own?.outletIsAvailable).toBe(false);
+    const other = (await listOutletMenuForPricing(pool, ownerB, outletB)).items.find(
+      (i) => i.catalogItemId === item.id,
+    );
+    expect(other?.name).toBe(`Scoped Tea ${S}`);
+    expect(other?.outletPrice).toBeNull();
+    await expect(
+      upsertOutletItemOverride(pool, ownerA, {
+        outletId: outletB,
+        catalogItemId: item.id,
+        name: 'Not allowed',
+      }),
+    ).rejects.toThrow();
+    await createAndApplyPublication(pool, ownerA, {
+      brandId: brand,
+      scope: 'outlet',
+      originOutletId: outletA,
+      overwritePrice: false,
+      forcedFields: [],
+      notes: `stage1-${S}`,
+    });
+    const menu = await getPublishedMenu(pool, admin, outletA);
+    expect(menu?.items.find((i) => i.catalogItemId === item.id)?.isAvailable).toBe(false);
+    expect(menu?.items.find((i) => i.catalogItemId === item.id)?.name).toBe(`Owner Tea ${S}`);
+    expect(old?.items.find((i) => i.catalogItemId === item.id)?.name).toBe(`Scoped Tea ${S}`);
+    expect(
+      (await getPublishedMenu(pool, admin, outletB))?.items.find((i) => i.catalogItemId === item.id)
+        ?.isAvailable,
+    ).toBe(true);
+    await upsertOutletItemOverride(pool, ownerA, {
+      outletId: outletA,
+      catalogItemId: item.id,
+      isAvailable: true,
+    });
+    expect(
+      (await listOutletMenuForPricing(pool, ownerA, outletA)).items.find(
+        (i) => i.catalogItemId === item.id,
+      )?.outletIsAvailable,
+    ).toBe(true);
   });
 });

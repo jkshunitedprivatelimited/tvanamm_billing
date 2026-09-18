@@ -10,6 +10,7 @@ import type {
   ShiftSummary,
   StartShiftCommand,
 } from '@jksh/contracts';
+import { recordVerifiedStaffAttendance } from './attendance';
 import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 import { recordAudit } from './audit';
@@ -153,64 +154,74 @@ export async function closeCashSession(
   cmd: CloseCashSessionCommand,
   meta: RequestMeta = {},
 ): Promise<CashSessionSummary> {
+  return withActorContext(pool, contextForActor(actor), (client) =>
+    closeCashSessionWithClient(client, actor, cashSessionId, cmd, meta),
+  );
+}
+
+async function closeCashSessionWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  cashSessionId: string,
+  cmd: CloseCashSessionCommand,
+  meta: RequestMeta = {},
+): Promise<CashSessionSummary> {
   const employeeId = operatorEmployeeId(actor);
-  return withActorContext(pool, contextForActor(actor), async (client) => {
-    const { rows } = await client.query<{
-      outlet_id: string;
-      organization_id: string;
-      franchise_id: string | null;
-      status: string;
-    }>(
-      `select outlet_id, organization_id, franchise_id, status
+  const { rows } = await client.query<{
+    outlet_id: string;
+    organization_id: string;
+    franchise_id: string | null;
+    status: string;
+  }>(
+    `select outlet_id, organization_id, franchise_id, status
          from billing.cash_sessions where id = $1 for update`,
-      [cashSessionId],
-    );
-    const session = rows[0];
-    if (!session) throw new IdentityError('not_found', 'Cash session not found');
-    ensureAllowed(actor, 'billing.cash_session.close', {
-      organizationId: session.organization_id,
-      ...(session.franchise_id ? { franchiseId: session.franchise_id } : {}),
-      outletId: session.outlet_id,
-    });
-    if (session.status !== 'open') {
-      throw new IdentityError('conflict', 'Cash session is already closed');
-    }
+    [cashSessionId],
+  );
+  const session = rows[0];
+  if (!session) throw new IdentityError('not_found', 'Cash session not found');
+  ensureAllowed(actor, 'billing.cash_session.close', {
+    organizationId: session.organization_id,
+    ...(session.franchise_id ? { franchiseId: session.franchise_id } : {}),
+    outletId: session.outlet_id,
+  });
+  if (session.status !== 'open') {
+    throw new IdentityError('conflict', 'Cash session is already closed');
+  }
 
-    const expected = await expectedCashFor(client, cashSessionId);
-    const variance = (Number(cmd.countedCash) - Number(expected)).toFixed(2);
-    if (Number(variance) !== 0 && !cmd.varianceReason) {
-      throw new IdentityError('validation', 'A reason is required for a non-zero cash variance');
-    }
+  const expected = await expectedCashFor(client, cashSessionId);
+  const variance = (Number(cmd.countedCash) - Number(expected)).toFixed(2);
+  if (Number(variance) !== 0 && !cmd.varianceReason) {
+    throw new IdentityError('validation', 'A reason is required for a non-zero cash variance');
+  }
 
-    await client.query(
-      `update billing.cash_sessions
+  await client.query(
+    `update billing.cash_sessions
           set status = 'closed', closed_by_employee_id = $2, closed_by_name = $3, closed_at = now(),
               counted_cash = $4, expected_cash = $5, variance = $6,
               variance_reason = $7, denominations = coalesce($8, denominations)
         where id = $1`,
-      [
-        cashSessionId,
-        employeeId,
-        await employeeName(client, employeeId),
-        cmd.countedCash,
-        expected,
-        variance,
-        cmd.varianceReason ?? null,
-        cmd.denominations ? JSON.stringify(cmd.denominations) : null,
-      ],
-    );
-    await recordAudit(client, {
-      action: 'cash_session.closed',
-      result: 'success',
-      actorEmployeeId: employeeId,
-      organizationId: session.organization_id,
-      franchiseId: session.franchise_id,
-      outletId: session.outlet_id,
-      correlationId: meta.correlationId ?? randomUUID(),
-      metadata: { cashSessionId, variance, hasReason: !!cmd.varianceReason },
-    });
-    return loadCashSession(client, cashSessionId);
+    [
+      cashSessionId,
+      employeeId,
+      await employeeName(client, employeeId),
+      cmd.countedCash,
+      expected,
+      variance,
+      cmd.varianceReason ?? null,
+      cmd.denominations ? JSON.stringify(cmd.denominations) : null,
+    ],
+  );
+  await recordAudit(client, {
+    action: 'cash_session.closed',
+    result: 'success',
+    actorEmployeeId: employeeId,
+    organizationId: session.organization_id,
+    franchiseId: session.franchise_id,
+    outletId: session.outlet_id,
+    correlationId: meta.correlationId ?? randomUUID(),
+    metadata: { cashSessionId, variance, hasReason: !!cmd.varianceReason },
   });
+  return loadCashSession(client, cashSessionId);
 }
 
 async function loadCashSession(
@@ -295,6 +306,11 @@ export async function startShift(
 
   return withActorContext(pool, contextForActor(actor), async (client) => {
     const outlet = await outletContext(client, outletId);
+    // Concurrent page renders must serialize the check-and-create for this employee.
+    // The transaction releases this lock after the new shift and audit are committed.
+    await client.query(`select pg_advisory_xact_lock(hashtextextended($1, 0))`, [
+      `employee-shift:${employeeId}`,
+    ]);
     // Resume an already-open shift instead of creating a second one.
     const open = await client.query<{ id: string }>(
       `select id from billing.employee_shifts where employee_id = $1 and status = 'open'`,
@@ -340,45 +356,54 @@ export async function endShift(
   shiftId: string,
   meta: RequestMeta = {},
 ): Promise<ShiftSummary> {
-  const employeeId = operatorEmployeeId(actor);
-  return withActorContext(pool, contextForActor(actor), async (client) => {
-    const { rows } = await client.query<{
-      status: string;
-      outlet_id: string;
-      organization_id: string;
-      franchise_id: string | null;
-      employee_id: string;
-    }>(
-      `select status, outlet_id, organization_id, franchise_id, employee_id
-         from billing.employee_shifts where id = $1 for update`,
-      [shiftId],
-    );
-    const shift = rows[0];
-    if (!shift) throw new IdentityError('not_found', 'Shift not found');
-    ensureAllowed(actor, 'billing.shift.close', {
-      organizationId: shift.organization_id,
-      ...(shift.franchise_id ? { franchiseId: shift.franchise_id } : {}),
-      outletId: shift.outlet_id,
-    });
-    if (shift.status !== 'open') throw new IdentityError('conflict', 'Shift is not open');
+  return withActorContext(pool, contextForActor(actor), (client) =>
+    endShiftWithClient(client, actor, shiftId, meta),
+  );
+}
 
-    await client.query(
-      `update billing.employee_shifts
-          set status = 'ended', ended_at = now(), ended_by_employee_id = $2 where id = $1`,
-      [shiftId, employeeId],
-    );
-    await recordAudit(client, {
-      action: 'shift.ended',
-      result: 'success',
-      actorEmployeeId: employeeId,
-      organizationId: shift.organization_id,
-      franchiseId: shift.franchise_id,
-      outletId: shift.outlet_id,
-      correlationId: meta.correlationId ?? randomUUID(),
-      metadata: { shiftId },
-    });
-    return loadShift(client, shiftId);
+async function endShiftWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  shiftId: string,
+  meta: RequestMeta = {},
+): Promise<ShiftSummary> {
+  const employeeId = operatorEmployeeId(actor);
+  const { rows } = await client.query<{
+    status: string;
+    outlet_id: string;
+    organization_id: string;
+    franchise_id: string | null;
+    employee_id: string;
+  }>(
+    `select status, outlet_id, organization_id, franchise_id, employee_id
+         from billing.employee_shifts where id = $1 for update`,
+    [shiftId],
+  );
+  const shift = rows[0];
+  if (!shift) throw new IdentityError('not_found', 'Shift not found');
+  ensureAllowed(actor, 'billing.shift.close', {
+    organizationId: shift.organization_id,
+    ...(shift.franchise_id ? { franchiseId: shift.franchise_id } : {}),
+    outletId: shift.outlet_id,
   });
+  if (shift.status !== 'open') throw new IdentityError('conflict', 'Shift is not open');
+
+  await client.query(
+    `update billing.employee_shifts
+          set status = 'ended', ended_at = now(), ended_by_employee_id = $2 where id = $1`,
+    [shiftId, employeeId],
+  );
+  await recordAudit(client, {
+    action: 'shift.ended',
+    result: 'success',
+    actorEmployeeId: employeeId,
+    organizationId: shift.organization_id,
+    franchiseId: shift.franchise_id,
+    outletId: shift.outlet_id,
+    correlationId: meta.correlationId ?? randomUUID(),
+    metadata: { shiftId },
+  });
+  return loadShift(client, shiftId);
 }
 
 export async function forceCloseShift(
@@ -513,5 +538,45 @@ export async function outletBillingWindow(
         ? 'stale_shift'
         : null;
     return { outletId, businessDate: today, blocked: reason !== null, reason };
+  });
+}
+
+/** Explicit combined action: the employee chooses Finish, so all records settle together. */
+export async function finishWork(
+  pool: Pool,
+  actor: ActorContext,
+  cash: { sessionId: string; command: CloseCashSessionCommand } | null = null,
+  meta: RequestMeta = {},
+): Promise<{ cashSession: CashSessionSummary | null }> {
+  const employeeId = operatorEmployeeId(actor);
+  if (!actor.outletId) throw new IdentityError('forbidden', 'No outlet in session');
+  return withActorContext(pool, contextForActor(actor), async (client) => {
+    // Serialize retries and starts for this employee.
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `employee-shift:${employeeId}`,
+    ]);
+    let cashSession: CashSessionSummary | null = null;
+    if (cash) {
+      const session = await client.query<{ status: string }>(
+        'select status from billing.cash_sessions where id = $1 and outlet_id = $2 for update',
+        [cash.sessionId, actor.outletId],
+      );
+      if (!session.rows[0]) throw new IdentityError('not_found', 'Cash session not found');
+      cashSession =
+        session.rows[0].status === 'open'
+          ? await closeCashSessionWithClient(client, actor, cash.sessionId, cash.command, meta)
+          : await loadCashSession(client, cash.sessionId);
+    }
+    const shifts = await client.query<{ id: string }>(
+      "select id from billing.employee_shifts where employee_id = $1 and outlet_id = $2 and status = 'open' for update",
+      [employeeId, actor.outletId],
+    );
+    for (const shift of shifts.rows) await endShiftWithClient(client, actor, shift.id, meta);
+    const attendance = await client.query(
+      "select id from identity.attendance_sessions where employee_id = $1 and outlet_id = $2 and status = 'open' for update",
+      [employeeId, actor.outletId],
+    );
+    if (attendance.rowCount) await recordVerifiedStaffAttendance(client, actor, 'check-out', meta);
+    return { cashSession };
   });
 }

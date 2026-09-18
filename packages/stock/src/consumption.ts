@@ -18,12 +18,13 @@ interface InboxRow {
   event_type: string;
   payload: unknown;
   processed_at: string | null;
+  source_occurred_at: string;
   correlation_id: string | null;
 }
 
 async function loadInbox(client: StockPoolClient, sourceEventId: string): Promise<InboxRow> {
   const { rows } = await client.query<InboxRow>(
-    `select id, source_event_id, event_type, payload, processed_at, correlation_id
+    `select id, source_event_id, event_type, payload, processed_at, correlation_id, coalesce(source_occurred_at, received_at) as source_occurred_at
        from stock_inbox.events where source_event_id = $1`,
     [sourceEventId],
   );
@@ -71,6 +72,7 @@ async function consumeRecipeLine(
     locationId: string;
     outletId: string;
     businessDate: string;
+    occurredAt: string;
     saleConsumptionId: string;
     billLineId: string | null;
     catalogItemId: string | null;
@@ -99,9 +101,9 @@ async function consumeRecipeLine(
       batch_id: string | null;
     }>(
       `select id, qty_base_remaining, batch_id from stock.prepared_batches
-        where stock_location_id = $1 and item_id = $2 and qty_base_remaining > 0
+        where stock_location_id = $1 and item_id = $2 and qty_base_remaining > 0 and recorded_at <= $3::timestamptz
         order by recorded_at asc limit 1`,
-      [args.locationId, version.prepared_base_item_id],
+      [args.locationId, version.prepared_base_item_id, args.occurredAt],
     );
     const pb = prep.rows[0];
     if (pb && Number(pb.qty_base_remaining) >= need) {
@@ -155,6 +157,15 @@ async function consumeRecipeLine(
       c.component_type === 'packaging' ||
       (c.component_type === 'alternative' && c.is_default);
     if (!consumed) continue;
+    // Do not invent historical consumption before the first physical stock entry.
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `stock-start:${args.locationId}:${c.item_id}`,
+    ]);
+    const started = await client.query(
+      `select 1 from stock.item_tracking_starts where stock_location_id=$1 and item_id=$2 and started_at <= $3::timestamptz`,
+      [args.locationId, c.item_id, args.occurredAt],
+    );
+    if (!started.rowCount) continue;
 
     const required = Number(c.qty_base) * args.unitsSold * (1 + Number(c.process_loss_pct) / 100);
     const { picks, shortfall } = await pickFefo(
@@ -306,6 +317,7 @@ export async function processSaleCompleted(
             locationId: loc.id,
             outletId: payload.outletId,
             businessDate: payload.businessDate,
+            occurredAt: payload.committedAt ?? inbox.source_occurred_at,
             saleConsumptionId: consumptionId,
             billLineId: line.billLineId,
             catalogItemId: line.catalogItemId,
@@ -323,6 +335,7 @@ export async function processSaleCompleted(
               locationId: loc.id,
               outletId: payload.outletId,
               businessDate: payload.businessDate,
+              occurredAt: payload.committedAt ?? inbox.source_occurred_at,
               saleConsumptionId: consumptionId,
               billLineId: line.billLineId,
               catalogItemId: line.catalogItemId,

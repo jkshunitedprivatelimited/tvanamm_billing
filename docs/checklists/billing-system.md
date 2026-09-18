@@ -22,7 +22,8 @@ and documentation are complete.
 - [x] Confirm Central master-menu edits require an explicit reviewed `Publish to
       outlets` action and are never pushed automatically.
 - [x] Confirm Franchise Owner price/menu edits use Draft, Preview, and explicit
-      Publish for the selected outlet and never alter an open cart.
+      Publish for explicitly selected owned outlet(s) and never alter an open
+      cart. No edit silently updates every owned outlet.
 - [x] Confirm each Store Employee is assigned to exactly one outlet and does not
       select or enter codes for other outlets.
 - [x] Confirm Central Admin may view/manage outlets but cannot create bills.
@@ -123,11 +124,12 @@ Detailed design: `docs/architecture/advanced-login.md`.
 - [x] Confirm Franchise Owner registers a new outlet terminal before employee PIN
       login is enabled.
 - [ ] Implement invitation acceptance without exposing privileged keys.
-- [ ] Implement self-service password reset.
-- [ ] Implement administrator-initiated password reset as an authorized command.
+- [ ] Implement secure self-service mobile-number change and account recovery.
+- [ ] Implement administrator-initiated account recovery as an authorized
+      command without creating a password.
 - [ ] Implement user disable/reactivate commands.
 - [ ] Force active sessions to end when a user is disabled.
-- [ ] Never email plaintext passwords.
+- [ ] Never issue, store, log, email, or return plaintext passwords/PINs.
 - [ ] Add tests proving users cannot modify other users or cross franchises.
 
 ## 2. Repository and Engineering Foundation
@@ -199,7 +201,8 @@ Detailed design: `docs/architecture/advanced-login.md`.
 - [ ] Treat standard menu prices as GST-inclusive.
 - [ ] Allow Franchise Owners to create franchise-owned menu items.
 - [ ] Keep franchise-created items isolated from other franchises.
-- [x] Confirm franchise-created items apply only to the selected outlet.
+- [x] Confirm franchise-created items apply only to explicitly selected owned
+      outlet(s), with no automatic all-outlet publication.
 - [x] Confirm Franchise Owners can override all Central item display, add-on,
       price, and availability fields for owned outlets.
 - [x] Confirm Central can copy a franchise item into a reviewed master-menu draft.
@@ -264,10 +267,13 @@ Detailed design: `docs/architecture/advanced-login.md`.
 - [ ] Never store raw card credentials.
 - [ ] Validate that successful payments equal the bill total.
 - [ ] Define pending, completed, failed, reversed, and refunded states.
-- [ ] Make payment webhooks signature-verified and replay-safe.
-- [ ] Use unique provider transaction IDs.
-- [ ] Reconcile provider payments with internal payments.
-- [ ] Define behavior when payment succeeds but bill confirmation times out.
+- [x] Confirm Store customer UPI has no gateway webhook or provider transaction
+      lifecycle in Billing V1.
+- [ ] Keep the optional UPI reference as operator-recorded metadata, not proof of
+      provider settlement.
+- [ ] Reconcile Cash/UPI from internal bill, payment, shift, and refund records.
+- [ ] Keep Razorpay payment verification, webhooks, replay protection, and
+      timeout reconciliation exclusively in the Stock-order domain.
 
 ## 9. Receipt and Printing
 

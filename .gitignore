@@ -14,3 +14,9 @@ supabase/.temp/
 
 AGENTS.md
 CLAUDE.md
+
+.next-production/
+
+# Local tool settings and deployment links
+.claude/
+.vercel/

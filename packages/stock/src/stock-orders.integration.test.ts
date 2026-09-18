@@ -22,6 +22,7 @@ import {
   submitStockOrderForPayment,
   getStockOrder,
 } from './stock-orders';
+import { listOutletOrders, listSupplyCatalogForCentral } from './reads';
 import { signCheckout, signWebhook, stubRazorpayGateway, type RazorpayPayment } from './razorpay';
 
 const RUN = !!process.env.STOCK_DATABASE_URL;
@@ -98,6 +99,10 @@ describe.skipIf(!RUN)('Stock franchise orders', () => {
   it('prices an order purely from the catalog snapshot', async () => {
     const cat = await getSupplyCatalogForOutlet(pool, owner, OUTLET);
     expect(cat.some((c) => c.id === catalogItemId)).toBe(true);
+    expect((await listSupplyCatalogForCentral(pool, sys)).some((c) => c.pricePaise === 105)).toBe(
+      true,
+    );
+    await expect(listSupplyCatalogForCentral(pool, owner)).rejects.toThrow(/capability/);
 
     const order = await createStockOrder(pool, owner, {
       organizationId: ORG,
@@ -112,6 +117,36 @@ describe.skipIf(!RUN)('Stock franchise orders', () => {
     expect(order.deliveryPaise).toBe(5000);
     expect(order.totalPaise).toBe(15500);
     orderId = order.id;
+  });
+
+  it('retries one order reference safely and rejects a changed basket', async () => {
+    const command = {
+      organizationId: ORG,
+      outletId: OUTLET,
+      franchiseId: FRANCHISE,
+      orderNumber: `SO-RETRY-${S}`,
+      lines: [{ supplyCatalogItemId: catalogItemId, qtyBase: '25' }],
+    };
+    const [first, retry] = await Promise.all([
+      createStockOrder(pool, owner, command),
+      createStockOrder(pool, owner, command),
+    ]);
+    expect(retry).toEqual(first);
+    await expect(
+      createStockOrder(pool, owner, {
+        ...command,
+        lines: [{ supplyCatalogItemId: catalogItemId, qtyBase: '26' }],
+      }),
+    ).rejects.toThrow(/another basket/);
+    const history = await listOutletOrders(pool, owner, OUTLET);
+    expect(history.orders.filter((o) => o.id === first.id)).toHaveLength(1);
+    const detail = await getStockOrder(pool, owner, first.id);
+    expect(detail.outletId).toBe(OUTLET);
+    expect(detail.lines[0]?.itemName).toBe('Paper Cup');
+    expect(detail.lines[0]?.baseUnit).toBe('each');
+    const foreign = { ...owner, franchiseId: '99999999-9999-4999-8999-999999999999' };
+    await expect(listOutletOrders(pool, foreign, OUTLET)).rejects.toThrow();
+    await expect(getStockOrder(pool, foreign, first.id)).rejects.toThrow(/not found/);
   });
 
   it('rejects an order for another franchise', async () => {

@@ -69,6 +69,9 @@ export async function recordExpense(
   });
   const employeeId = actor.kind === 'operator' ? actor.employeeId : undefined;
   const result = await withActorContext(pool, contextForActor(actor), async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `expense:${cmd.outletId}:${cmd.idempotencyKey}`,
+    ]);
     const existing = await client.query<{ id: string }>(
       `select id from billing.outlet_expenses where outlet_id = $1 and idempotency_key = $2`,
       [cmd.outletId, cmd.idempotencyKey],
@@ -86,7 +89,7 @@ export async function recordExpense(
     let cashSessionId: string | null = null;
     if (cmd.paymentSource === 'shared_cash_drawer') {
       const cash = await client.query<{ id: string }>(
-        `select id from billing.cash_sessions where outlet_id = $1 and status = 'open'`,
+        `select id from billing.cash_sessions where outlet_id = $1 and status = 'open' for update`,
         [cmd.outletId],
       );
       if (!cash.rows[0]) {
@@ -328,16 +331,53 @@ export async function setExpenseThreshold(
   });
 }
 
-export async function listExpenses(
+/** The threshold currently in effect for an outlet — its own override if set,
+ *  otherwise the organization default (`highValueThreshold`'s exact
+ *  resolution, exposed read-only so the owner can see what they're editing
+ *  before they submit a new one via `setExpenseThreshold`). */
+export async function getExpenseThreshold(
   pool: Pool,
   actor: ActorContext,
-  opts: { outletId: string; businessDate?: string; unreviewedOnly?: boolean },
-): Promise<ExpenseView[]> {
+  outletId: string,
+): Promise<{ threshold: string; isOverride: boolean }> {
   ensureAllowed(actor, 'billing.expense.read', {
     organizationId: actor.scope.organizationId,
     ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
-    outletId: opts.outletId,
+    outletId,
   });
+  return withActorContext(pool, contextForActor(actor), async (client) => {
+    const outlet = await loadOutlet(client, outletId);
+    const override = await client.query<{ high_value_threshold: string | null }>(
+      `select high_value_threshold from billing.outlet_expense_settings where outlet_id = $1`,
+      [outletId],
+    );
+    if (override.rows[0]?.high_value_threshold != null) {
+      return { threshold: override.rows[0].high_value_threshold, isOverride: true };
+    }
+    const threshold = await highValueThreshold(client, outletId, outlet.organization_id);
+    return { threshold: threshold.toFixed(2), isOverride: false };
+  });
+}
+
+export async function listExpenses(
+  pool: Pool,
+  actor: ActorContext,
+  opts: {
+    outletId: string;
+    businessDate?: string;
+    unreviewedOnly?: boolean;
+    currentEmployeeShiftOnly?: boolean;
+  },
+): Promise<ExpenseView[]> {
+  ensureAllowed(
+    actor,
+    opts.currentEmployeeShiftOnly ? 'billing.expense.record' : 'billing.expense.read',
+    {
+      organizationId: actor.scope.organizationId,
+      ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
+      outletId: opts.outletId,
+    },
+  );
   return withActorContext(pool, contextForActor(actor), async (client) => {
     const outlet = await loadOutlet(client, opts.outletId);
     const threshold = await highValueThreshold(client, opts.outletId, outlet.organization_id);
@@ -346,6 +386,16 @@ export async function listExpenses(
     if (opts.businessDate) {
       params.push(opts.businessDate);
       where += ` and e.business_date = $${String(params.length)}`;
+    }
+    if (opts.currentEmployeeShiftOnly) {
+      if (actor.kind !== 'operator' || !actor.employeeId) {
+        throw new IdentityError('forbidden', 'An employee session is required');
+      }
+      params.push(actor.employeeId);
+      where += ` and e.recorded_by_employee_id = $${String(params.length)}
+        and exists (select 1 from billing.employee_shifts s
+          where s.employee_id = e.recorded_by_employee_id and s.outlet_id = e.outlet_id
+            and s.status = 'open' and e.created_at >= s.started_at)`;
     }
     if (opts.unreviewedOnly) where += ` and e.reviewed_at is null and e.reversed_at is null`;
     const { rows } = await client.query<{

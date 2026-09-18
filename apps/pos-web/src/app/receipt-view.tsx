@@ -42,7 +42,11 @@ export function ReceiptView({
               <span className="item-name">
                 + {a.quantity} x {a.addonName}
               </span>
-              <span>₹{a.unitPrice}</span>
+              {/* `a.quantity` is the full quantity for this line (already
+                  scaled by the item's own quantity), so the total - not the
+                  per-unit price - belongs on the right, same convention as
+                  the item line above. */}
+              <span>₹{(Number(a.unitPrice) * a.quantity).toFixed(2)}</span>
             </div>
           ))}
           {line.discount !== '0.00' ? (

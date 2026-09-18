@@ -1,6 +1,7 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { listOutlets } from '@jksh/identity';
-import { getCentralOversight, getOwnerDashboard } from '@jksh/stock';
+import { getCentralOversight, getOwnerDashboard, listCentralLowStockAlerts } from '@jksh/stock';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { stockActorFor, stockDb } from '@/server/stock';
@@ -28,13 +29,39 @@ export default async function StockPortfolioPage() {
     );
   }
 
+  if (actor.role === 'franchise_owner') {
+    const owned = await listOutlets(db(), actor);
+    if (owned.length === 1 && owned[0]) redirect(`/stock/${owned[0].id}`);
+  }
   const stockActor = await stockActorFor(actor);
 
   if (actor.role === 'central_admin') {
-    const oversight = await getCentralOversight(stockDb(), stockActor, stockActor.organizationId);
+    const [oversight, alerts, outlets] = await Promise.all([
+      getCentralOversight(stockDb(), stockActor, stockActor.organizationId),
+      listCentralLowStockAlerts(stockDb(), stockActor),
+      listOutlets(db(), actor),
+    ]);
     return (
       <main>
-        <h1>Stock — Central oversight</h1>
+        <p className="eyebrow">Central admin · Operations</p>
+        <h1>Stock control</h1>
+        <p className="page-intro">
+          Monitor outlet shortages, coordinate replenishment and resolve stock issues.
+        </p>
+        <div className="workflow-grid" style={{ marginBottom: 24 }}>
+          <Link className="workflow-card" href="/stock/ops/fulfilment">
+            <strong>Fulfil outlet orders →</strong>
+            <span>Review payments, allocate stock and prepare dispatches.</span>
+          </Link>
+          <Link className="workflow-card" href="/stock/ops/purchase-orders">
+            <strong>Purchase supplies →</strong>
+            <span>Manage supplier orders and incoming materials.</span>
+          </Link>
+          <Link className="workflow-card" href="/stock/ops/recalls">
+            <strong>Manage recalls →</strong>
+            <span>Contain stock risks and coordinate affected outlets.</span>
+          </Link>
+        </div>
         <div className="card">
           <div className="grid">
             <Stat label="Stock value" value={rupees(oversight.stockValuePaise)} />
@@ -48,7 +75,65 @@ export default async function StockPortfolioPage() {
             <Stat label="Open recalls" value={String(oversight.openRecalls)} />
           </div>
         </div>
-        <RelayTrigger />
+        <h2>Outlets needing stock</h2>
+        <p className="page-intro">
+          Latest background checks · up to 100 active alerts. Open an outlet for current balances
+          and limits.
+        </p>
+        <div className="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Outlet</th>
+                <th>Item</th>
+                <th>Available at check</th>
+                <th>Limit</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alerts.map((a) => (
+                <tr key={`${a.outletId}:${a.itemId}`}>
+                  <td>{outlets.find((o) => o.id === a.outletId)?.displayName ?? 'Outlet'}</td>
+                  <td>{a.name}</td>
+                  <td>
+                    {Number(a.quantity).toLocaleString('en-IN')} {a.baseUnit}
+                    <div className="muted" style={{ fontSize: 11 }}>
+                      {new Date(a.checkedAt).toLocaleString()}
+                    </div>
+                  </td>
+                  <td>
+                    {Number(a.threshold).toLocaleString('en-IN')} {a.baseUnit}
+                  </td>
+                  <td>
+                    <Link href={`/stock/${a.outletId}/alerts`}>Review shortage →</Link>
+                  </td>
+                </tr>
+              ))}
+              {!alerts.length ? (
+                <tr>
+                  <td colSpan={5} className="muted">
+                    No active alerts from completed checks. Configure outlet limits below to start
+                    monitoring.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        <h2>Outlet stock limits</h2>
+        <div className="grid">
+          {outlets.map((o) => (
+            <Link className="workflow-card" key={o.id} href={`/stock/${o.id}/alerts`}>
+              <strong>{o.displayName} →</strong>
+              <span>Review balances and configure item thresholds.</span>
+            </Link>
+          ))}
+        </div>
+        <details style={{ marginTop: 24 }}>
+          <summary>Integration tools</summary>
+          <RelayTrigger />
+        </details>
       </main>
     );
   }
@@ -71,7 +156,10 @@ export default async function StockPortfolioPage() {
 
   return (
     <main>
-      <h1>Stock — your outlets</h1>
+      <h1>Stock & orders</h1>
+      <p className="page-intro">
+        Choose an outlet to order supplies, receive deliveries or review stock that needs attention.
+      </p>
       <div className="grid">
         {cards.map(({ outlet, dashboard }) => (
           <div key={outlet.id} className="card">
@@ -99,13 +187,14 @@ export default async function StockPortfolioPage() {
               </div>
             ) : (
               <p className="muted" style={{ fontSize: 13 }}>
-                Stock tracking not configured yet.
+                Stock data is unavailable. Open the outlet to check access or setup.
               </p>
             )}
-            <div style={{ marginTop: 12, display: 'flex', gap: 12 }}>
+            <div className="outlet-actions">
               <Link href={`/stock/${outlet.id}`}>Overview</Link>
               <Link href={`/stock/${outlet.id}/order`}>Order stock</Link>
-              <Link href={`/stock/${outlet.id}/suggestions`}>Suggestions</Link>
+              <Link href={`/stock/${outlet.id}/alerts`}>Stock limits</Link>
+              <Link href={`/stock/${outlet.id}/suggestions`}>Reorder suggestions</Link>
             </div>
           </div>
         ))}

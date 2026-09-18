@@ -72,8 +72,11 @@ Every bill also receives a globally unique internal ID and client idempotency ke
 
 - An offline sale uses the last server-approved price snapshot shown to the
   employee; a later online price change does not rewrite the completed bill.
-- Disabled products remain sellable offline only until the authorization/menu
-  bundle expires.
+- An item already paused in the cached menu is visible as `Out of stock` and
+  cannot be added offline. If Central, an owner, or an employee pauses an item
+  on another device while this terminal is disconnected, the disconnected
+  terminal cannot learn that newer state until synchronization; its cached menu
+  remains authoritative only until the authorization/menu bundle expires.
 - Revoked employees and terminals lose offline capability when their bundle
   expires; high-risk revocation cannot be instantaneous without connectivity.
 - Duplicate receipt numbers or idempotency keys are rejected and investigated.

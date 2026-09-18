@@ -15,7 +15,13 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   agentRules: false,
-  transpilePackages: ['@jksh/config', '@jksh/contracts', '@jksh/db', '@jksh/identity'],
+  transpilePackages: [
+    '@jksh/config',
+    '@jksh/contracts',
+    '@jksh/db',
+    '@jksh/identity',
+    '@jksh/stock',
+  ],
   serverExternalPackages: ['pg', '@node-rs/argon2'],
   async headers() {
     return [

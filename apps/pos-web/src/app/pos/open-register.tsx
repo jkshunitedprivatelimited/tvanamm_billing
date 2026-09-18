@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { StaffMenu } from '@/components/StaffMenu';
 
 export function OpenRegister({ outletName }: { outletName: string }) {
   const router = useRouter();
@@ -33,6 +34,7 @@ export function OpenRegister({ outletName }: { outletName: string }) {
     <div className="screen">
       <div className="panel">
         <h1>{outletName}</h1>
+        <StaffMenu />
         <p className="muted">Open the shared Cash session to start billing.</p>
         <label htmlFor="opening-cash">Opening Cash amount</label>
         <input

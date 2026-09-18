@@ -31,7 +31,12 @@ interface SyncResult {
   error?: string;
 }
 
-async function primeOnce(menu: PosMenuSnapshot, outletName: string): Promise<boolean> {
+async function primeOnce(
+  menu: PosMenuSnapshot,
+  outletName: string,
+  employeeId: string,
+  employeeName: string,
+): Promise<boolean> {
   try {
     const kit = await readOfflineKit();
     const needBlock = !kit || kit.receiptNumbers.length < LOW_WATER;
@@ -67,6 +72,8 @@ async function primeOnce(menu: PosMenuSnapshot, outletName: string): Promise<boo
 
     await saveOfflineKit({
       outletName,
+      employeeId,
+      employeeName,
       menu,
       authToken: auth.token,
       authExpiresAt: auth.expiresAt,
@@ -84,10 +91,19 @@ async function primeOnce(menu: PosMenuSnapshot, outletName: string): Promise<boo
 export function useOffline(
   menu: PosMenuSnapshot,
   outletName: string,
+  employeeId: string,
+  employeeName: string,
   onSynced?: (billId: string) => void,
 ): OfflineState & { prime: () => Promise<void>; sync: () => Promise<void> } {
+  // Always render "online" for the very first paint on both server and
+  // client — Node's built-in `navigator` global (no `onLine` property) makes
+  // `typeof navigator === 'undefined'` false during SSR, so reading
+  // `navigator.onLine` here would render one value on the server and a
+  // different real one in the browser, breaking hydration. The real value is
+  // applied a moment later, from inside the effect below, once we're
+  // definitely running in the browser.
   const [state, setState] = useState<OfflineState>({
-    online: typeof navigator === 'undefined' ? true : navigator.onLine,
+    online: true,
     ready: false,
     priming: false,
     receiptsLeft: 0,
@@ -111,11 +127,11 @@ export function useOffline(
     if (busy.current || !navigator.onLine) return;
     busy.current = true;
     setState((s) => ({ ...s, priming: true }));
-    await primeOnce(menu, outletName);
+    await primeOnce(menu, outletName, employeeId, employeeName);
     busy.current = false;
     setState((s) => ({ ...s, priming: false }));
     await refreshCounts();
-  }, [menu, outletName, refreshCounts]);
+  }, [menu, outletName, employeeId, employeeName, refreshCounts]);
 
   const sync = useCallback(async () => {
     if (!navigator.onLine) return;
@@ -147,6 +163,8 @@ export function useOffline(
   }, [onSynced, refreshCounts]);
 
   useEffect(() => {
+    // Correct the online flag for real now that we're in the browser.
+    setState((s) => (s.online === navigator.onLine ? s : { ...s, online: navigator.onLine }));
     void refreshCounts();
     void prime();
 

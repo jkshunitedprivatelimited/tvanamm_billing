@@ -2,11 +2,12 @@ import {
   getOperatorSummary,
   getOpenCashSession,
   outletBillingWindow,
-  startShift,
+  listOpenShifts,
   getPublishedMenu,
 } from '@jksh/identity';
 import { requireOperator } from '@/server/auth';
 import { db } from '@/server/pool';
+import { StartShift } from './start-shift';
 import { OpenRegister } from './open-register';
 import { PosClient } from './pos-client';
 
@@ -48,10 +49,10 @@ export default async function PosPage() {
     return <OpenRegister outletName={outletName} />;
   }
 
-  // Resuming/starting the employee's own shift is automatic - it never
-  // creates a second open shift for the same employee (`pos-workflow.md`
-  // "Employee confirms/resumes their Billing shift").
-  await startShift(pool, actor, {});
+  const shifts = await listOpenShifts(pool, actor, actor.outletId);
+  if (!shifts.some((shift) => shift.employeeId === actor.employeeId)) {
+    return <StartShift outletName={outletName} employeeName={me?.employeeName ?? 'Employee'} />;
+  }
 
   const menu = await getPublishedMenu(pool, actor, actor.outletId);
   if (!menu) {
@@ -66,6 +67,11 @@ export default async function PosPage() {
   }
 
   return (
-    <PosClient menu={menu} employeeName={me?.employeeName ?? 'Employee'} outletName={outletName} />
+    <PosClient
+      menu={menu}
+      employeeId={actor.employeeId ?? ''}
+      employeeName={me?.employeeName ?? 'Employee'}
+      outletName={outletName}
+    />
   );
 }

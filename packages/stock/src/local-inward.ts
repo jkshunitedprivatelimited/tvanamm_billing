@@ -155,6 +155,17 @@ export async function reviewLocalInward(
       throw new StockError('conflict', `Local inward is ${row.status}`);
     }
 
+    if (cmd.action === 'reverse') {
+      const linked = await client.query(
+        `select 1 from stock.employee_stock_entries where id=$1 and result->>'expenseId' is not null`,
+        [localInwardId],
+      );
+      if (linked.rowCount)
+        throw new StockError(
+          'conflict',
+          'This purchase has a linked expense. Correct the expense and stock count separately so both records remain accurate.',
+        );
+    }
     if (cmd.action === 'confirm') {
       const cost =
         cmd.unitCostPaise ?? (row.unit_cost_paise != null ? Number(row.unit_cost_paise) : null);

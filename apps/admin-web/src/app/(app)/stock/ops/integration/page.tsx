@@ -13,10 +13,10 @@ export default async function IntegrationHealthPage() {
       <p className="muted">
         <Link href="/stock/ops">← Stock operations</Link>
       </p>
-      <h1>Billing → Stock integration</h1>
+      <h1>Stock update status</h1>
       <p className="page-intro">
-        Sale events flow Billing outbox → Stock inbox → consumption, then a reconciliation run. This
-        shows what is stuck and lets you re-queue an event that dead-lettered.
+        Check whether completed bills have updated stock. Review pending updates or retry failures.
+        Billing can continue while stock updates are being processed.
       </p>
       <IntegrationClient />
     </main>

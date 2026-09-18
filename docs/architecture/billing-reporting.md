@@ -58,6 +58,7 @@ date boundaries per outlet before aggregation.
 - Gross sales.
 - Discounts.
 - Refunds.
+- Outlet operational expenses by category, payment source, and review state.
 - Net sales.
 - Cash total.
 - UPI total.
@@ -68,11 +69,27 @@ date boundaries per outlet before aggregation.
 
 - The same financial metrics across every JKSH-owned and franchise-owned outlet.
 - Brand, franchise, and outlet filters.
+- Combined JKSH totals with drill-down by brand, franchise, outlet, terminal,
+  employee, document, and underlying immutable audit events.
 - Active, suspended, and closed outlet counts.
 - Registered terminal state and last synchronization time.
 - Pending/failed offline synchronization indicators.
 - Archive/export/report job failures.
 - Drill-down without permission to create customer bills.
+
+## Complete Audit Reporting
+
+Authorized Central users can filter/export audit activity by date, actor, role,
+brand, franchise, outlet, terminal, domain, entity, action, outcome, risk level,
+correlation ID, and AI-assisted/manual source. Drill-down links the business
+record, prior/new version or reversal, related event/job, and authorization
+decision where retained.
+
+Audit reports never expose OTPs, PINs, secret values, raw session tokens, private
+bank credentials, or unrestricted customer/employee personal data. Audit events
+are append-only, paginated, integrity-monitored, and exported asynchronously.
+Anomaly filters are review signals and never automatically accuse or suspend a
+person/outlet.
 
 ## Confirmed Accountant Dashboard
 
@@ -81,6 +98,7 @@ Accountant access; Franchise Owners cannot grant it.
 
 - Net sales and gross sales.
 - Cash and UPI reconciliation.
+- Shared-drawer expenses and their impact on expected closing Cash.
 - Refunds and audited adjustments.
 - GST/tax reporting totals retained internally.
 - Outlet and combined financial reports.

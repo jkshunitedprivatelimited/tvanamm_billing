@@ -22,13 +22,27 @@ function AcceptForm() {
     setBusy(true);
     setError(null);
     try {
-      await fetch('/api/v1/auth/otp/request', {
+      const digits = phone.replace(/\D/g, '');
+      const normalized = digits.length === 10 ? `+91${digits}` : `+${digits}`;
+      if (!/^\+[1-9]\d{7,14}$/.test(normalized)) {
+        setError('Enter a valid mobile number.');
+        return;
+      }
+      setPhone(normalized);
+      const res = await fetch('/api/v1/auth/otp/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ phone: normalized }),
       });
+      const body = (await res.json()) as { message?: string };
+      if (!res.ok) {
+        setError(body.message ?? 'Could not send the code. Please try again.');
+        return;
+      }
       setStep('code');
       setNotice('Enter the code sent to your mobile.');
+    } catch {
+      setError('Could not reach the service. Check your connection and try again.');
     } finally {
       setBusy(false);
     }
@@ -59,6 +73,8 @@ function AcceptForm() {
       }
       router.replace(body.outcome === 'select_workspace' ? '/select-workspace' : body.redirectTo);
       router.refresh();
+    } catch {
+      setError('Could not reach the service. Check your connection and try again.');
     } finally {
       setBusy(false);
     }
@@ -94,6 +110,19 @@ function AcceptForm() {
           />
           <button type="submit" disabled={busy || code.length < 4}>
             {busy ? 'Accepting…' : 'Accept invitation'}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() => {
+              setStep('phone');
+              setCode('');
+              setNotice(null);
+              setError(null);
+            }}
+          >
+            Change number / request new code
           </button>
         </form>
       )}

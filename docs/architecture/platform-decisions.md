@@ -8,9 +8,15 @@
 - Use `jksh-billing-dev` for development and `jksh-billing-prod` for production.
 - Separate concerns inside the project using `identity`, `billing`, `audit`, and
   `outbox` database schemas with explicit grants and API boundaries.
-- When Stock development begins, create a separate Stock Supabase project if
-  physical isolation is required. Stock consumes versioned Billing events and
-  never reads or writes Billing tables directly.
+- Use `jksh-stock-dev` for Stock development and `jksh-stock-prod` for Stock
+  production. Stock uses a separate Supabase project/database per environment and
+  consumes versioned Billing events and never reads or writes Billing tables
+  directly.
+- `admin.jkshunited.com` provides combined Franchise Owner Billing/Stock
+  navigation. The domains remain separate server modules with separate bounded
+  database pools; a shared UI does not permit cross-database joins.
+- Razorpay is limited to Franchise Owner payments for JKSH Stock orders. Store
+  customer UPI remains externally verified through the outlet's bank scanner.
 - Put identity, authorization, and Billing commands behind secure TypeScript API
   services; browser applications do not orchestrate privileged table mutations.
 - Use `billing.jkshunited.com` for the Store PWA.
@@ -20,10 +26,20 @@
 - JKSH is the parent organization.
 - TVANAMM and T Leaf are brands under JKSH.
 - TVANAMM is the first brand enabled for Billing.
+- Each outlet has exactly one primary brand. A Franchise Owner may hold
+  memberships for outlets across multiple JKSH brands through the same login.
 - Brand and outlet configuration controls logo, display name, address, contact
   details, menu, pricing, receipt appearance, and enabled features.
 - Core Billing behavior remains brand-neutral so T Leaf can be enabled without a
   second codebase.
+- Generic Stock materials may be organization-shared across JKSH brands;
+  branded powders, packaging, recipes, menus, and controlled items retain an
+  explicit brand scope.
+- `Ask JKSH AI` uses a provider-neutral gateway and authorized application tools;
+  it never receives direct database authority or bypasses existing permissions.
+- Gemini on Vertex AI is the initial production AI provider. Access is
+  server-to-server through least-privilege Google Cloud identity; no Gemini
+  credential is exposed to a browser.
 
 ## Confirmed Request and Load Optimization
 

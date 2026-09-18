@@ -101,6 +101,7 @@ export async function publishCatalogItem(
 }
 
 export interface CatalogEntry {
+  baseUnit: string;
   id: string;
   itemId: string;
   itemName: string;
@@ -126,6 +127,7 @@ export async function getSupplyCatalogForOutlet(
       id: string;
       item_id: string;
       item_name: string;
+      base_unit: string;
       sku: string;
       gst_inclusive_price_paise: string;
       gst_rate: string;
@@ -134,7 +136,7 @@ export async function getSupplyCatalogForOutlet(
       is_available: boolean;
       version: number;
     }>(
-      `select c.id, c.item_id, i.name as item_name, i.sku,
+      `select c.id, c.item_id, i.name as item_name, i.sku, i.base_unit,
               c.gst_inclusive_price_paise, c.gst_rate, c.hsn_code, c.order_pack_base,
               c.is_available, c.version
          from stock.supply_catalog_items c
@@ -150,6 +152,7 @@ export async function getSupplyCatalogForOutlet(
       id: r.id,
       itemId: r.item_id,
       itemName: r.item_name,
+      baseUnit: r.base_unit,
       sku: r.sku,
       gstInclusivePricePaise: Number(r.gst_inclusive_price_paise),
       gstRate: r.gst_rate,

@@ -12,7 +12,7 @@ import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth';
 import { issueActivationCode, registerTerminal } from './terminal';
 import { createEmployee } from './employee';
 import { pinLogin, loadOperatorContext } from './store-auth';
-import { openCashSession, closeCashSession, startShift } from './shifts';
+import { openCashSession, startShift, finishWork } from './shifts';
 import { createCatalogItem } from './catalog';
 import { createAndApplyPublication, getPublishedMenu } from './menu-publish';
 import { createBill } from './bills';
@@ -234,10 +234,20 @@ describe.skipIf(!RUN)('Outlet operational expenses', () => {
       reason: 'auto fare for supplies pickup',
     });
 
+    const review = await listExpenses(pool, op, { outletId, currentEmployeeShiftOnly: true });
+    expect(review.map((expense) => expense.categoryName).sort()).toEqual([
+      'Cleaning supplies',
+      'Transport',
+    ]);
+    expect(review.every((expense) => expense.reason.length > 0)).toBe(true);
+
     // Expected = 2000 opening + 20 cash sale - 150 drawer expense = 1870.
-    const closed = await closeCashSession(pool, await operator(), session.id, {
-      countedCash: '1870.00',
+    const result = await finishWork(pool, op, {
+      sessionId: session.id,
+      command: { countedCash: '1870.00' },
     });
+    const closed = result.cashSession!;
+    expect(await listExpenses(pool, op, { outletId, currentEmployeeShiftOnly: true })).toEqual([]);
     expect(closed.expectedCash).toBe('1870.00');
     expect(closed.variance).toBe('0.00');
   }, 30_000);

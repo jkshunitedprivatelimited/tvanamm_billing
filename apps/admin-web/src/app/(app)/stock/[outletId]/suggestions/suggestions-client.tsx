@@ -1,13 +1,49 @@
 'use client';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
+import { DataTable, type Column } from '@/components/DataTable';
 
 interface Row {
   id: string;
+  itemId: string;
   itemName: string;
   suggestedQtyBase: string;
   status: string;
   inputs: unknown;
+}
+
+/** Matches `SuggestionInputs` in packages/stock/src/analytics.ts — `inputs`
+ *  arrives as `unknown` (raw jsonb), so this is a display-only shape guard,
+ *  not a validated type. */
+interface SuggestionInputsShape {
+  trailingDailyConsumptionBase: number;
+  leadTimeDays: number;
+  safetyDays: number;
+  usableStockBase: number;
+  confirmedInboundBase: number;
+  backorderBase: number;
+  orderPackBase: number;
+}
+
+function isSuggestionInputs(v: unknown): v is SuggestionInputsShape {
+  return typeof v === 'object' && v !== null && 'trailingDailyConsumptionBase' in v;
+}
+
+/** A short, readable sentence instead of a raw JSON dump — the same numbers
+ *  that went into `suggestReorderQty`'s formula, in plain language. */
+function explain(inputs: unknown): string {
+  if (!isSuggestionInputs(inputs)) return '—';
+  const days = inputs.leadTimeDays + inputs.safetyDays;
+  const parts = [
+    `~${inputs.trailingDailyConsumptionBase.toFixed(1)}/day over ${String(days)} days`,
+    `− ${inputs.usableStockBase.toFixed(1)} on hand`,
+  ];
+  if (inputs.confirmedInboundBase > 0)
+    parts.push(`− ${inputs.confirmedInboundBase.toFixed(1)} incoming`);
+  if (inputs.backorderBase > 0) parts.push(`+ ${inputs.backorderBase.toFixed(1)} backorder`);
+  parts.push(`rounded to packs of ${String(inputs.orderPackBase)}`);
+  return parts.join(', ');
 }
 
 export function SuggestionsClient({ outletId, rows }: { outletId: string; rows: Row[] }) {
@@ -32,9 +68,61 @@ export function SuggestionsClient({ outletId, rows }: { outletId: string; rows: 
     startTransition(() => router.refresh());
   }
 
+  const columns: Column<Row>[] = [
+    {
+      key: 'item',
+      header: 'Item',
+      width: 'minmax(140px,1fr)',
+      nowrap: true,
+      sortValue: (r) => r.itemName,
+      render: (r) => r.itemName,
+    },
+    {
+      key: 'qty',
+      header: 'Suggested qty',
+      width: '110px',
+      align: 'right',
+      sortValue: (r) => Number(r.suggestedQtyBase),
+      render: (r) => r.suggestedQtyBase,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      width: '100px',
+      sortValue: (r) => r.status,
+      render: (r) => <span className="pill">{r.status}</span>,
+    },
+    {
+      key: 'why',
+      header: 'Why',
+      width: 'minmax(220px,1.6fr)',
+      nowrap: true,
+      render: (r) => explain(r.inputs),
+    },
+    {
+      key: 'action',
+      header: '',
+      width: '220px',
+      render: (r) =>
+        r.status === 'open' ? (
+          <div className="row" style={{ gap: 8 }}>
+            <Link
+              href={`/stock/${outletId}/order?item=${r.itemId}&qty=${r.suggestedQtyBase}`}
+              className="link-btn"
+            >
+              Convert to order
+            </Link>
+            <button className="ghost sm" onClick={() => void dismiss(r.id)} disabled={pending}>
+              Dismiss
+            </button>
+          </div>
+        ) : null,
+    },
+  ];
+
   return (
     <div className="card">
-      <button onClick={regenerate} disabled={pending}>
+      <button onClick={() => void regenerate()} disabled={pending}>
         Recalculate
       </button>
       {msg ? (
@@ -42,49 +130,15 @@ export function SuggestionsClient({ outletId, rows }: { outletId: string; rows: 
           {msg}
         </span>
       ) : null}
-      <table style={{ marginTop: 12 }}>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Suggested qty</th>
-            <th>Status</th>
-            <th>Why</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <td>{r.itemName}</td>
-              <td className="num">{r.suggestedQtyBase}</td>
-              <td>
-                <span className="pill">{r.status}</span>
-              </td>
-              <td className="mono" style={{ fontSize: 11, maxWidth: 320 }}>
-                {JSON.stringify(r.inputs)}
-              </td>
-              <td>
-                {r.status === 'open' ? (
-                  <button
-                    className="secondary"
-                    onClick={() => void dismiss(r.id)}
-                    disabled={pending}
-                  >
-                    Dismiss
-                  </button>
-                ) : null}
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 ? (
-            <tr>
-              <td colSpan={5} className="muted">
-                No suggestions. Recalculate after some sales history exists.
-              </td>
-            </tr>
-          ) : null}
-        </tbody>
-      </table>
+      <div style={{ marginTop: 12 }}>
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.id}
+          initialSort={{ key: 'qty', dir: 'desc' }}
+          empty="No suggestions. Recalculate after some sales history exists."
+        />
+      </div>
     </div>
   );
 }

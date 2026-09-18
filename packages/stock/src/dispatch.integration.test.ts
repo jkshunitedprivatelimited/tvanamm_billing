@@ -26,6 +26,7 @@ import {
   resolveDiscrepancy,
   getDispatch,
 } from './dispatch';
+import { listPendingDeliveries } from './reads';
 import { signCheckout, stubRazorpayGateway, type RazorpayPayment } from './razorpay';
 
 const RUN = !!process.env.STOCK_DATABASE_URL;
@@ -210,6 +211,9 @@ describe.skipIf(!RUN)('Stock fulfilment', () => {
     ).rows[0]!.id;
 
     const outletBefore = await outletOnHand();
+    const awaiting = await listPendingDeliveries(pool, owner, OUTLET);
+    expect(awaiting.some((d) => d.id === dispatch.dispatchId)).toBe(true);
+    expect(awaiting.find((d) => d.id === dispatch.dispatchId)?.lines.length).toBeGreaterThan(0);
     const inward = await recordOutletInward(pool, owner, {
       organizationId: ORG,
       stockOrderId: orderId,

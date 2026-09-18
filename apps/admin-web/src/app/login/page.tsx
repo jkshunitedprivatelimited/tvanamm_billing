@@ -1,35 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { BrandMark } from '@/components/BrandMark';
-
-const WIDGET_ID = process.env.NEXT_PUBLIC_MSG91_WIDGET_ID;
-const WIDGET_TOKEN = process.env.NEXT_PUBLIC_MSG91_WIDGET_TOKEN;
-const USE_WIDGET = !!WIDGET_ID && !!WIDGET_TOKEN;
-
-type Cb = (data: unknown) => void;
-interface Msg91Widget {
-  initSendOTP: (c: {
-    widgetId: string;
-    tokenAuth: string;
-    exposeMethods: boolean;
-    success?: Cb;
-    failure?: Cb;
-  }) => void;
-  sendOtp: (identifier: string, success: Cb, failure: Cb) => void;
-  verifyOtp: (otp: string, success: Cb, failure: Cb) => void;
-  retryOtp: (channel: string | null, success: Cb, failure: Cb) => void;
-}
-type W = Window & Partial<Msg91Widget>;
-
-function msgOf(d: unknown, fallback: string): string {
-  if (d && typeof d === 'object' && 'message' in d) {
-    const m = (d as { message?: unknown }).message;
-    if (typeof m === 'string') return m;
-  }
-  return fallback;
-}
 
 type LoginResult =
   | { outcome: 'single_workspace'; redirectTo: string }
@@ -45,108 +18,44 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const widgetReady = useRef(false);
+  const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
-    if (!WIDGET_ID || !WIDGET_TOKEN || widgetReady.current) return;
-    const w = window as W;
-    const init = () => {
-      if (!w.initSendOTP) return;
-      w.initSendOTP({ widgetId: WIDGET_ID, tokenAuth: WIDGET_TOKEN, exposeMethods: true });
-      widgetReady.current = true;
-    };
-    if (w.initSendOTP) return init();
-    const urls = [
-      'https://verify.msg91.com/otp-provider.js',
-      'https://verify.phone91.com/otp-provider.js',
-    ];
-    const load = (i: number) => {
-      const src = urls[i];
-      if (!src) return;
-      const s = document.createElement('script');
-      s.src = src;
-      s.async = true;
-      s.onload = init;
-      s.onerror = () => load(i + 1);
-      document.head.appendChild(s);
-    };
-    load(0);
-  }, []);
+    if (cooldown <= 0) return;
+    const timer = window.setTimeout(() => setCooldown((n) => Math.max(0, n - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldown]);
 
-  const finish = useCallback(
-    (body: LoginResult, resOk: boolean) => {
-      if (!resOk || !('outcome' in body)) {
-        setError(('message' in body && body.message) || 'Verification failed.');
-        return;
-      }
-      if (body.outcome === 'rejected') {
-        setError(
-          body.retryAfterSeconds
-            ? `Too many attempts. Try again in ${String(body.retryAfterSeconds)}s.`
-            : 'That code was not accepted.',
-        );
-        return;
-      }
-      router.replace(body.outcome === 'select_workspace' ? '/select-workspace' : body.redirectTo);
-      router.refresh();
-    },
-    [router],
-  );
-
-  const identifier = () => phone.replace(/\D/g, '');
-
-  async function start(e: React.SyntheticEvent) {
-    e.preventDefault();
+  async function requestCode() {
+    const digits = phone.replace(/\D/g, '');
+    const normalized = digits.length === 10 ? `+91${digits}` : `+${digits}`;
+    if (!/^\+[1-9]\d{7,14}$/.test(normalized)) {
+      setError('Enter a valid mobile number, including its country code.');
+      return;
+    }
+    setPhone(normalized);
     setBusy(true);
     setError(null);
     try {
-      if (USE_WIDGET) {
-        const sendOtp = (window as W).sendOtp;
-        if (!sendOtp) {
-          setError('OTP service is still loading — try again in a moment.');
-          return;
-        }
-        await new Promise<void>((resolve) => {
-          sendOtp(
-            identifier(),
-            () => {
-              setStep('code');
-              setNotice('If that number has an account, a code is on its way.');
-              resolve();
-            },
-            (d) => {
-              setError(msgOf(d, 'Could not send the code.'));
-              resolve();
-            },
-          );
-        });
-        return;
-      }
       const res = await fetch('/api/v1/auth/otp/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone }),
+        body: JSON.stringify({ phone: normalized }),
       });
+      const body = (await res.json()) as { message?: string; resendAvailableInSeconds?: number };
+      setCooldown(body.resendAvailableInSeconds ?? 0);
       if (!res.ok) {
-        setError(
-          ((await res.json()) as { message?: string }).message ?? 'Could not send the code.',
-        );
+        setError(body.message ?? 'Could not send the code. Please try again.');
         return;
       }
+      setCode('');
       setStep('code');
       setNotice('If that number has an account, a code is on its way.');
+    } catch {
+      setError('Could not reach the login service. Check your connection and try again.');
     } finally {
       setBusy(false);
     }
-  }
-
-  async function submitToServer(accessToken: string) {
-    const res = await fetch('/api/v1/auth/msg91-verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone, accessToken }),
-    });
-    finish((await res.json()) as LoginResult, res.ok);
   }
 
   async function verify(e: React.SyntheticEvent) {
@@ -154,32 +63,28 @@ export default function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      if (USE_WIDGET) {
-        const verifyOtp = (window as W).verifyOtp;
-        if (!verifyOtp) {
-          setError('OTP service is not ready.');
-          return;
-        }
-        await new Promise<void>((resolve) => {
-          verifyOtp(
-            code,
-            (d) => {
-              void submitToServer(msgOf(d, '')).finally(resolve);
-            },
-            (d) => {
-              setError(msgOf(d, 'That code was not accepted.'));
-              resolve();
-            },
-          );
-        });
-        return;
-      }
       const res = await fetch('/api/v1/auth/otp/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, code }),
       });
-      finish((await res.json()) as LoginResult, res.ok);
+      const body = (await res.json()) as LoginResult;
+      if (!res.ok || !('outcome' in body)) {
+        setError(('message' in body && body.message) || 'Verification failed.');
+        return;
+      }
+      if (body.outcome === 'rejected') {
+        setError(
+          body.retryAfterSeconds
+            ? `Too many attempts. Try again in ${String(body.retryAfterSeconds)}s.`
+            : 'That code was not accepted or has expired. Check it or request a new code.',
+        );
+        return;
+      }
+      router.replace(body.outcome === 'select_workspace' ? '/select-workspace' : body.redirectTo);
+      router.refresh();
+    } catch {
+      setError('Could not verify the code. Check your connection and try again.');
     } finally {
       setBusy(false);
     }
@@ -196,7 +101,12 @@ export default function LoginPage() {
         </div>
         <h2>Sign in</h2>
         {step === 'phone' ? (
-          <form onSubmit={start}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void requestCode();
+            }}
+          >
             <label htmlFor="phone">Mobile number</label>
             <input
               id="phone"
@@ -204,10 +114,10 @@ export default function LoginPage() {
               autoComplete="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value.trim())}
-              placeholder="+919876543210"
+              placeholder="9550511549"
             />
-            <button type="submit" disabled={busy}>
-              {busy ? 'Sending…' : 'Send code'}
+            <button type="submit" disabled={busy || cooldown > 0}>
+              {busy ? 'Sending…' : cooldown > 0 ? `Try again in ${String(cooldown)}s` : 'Send code'}
             </button>
           </form>
         ) : (
@@ -227,18 +137,36 @@ export default function LoginPage() {
             <button
               type="button"
               className="secondary"
+              disabled={busy || cooldown > 0}
+              onClick={() => void requestCode()}
+            >
+              {cooldown > 0 ? `Resend in ${String(cooldown)}s` : 'Resend code'}
+            </button>{' '}
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
               onClick={() => {
                 setStep('phone');
                 setCode('');
                 setNotice(null);
+                setError(null);
               }}
             >
               Change number
             </button>
           </form>
         )}
-        {notice ? <p className="ok">{notice}</p> : null}
-        {error ? <p className="error">{error}</p> : null}
+        {notice ? (
+          <p className="ok" role="status">
+            {notice}
+          </p>
+        ) : null}
+        {error ? (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
     </div>
   );

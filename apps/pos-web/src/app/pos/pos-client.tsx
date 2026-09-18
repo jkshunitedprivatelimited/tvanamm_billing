@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   PosMenuSnapshot,
@@ -11,7 +11,10 @@ import type {
 import Link from 'next/link';
 import { ReceiptView } from '../receipt-view';
 import { terminalPaperWidthMm } from '../terminal-prefs';
+import { smartPrint, smartPrintReceipt } from '@/lib/printer';
+import { buildOfflineTicketEscPos } from '@/lib/escpos';
 import { BrandMark } from '@/components/BrandMark';
+import { StaffMenu } from '@/components/StaffMenu';
 import { useOffline } from '@/lib/use-offline';
 import {
   enqueueOutboxBill,
@@ -61,12 +64,45 @@ function lineTotal(line: CartLine): { base: number; discount: number; final: num
   return { base, discount, final: base - discount };
 }
 
+/** Pure so a single tap on "Cash"/"UPI" can charge the exact rounded amount
+ *  immediately, without waiting on a state update + re-render to see it. */
+function computeTotals(
+  cart: CartLine[],
+  billDiscount: DiscountInput | null,
+  payment: 'cash' | 'upi' | null,
+) {
+  const lines = cart.map(lineTotal);
+  const subtotal = lines.reduce((s, l) => s + l.base, 0);
+  const lineDiscountTotal = lines.reduce((s, l) => s + l.discount, 0);
+  const afterLine = subtotal - lineDiscountTotal;
+  let billDiscountAmt = 0;
+  if (billDiscount) {
+    billDiscountAmt =
+      billDiscount.kind === 'percent'
+        ? (afterLine * Number(billDiscount.value)) / 100
+        : Number(billDiscount.value);
+    billDiscountAmt = Math.min(billDiscountAmt, afterLine);
+  }
+  const preRound = afterLine - billDiscountAmt;
+  const rounded = payment === 'cash' ? Math.round(preRound) : preRound;
+  return {
+    subtotal: money(subtotal),
+    discountTotal: money(lineDiscountTotal + billDiscountAmt),
+    preRound: money(preRound),
+    roundAdjustment: money(rounded - preRound),
+    final: money(rounded),
+    isComplimentary: preRound <= 0,
+  };
+}
+
 export function PosClient({
   menu,
+  employeeId,
   employeeName,
   outletName,
 }: {
   menu: PosMenuSnapshot;
+  employeeId: string;
   employeeName: string;
   outletName: string;
 }) {
@@ -87,6 +123,14 @@ export function PosClient({
   const [offlineDone, setOfflineDone] = useState<{ receiptNumber: string; total: string } | null>(
     null,
   );
+  const [printerNotice, setPrinterNotice] = useState<string | null>(null);
+  // Brief highlight on the tapped card so adding an item gives visible
+  // feedback beyond the cart total changing off to the side.
+  const [justAdded, setJustAdded] = useState<string | null>(null);
+  function flash(id: string) {
+    setJustAdded(id);
+    setTimeout(() => setJustAdded((cur) => (cur === id ? null : cur)), 320);
+  }
 
   // A synced offline bill now has a real receipt; show it if the till is idle,
   // otherwise leave a note (reprint from History).
@@ -112,10 +156,28 @@ export function PosClient({
     },
     [cart.length, offlineDone],
   );
-  const offline = useOffline(menu, outletName, showSyncedReceipt);
+  const offline = useOffline(menu, outletName, employeeId, employeeName, showSyncedReceipt);
   const [showCustomer, setShowCustomer] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerMobile, setCustomerMobile] = useState('');
+
+  // Pick up published menus while the till is idle. Keep an in-progress
+  // sale on its existing menu version until the cashier finishes it.
+  useEffect(() => {
+    if (cart.length > 0 || busy || receipt || offlineDone) return;
+    const refresh = () => {
+      if (navigator.onLine && document.visibilityState === 'visible') router.refresh();
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
+    };
+  }, [router, cart.length, busy, receipt, offlineDone]);
 
   const categories = useMemo(() => {
     const seen = new Map<string, number>();
@@ -132,30 +194,14 @@ export function PosClient({
     });
   }, [menu.items, search, category]);
 
-  const totals = useMemo(() => {
-    const lines = cart.map(lineTotal);
-    const subtotal = lines.reduce((s, l) => s + l.base, 0);
-    const lineDiscountTotal = lines.reduce((s, l) => s + l.discount, 0);
-    const afterLine = subtotal - lineDiscountTotal;
-    let billDiscountAmt = 0;
-    if (billDiscount) {
-      billDiscountAmt =
-        billDiscount.kind === 'percent'
-          ? (afterLine * Number(billDiscount.value)) / 100
-          : Number(billDiscount.value);
-      billDiscountAmt = Math.min(billDiscountAmt, afterLine);
-    }
-    const preRound = afterLine - billDiscountAmt;
-    const rounded = payment === 'cash' ? Math.round(preRound) : preRound;
-    return {
-      subtotal: money(subtotal),
-      discountTotal: money(lineDiscountTotal + billDiscountAmt),
-      preRound: money(preRound),
-      roundAdjustment: money(rounded - preRound),
-      final: money(rounded),
-      isComplimentary: preRound <= 0,
-    };
-  }, [cart, billDiscount, payment]);
+  // The summary card always shows the exact (unrounded) total; each payment
+  // button shows what that method will actually charge, so cash rounding is
+  // visible right on the button a cashier taps — no separate preview step.
+  const totals = useMemo(() => computeTotals(cart, billDiscount, null), [cart, billDiscount]);
+  const cashTotal = useMemo(
+    () => computeTotals(cart, billDiscount, 'cash').final,
+    [cart, billDiscount],
+  );
 
   function addLine(item: MenuItem, addons: CartAddon[], note: string | null) {
     const key = `${item.catalogItemId}|${addons
@@ -222,19 +268,21 @@ export function PosClient({
     setCart((prev) => prev.filter((l) => l.clientLineId !== clientLineId));
   }
 
-  async function checkout() {
-    if (cart.length === 0) return;
-    if (!totals.isComplimentary && !payment) {
-      setError('Choose Cash or UPI before confirming.');
+  async function checkout(method: 'cash' | 'upi' | null) {
+    if (cart.length === 0 || busy) return;
+    const t = computeTotals(cart, billDiscount, method);
+    if (!t.isComplimentary && !method) {
+      setError('Choose Cash or UPI to charge this sale.');
       return;
     }
+    setPayment(method);
     setBusy(true);
     setError(null);
     try {
       const cmd: CreateBillCommand = {
         idempotencyKey: crypto.randomUUID() + crypto.randomUUID(),
         menuVersion: menu.version,
-        paymentMethod: totals.isComplimentary ? null : payment,
+        paymentMethod: t.isComplimentary ? null : method,
         lines: cart.flatMap((l): CreateBillCommand['lines'] => {
           if (l.comboId) {
             return [
@@ -270,7 +318,7 @@ export function PosClient({
           : {}),
       };
       const provisionalCommon = {
-        total: totals.final,
+        total: t.final,
         paymentMethod: cmd.paymentMethod,
         lineCount: cmd.lines.length,
       };
@@ -291,7 +339,7 @@ export function PosClient({
         });
         void offline.sync();
         if (opts.offline && opts.receiptNumber) {
-          setOfflineDone({ receiptNumber: opts.receiptNumber, total: totals.final });
+          setOfflineDone({ receiptNumber: opts.receiptNumber, total: t.final });
         } else {
           setQueuedNotice(
             'No connection — bill saved. It sends automatically and the receipt prints once it does.',
@@ -314,6 +362,9 @@ export function PosClient({
           return;
         }
         cmd.offlineAuthBundle = kit.authToken;
+        // Which employee actually rang this up, so a later sync (possibly by
+        // someone else on this shared terminal) can never relabel the sale.
+        cmd.offlineEmployeeId = employeeId;
         await queue({ offline: true, receiptNumber: rn });
         return;
       }
@@ -364,24 +415,41 @@ export function PosClient({
     setReceiptBillId(null);
     setQueuedNotice(null);
     setOfflineDone(null);
+    setPrinterNotice(null);
     if (navigator.onLine) router.refresh();
   }
 
-  function printReceipt() {
-    let result: 'success' | 'failed' = 'success';
-    try {
-      window.print();
-    } catch {
-      result = 'failed';
-    }
+  const printOfflineTicket = useCallback(async (done: { receiptNumber: string; total: string }) => {
+    const outcome = await smartPrint(
+      buildOfflineTicketEscPos(done.receiptNumber, done.total, terminalPaperWidthMm()),
+    );
+    if (!outcome.ok) setPrinterNotice(outcome.error ?? 'Printer error — opened the print dialog.');
+  }, []);
+
+  const printReceipt = useCallback(async () => {
+    if (!receipt) return;
+    const outcome = await smartPrintReceipt(receipt, terminalPaperWidthMm());
+    if (!outcome.ok) setPrinterNotice(outcome.error ?? 'Printer error — opened the print dialog.');
     if (receiptBillId) {
       void fetch(`/api/v1/bills/${receiptBillId}/print-attempts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ result }),
+        body: JSON.stringify({ result: outcome.ok ? 'success' : 'failed' }),
       });
     }
-  }
+  }, [receipt, receiptBillId]);
+
+  // Print fires the moment a receipt is ready — a rush-hour till shouldn't
+  // need a tap just to print what it already has. Guarded by the bill/receipt
+  // id so it can't re-fire on an unrelated re-render.
+  const printedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = receiptBillId ?? (offlineDone ? offlineDone.receiptNumber : null);
+    if (!key || printedRef.current === key) return;
+    printedRef.current = key;
+    if (receipt) void printReceipt();
+    else if (offlineDone) void printOfflineTicket(offlineDone);
+  }, [receipt, offlineDone, receiptBillId, printReceipt]);
 
   if (receipt) {
     return (
@@ -389,11 +457,16 @@ export function PosClient({
         <div style={{ width: 380, maxWidth: '100%' }}>
           <ReceiptView receipt={receipt} paperWidthMm={terminalPaperWidthMm()} />
           <div className="no-print" style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-            <button onClick={printReceipt}>Print receipt</button>
-            <button className="ghost" onClick={newSale}>
-              New sale
+            <button onClick={newSale}>New sale</button>
+            <button className="ghost" onClick={() => void printReceipt()}>
+              Print again
             </button>
           </div>
+          {printerNotice ? (
+            <p className="error no-print" style={{ marginTop: 10 }}>
+              {printerNotice}
+            </p>
+          ) : null}
         </div>
       </div>
     );
@@ -418,10 +491,19 @@ export function PosClient({
             The bill is stored on this terminal and sends automatically when the connection returns.
             Check <strong>Recovery</strong> for its status.
           </p>
-          <button onClick={() => window.print()}>Print</button>
-          <button className="ghost" style={{ marginTop: 10 }} onClick={newSale}>
-            New sale
+          <button onClick={newSale}>New sale</button>
+          <button
+            className="ghost"
+            style={{ marginTop: 10 }}
+            onClick={() => void printOfflineTicket(offlineDone)}
+          >
+            Print again
           </button>
+          {printerNotice ? (
+            <p className="error" style={{ marginTop: 10 }}>
+              {printerNotice}
+            </p>
+          ) : null}
         </div>
       </div>
     );
@@ -466,9 +548,17 @@ export function PosClient({
               Recovery
             </Link>
           ) : null}
+          <span className="topnav">
+            <a href="/stock">Stock & purchases</a>
+            <a href="/history">Bill history</a>
+            <a href="/close" className="danger">
+              Finish
+            </a>
+          </span>
           <span className="muted">{employeeName}</span>
         </span>
       </div>
+      <StaffMenu />
       {queuedNotice ? (
         <p className="ok" style={{ margin: '8px 16px 0' }}>
           {queuedNotice}
@@ -504,12 +594,15 @@ export function PosClient({
             {visibleItems.map((item) => (
               <button
                 key={item.catalogItemId}
-                className="item-card"
+                className={`item-card${justAdded === item.catalogItemId ? ' flash' : ''}`}
                 disabled={!item.isAvailable}
                 title={item.isAvailable ? undefined : (item.availabilityNote ?? 'Out of stock')}
                 onClick={() => {
                   if (item.addons.length > 0) setAddonItem(item);
-                  else addLine(item, [], null);
+                  else {
+                    addLine(item, [], null);
+                    flash(item.catalogItemId);
+                  }
                 }}
               >
                 <span className="name">{item.name}</span>
@@ -526,7 +619,7 @@ export function PosClient({
                 {menu.combos.map((combo) => (
                   <button
                     key={combo.comboId}
-                    className="item-card"
+                    className={`item-card${justAdded === combo.comboId ? ' flash' : ''}`}
                     disabled={!combo.isAvailable}
                     title={
                       combo.isAvailable
@@ -535,7 +628,10 @@ export function PosClient({
                             .join(', ')
                         : (combo.availabilityNote ?? 'Out of stock')
                     }
-                    onClick={() => addComboLine(combo)}
+                    onClick={() => {
+                      addComboLine(combo);
+                      flash(combo.comboId);
+                    }}
                   >
                     <span className="name">{combo.name}</span>
                     <span className="price">₹{combo.price}</span>
@@ -547,15 +643,33 @@ export function PosClient({
           ) : null}
         </div>
         <div className="cart-pane">
-          <h1 style={{ fontSize: 15, margin: '0 0 10px' }}>Current sale</h1>
+          <div className="cart-header">
+            <h1>Current sale</h1>
+            {cart.length > 0 ? (
+              <span className="cart-count">
+                {cart.reduce((s, l) => s + l.quantity, 0)} item
+                {cart.reduce((s, l) => s + l.quantity, 0) === 1 ? '' : 's'}
+              </span>
+            ) : null}
+          </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {cart.length === 0 ? <p className="muted">Cart is empty.</p> : null}
+            {cart.length === 0 ? (
+              <div className="cart-empty">
+                <span className="icon">₹</span>
+                <p className="muted" style={{ margin: 0, fontWeight: 600 }}>
+                  Cart is empty
+                </p>
+                <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+                  Tap a menu item to add it
+                </p>
+              </div>
+            ) : null}
             {cart.map((line) => {
               const t = lineTotal(line);
               return (
                 <div className="cart-line" key={line.clientLineId}>
                   <div style={{ flex: 1 }}>
-                    <div>{line.name}</div>
+                    <div className="item-name">{line.name}</div>
                     {line.addons.map((a) => (
                       <div className="meta" key={a.addonId}>
                         + {a.quantity} x {a.name}
@@ -579,34 +693,40 @@ export function PosClient({
                       </button>
                     )}
                     <div className="qty-row">
-                      <button onClick={() => updateQuantity(line.clientLineId, -1)}>-</button>
-                      <span>{line.quantity}</span>
-                      <button onClick={() => updateQuantity(line.clientLineId, 1)}>+</button>
-                      <button className="link-btn" onClick={() => removeLine(line.clientLineId)}>
-                        Remove
+                      <div className="qty-pill">
+                        <button onClick={() => updateQuantity(line.clientLineId, -1)}>−</button>
+                        <span>{line.quantity}</span>
+                        <button onClick={() => updateQuantity(line.clientLineId, 1)}>+</button>
+                      </div>
+                      <button
+                        className="remove-btn"
+                        title="Remove"
+                        onClick={() => removeLine(line.clientLineId)}
+                      >
+                        ✕
                       </button>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>₹{money(t.final)}</div>
+                  <div style={{ textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 600 }}>
+                    ₹{money(t.final)}
+                  </div>
                 </div>
               );
             })}
           </div>
 
-          <button
-            className="link-btn"
-            style={{ margin: '8px 0' }}
-            onClick={() => setShowBillDiscount(true)}
-          >
-            {billDiscount ? 'Edit bill discount' : 'Add bill discount'}
-          </button>
-          <button
-            className="link-btn"
-            style={{ margin: '0 0 8px' }}
-            onClick={() => setShowCustomer((v) => !v)}
-          >
-            {showCustomer ? 'Hide customer details' : 'Add customer details (optional)'}
-          </button>
+          <div className="row" style={{ gap: 14, margin: '10px 0 2px' }}>
+            <button
+              className="link-btn"
+              disabled={cart.length === 0}
+              onClick={() => setShowBillDiscount(true)}
+            >
+              {billDiscount ? 'Edit bill discount' : 'Add bill discount'}
+            </button>
+            <button className="link-btn" onClick={() => setShowCustomer((v) => !v)}>
+              {showCustomer ? 'Hide customer details' : '+ Customer details'}
+            </button>
+          </div>
           {showCustomer ? (
             <div style={{ marginBottom: 8 }}>
               <input
@@ -622,56 +742,60 @@ export function PosClient({
             </div>
           ) : null}
 
-          <div className="totals-row">
-            <span>Subtotal</span>
-            <span>₹{totals.subtotal}</span>
-          </div>
-          {totals.discountTotal !== '0.00' ? (
+          <div className="totals-card">
             <div className="totals-row">
-              <span>Discount</span>
-              <span>-₹{totals.discountTotal}</span>
+              <span>Subtotal</span>
+              <span>₹{totals.subtotal}</span>
             </div>
-          ) : null}
-          {payment === 'cash' && totals.roundAdjustment !== '0.00' ? (
-            <div className="totals-row">
-              <span>Round-off</span>
-              <span>₹{totals.roundAdjustment}</span>
+            {totals.discountTotal !== '0.00' ? (
+              <div className="totals-row">
+                <span>Discount</span>
+                <span>-₹{totals.discountTotal}</span>
+              </div>
+            ) : null}
+            <div className="totals-row grand">
+              <span>Total</span>
+              <span>₹{totals.final}</span>
             </div>
-          ) : null}
-          <div className="totals-row grand">
-            <span>Total</span>
-            <span>₹{totals.final}</span>
           </div>
 
-          {!totals.isComplimentary ? (
+          {error ? <p className="error">{error}</p> : null}
+
+          {/* Cash / UPI charges the sale on one tap — no separate "confirm"
+              step. Each button shows exactly what it will charge (cash is
+              rounded to the nearest rupee), so nothing is hidden by the
+              shortcut. */}
+          {cart.length === 0 || !totals.isComplimentary ? (
             <div className="pay-row">
               <button
-                className={payment === 'cash' ? 'selected' : 'ghost'}
-                onClick={() => setPayment('cash')}
+                className="charge-btn cash"
+                disabled={busy || cart.length === 0}
+                onClick={() => void checkout('cash')}
               >
-                Cash
+                {busy && payment === 'cash' ? 'Charging…' : `Cash · ₹${cashTotal}`}
               </button>
               <button
-                className={payment === 'upi' ? 'selected' : 'ghost'}
-                onClick={() => setPayment('upi')}
+                className="charge-btn upi"
+                disabled={busy || cart.length === 0}
+                onClick={() => void checkout('upi')}
               >
-                UPI
+                {busy && payment === 'upi' ? 'Charging…' : `UPI · ₹${totals.final}`}
               </button>
             </div>
           ) : (
-            <p className="ok" style={{ margin: '10px 0' }}>
-              Complimentary - no payment required.
-            </p>
+            <>
+              <p className="ok" style={{ margin: '10px 0' }}>
+                Complimentary - no payment required.
+              </p>
+              <button
+                className="confirm-btn"
+                disabled={busy || cart.length === 0}
+                onClick={() => void checkout(null)}
+              >
+                {busy ? 'Processing…' : 'Confirm sale'}
+              </button>
+            </>
           )}
-
-          {error ? <p className="error">{error}</p> : null}
-          <button disabled={busy || cart.length === 0} onClick={() => void checkout()}>
-            {busy ? 'Processing…' : 'Confirm sale'}
-          </button>
-          <div className="topnav" style={{ marginTop: 12, justifyContent: 'space-between' }}>
-            <a href="/history">Bill history</a>
-            <a href="/close">Close register</a>
-          </div>
         </div>
       </div>
 

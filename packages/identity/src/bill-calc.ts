@@ -129,12 +129,20 @@ export function calculateBill(input: CalcInput): CalcResult {
     if (line.baseTotalOverride !== undefined) {
       base = toPaise(line.baseTotalOverride);
     } else {
+      // An add-on's quantity is per unit of the item it's attached to (the
+      // POS merges repeated identical item+addon selections into one line by
+      // incrementing `quantity`, never by growing the addons array), so the
+      // add-on cost scales with the line quantity the same way the item
+      // price does — matching the POS's own display total
+      // (`apps/pos-web/src/app/pos/pos-client.tsx`'s `lineTotal`). Omitting
+      // that multiplication under-billed every multi-quantity line with an
+      // add-on.
       base = toPaise(line.unitPrice) * line.quantity;
       for (const a of line.addons) {
         if (a.quantity <= 0 || !Number.isInteger(a.quantity)) {
           throw new Error('add-on quantity must be a positive integer');
         }
-        base += toPaise(a.unitPrice) * a.quantity;
+        base += toPaise(a.unitPrice) * a.quantity * line.quantity;
       }
     }
     if (base < 0) throw new Error('line base cannot be negative');

@@ -592,22 +592,29 @@ export async function resolveDiscrepancy(
     if (!disc) throw new StockError('not_found', 'Discrepancy not found');
     if (disc.status !== 'open') throw new StockError('conflict', 'Discrepancy already resolved');
 
+    // The capability check above doesn't know which outlet this discrepancy
+    // belongs to — without this, any actor holding `stock.order.oversee`
+    // (franchise_owner included) could resolve a discrepancy on an outlet
+    // that isn't theirs just by knowing/guessing its id.
+    const inwardOutlet = (
+      await client.query<{ outlet_id: string }>(
+        'select outlet_id from stock.outlet_inwards where id = $1',
+        [disc.outlet_inward_id],
+      )
+    ).rows[0];
+    if (!inwardOutlet) throw new StockError('not_found', 'Receiving record not found');
+    await assertOutletInFranchise(pool, actor, inwardOutlet.outlet_id);
+
     let creditNoteId: string | undefined;
 
     if (resolution === 'approved_excess') {
       if (disc.kind !== 'excess') {
         throw new StockError('validation', 'approved_excess only applies to an excess discrepancy');
       }
-      const inward = (
-        await client.query<{ outlet_id: string }>(
-          'select outlet_id from stock.outlet_inwards where id = $1',
-          [disc.outlet_inward_id],
-        )
-      ).rows[0];
       const sellable = (
         await client.query<{ id: string }>(
           `select id from stock.stock_locations where outlet_id = $1 and kind = 'sellable'`,
-          [inward?.outlet_id],
+          [inwardOutlet.outlet_id],
         )
       ).rows[0]?.id;
       if (!sellable) throw new StockError('conflict', 'Outlet stock tracking is not configured');
@@ -670,6 +677,56 @@ export async function resolveDiscrepancy(
       data: { resolution, creditNoteId: creditNoteId ?? null },
     });
     return creditNoteId ? { creditNoteId } : {};
+  });
+}
+
+/**
+ * The terminal step no function ever performed: an order sits at `received`
+ * forever once fully delivered, even after every discrepancy against it is
+ * resolved. Closing is a deliberate action (not automatic on the last
+ * discrepancy resolving) so the owner/Central gets an explicit "this order
+ * is fully wrapped up" checkpoint, matching how approval steps work
+ * elsewhere in this package.
+ */
+export async function closeStockOrder(
+  pool: StockPool,
+  actor: StockActor,
+  orderId: string,
+): Promise<{ status: string }> {
+  ensureStockAllowed(actor, 'stock.order.oversee');
+  return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    const o = await client.query<{ status: string; outlet_id: string; organization_id: string }>(
+      `select status, outlet_id, organization_id from stock.stock_orders where id = $1`,
+      [orderId],
+    );
+    const order = o.rows[0];
+    if (!order) throw new StockError('not_found', 'Order not found');
+    await assertOutletInFranchise(pool, actor, order.outlet_id);
+    if (order.status !== 'received') {
+      throw new StockError('conflict', `Order is ${order.status}, not fully received yet`);
+    }
+    const open = await client.query<{ n: string }>(
+      `select count(*) as n
+         from stock.stock_order_discrepancies d
+         join stock.outlet_inwards oi on oi.id = d.outlet_inward_id
+        where oi.stock_order_id = $1 and d.status = 'open'`,
+      [orderId],
+    );
+    if (Number(open.rows[0]?.n ?? '0') > 0) {
+      throw new StockError('conflict', 'Resolve every open discrepancy before closing this order');
+    }
+    await client.query(`update stock.stock_orders set status = 'closed' where id = $1`, [orderId]);
+    await recordStockAudit(client, {
+      action: 'stock_order.closed',
+      actorRequest: actor.request,
+      accountId: actor.accountId,
+      organizationId: order.organization_id,
+      outletId: order.outlet_id,
+      subjectType: 'stock_order',
+      subjectId: orderId,
+      data: {},
+    });
+    return { status: 'closed' };
   });
 }
 

@@ -102,4 +102,25 @@ describe('resolveRazorpayGateway', () => {
       expect(typeof resolveRazorpayGateway().verifyCheckoutSignature).toBe('function');
     });
   });
+
+  it('refuses to fall back to the test stub in production', () => {
+    const prevEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    delete process.env.RAZORPAY_KEY_ID;
+    delete process.env.RAZORPAY_KEY_SECRET;
+    delete process.env.RAZORPAY_WEBHOOK_SECRET;
+    try {
+      expect(() => resolveRazorpayGateway()).toThrow(/not configured for production/i);
+
+      process.env.RAZORPAY_KEY_ID = 'rzp_live_abc';
+      process.env.RAZORPAY_KEY_SECRET = 'sec';
+      expect(() => resolveRazorpayGateway()).toThrow(/RAZORPAY_WEBHOOK_SECRET/);
+
+      process.env.RAZORPAY_WEBHOOK_SECRET = 'whsec';
+      expect(() => resolveRazorpayGateway()).not.toThrow();
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+      delete process.env.RAZORPAY_WEBHOOK_SECRET;
+    }
+  });
 });

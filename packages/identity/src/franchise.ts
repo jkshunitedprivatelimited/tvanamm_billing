@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { withActorContext, type Pool } from '@jksh/db';
+import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
 import type { ActorContext, CreateFranchiseCommand, FranchiseSummary } from '@jksh/contracts';
 import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
@@ -27,33 +27,42 @@ export async function createFranchise(
   cmd: CreateFranchiseCommand,
   meta: RequestMeta = {},
 ): Promise<{ id: string }> {
+  return withActorContext(pool, contextForActor(actor), (client) =>
+    createFranchiseWithClient(client, actor, cmd, meta),
+  );
+}
+
+export async function createFranchiseWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  cmd: CreateFranchiseCommand,
+  meta: RequestMeta = {},
+): Promise<{ id: string }> {
   ensureAllowed(actor, 'billing.franchise.manage', { organizationId: actor.scope.organizationId });
 
-  return withActorContext(pool, contextForActor(actor), async (client) => {
-    const brand = await client.query<{ organization_id: string }>(
-      `select organization_id from billing.brands where id = $1`,
-      [cmd.brandId],
-    );
-    if (brand.rows[0]?.organization_id !== actor.scope.organizationId) {
-      throw new IdentityError('validation', 'Brand is outside your organization');
-    }
-    const id = randomUUID();
-    await client.query(
-      `insert into billing.franchises (id, organization_id, brand_id, name, slug)
+  const brand = await client.query<{ organization_id: string }>(
+    `select organization_id from billing.brands where id = $1`,
+    [cmd.brandId],
+  );
+  if (brand.rows[0]?.organization_id !== actor.scope.organizationId) {
+    throw new IdentityError('validation', 'Brand is outside your organization');
+  }
+  const id = randomUUID();
+  await client.query(
+    `insert into billing.franchises (id, organization_id, brand_id, name, slug)
        values ($1, $2, $3, $4, $5)`,
-      [id, actor.scope.organizationId, cmd.brandId, cmd.name, slugify(cmd.name)],
-    );
-    await recordAudit(client, {
-      action: 'franchise.created',
-      result: 'success',
-      actorAccountId: actor.accountId,
-      organizationId: actor.scope.organizationId,
-      franchiseId: id,
-      correlationId: meta.correlationId ?? randomUUID(),
-      metadata: { name: cmd.name },
-    });
-    return { id };
+    [id, actor.scope.organizationId, cmd.brandId, cmd.name, slugify(cmd.name)],
+  );
+  await recordAudit(client, {
+    action: 'franchise.created',
+    result: 'success',
+    actorAccountId: actor.accountId,
+    organizationId: actor.scope.organizationId,
+    franchiseId: id,
+    correlationId: meta.correlationId ?? randomUUID(),
+    metadata: { name: cmd.name },
   });
+  return { id };
 }
 
 export async function listFranchises(pool: Pool, actor: ActorContext): Promise<FranchiseSummary[]> {

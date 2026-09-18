@@ -14,14 +14,10 @@ export async function POST(request: Request) {
     const meta = requestMeta(request);
     const actor = await currentOperator();
     if (actor?.outletId && actor.employeeId) {
-      try {
-        const mine = (await listOpenShifts(db(), actor, actor.outletId)).find(
-          (s) => s.employeeId === actor.employeeId,
-        );
-        if (mine) await endShift(db(), actor, mine.id, meta);
-      } catch {
-        // A missing/closed shift must never block sign-out.
-      }
+      const mine = (await listOpenShifts(db(), actor, actor.outletId)).find(
+        (s) => s.employeeId === actor.employeeId,
+      );
+      if (mine) await endShift(db(), actor, mine.id, meta);
     }
 
     const token = await operatorToken();

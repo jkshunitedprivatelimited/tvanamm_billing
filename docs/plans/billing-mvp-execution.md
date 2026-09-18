@@ -38,6 +38,14 @@ only their authorized workspace.
 - Implement GST-inclusive standard pricing.
 - Allow Franchise Owners to create private menu items.
 - Implement different prices and availability per outlet.
+- Keep V1 items single-portion with no variant model.
+- Support free/fixed/included add-ons and Central/Franchise combos composed from
+  existing items.
+- Keep recipes optional: Franchise-created items can be enabled immediately and
+  unmapped items are visibly `not_stock_tracked`; allow one-to-one packaged
+  resale mappings.
+- Add a Stock-owned scaling preview from batch inputs, usable yield, and serving
+  quantity; do not calculate ingredient consumption from selling price.
 - Prevent Store Employees from overriding prices during billing.
 
 Exit: each outlet receives the correct isolated, sellable menu.

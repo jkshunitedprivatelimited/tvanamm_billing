@@ -21,6 +21,7 @@ export const auditActionSchema = z.enum([
   'workspace.selected',
   'franchise.created',
   'outlet.created',
+  'outlet.setup_submitted',
   'outlet.activated',
   'outlet.suspended',
   'outlet.closed',
@@ -105,3 +106,59 @@ export const auditEventSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).default({}),
 });
 export type AuditEvent = z.infer<typeof auditEventSchema>;
+
+/** Business-facing categories; multiple technical events belong to one task. */
+export const ACTIVITY_CATEGORIES = {
+  business: {
+    label: 'Outlet activity',
+    prefixes: [
+      'sale.',
+      'bill.',
+      'expense.',
+      'cash_session.',
+      'shift.',
+      'attendance.',
+      'employee.',
+      'menu.',
+      'catalog.',
+      'offer.',
+    ],
+  },
+  money: {
+    label: 'Sales & money',
+    prefixes: ['sale.', 'bill.', 'expense.', 'cash_session.', 'billing.export.'],
+  },
+  team: {
+    label: 'Team',
+    prefixes: [
+      'attendance.',
+      'shift.',
+      'employee.',
+      'login.',
+      'operator.',
+      'pin.',
+      'logout',
+      'session.',
+    ],
+  },
+  menu: { label: 'Menu', prefixes: ['menu.', 'catalog.', 'offer.'] },
+  account: {
+    label: 'Account & devices',
+    prefixes: [
+      'workspace.',
+      'account.',
+      'membership.',
+      'terminal.',
+      'otp.',
+      'invitation.',
+      'disabled_account.',
+      'step_up.',
+      'offline_auth.',
+      'sync.',
+      'receipt_block.',
+      'outlet.',
+      'franchise.',
+    ],
+  },
+} as const;
+export type ActivityCategory = keyof typeof ACTIVITY_CATEGORIES;

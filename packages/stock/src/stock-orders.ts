@@ -78,7 +78,57 @@ export async function createStockOrder(
     seen.add(line.supplyCatalogItemId);
   }
 
+  if (actor.organizationId !== cmd.organizationId)
+    throw new StockError('forbidden', 'Cross-organization order');
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
+    // Serialize retries of the same client-generated order reference. Preserve
+    // the original price snapshot; never silently accept a different basket.
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `stock-order:${cmd.organizationId}:${cmd.orderNumber}`,
+    ]);
+    const prior = await client.query<{
+      id: string;
+      outlet_id: string;
+      franchise_id: string;
+      subtotal_paise: string;
+      tax_paise: string;
+      delivery_paise: string;
+      total_paise: string;
+    }>('select * from stock.stock_orders where organization_id = $1 and order_number = $2', [
+      cmd.organizationId,
+      cmd.orderNumber,
+    ]);
+    const existing = prior.rows[0];
+    if (existing) {
+      const saved = await client.query<{ supply_catalog_item_id: string; qty_base: string }>(
+        'select supply_catalog_item_id, qty_base from stock.stock_order_lines where stock_order_id = $1',
+        [existing.id],
+      );
+      if (
+        existing.outlet_id !== cmd.outletId ||
+        existing.franchise_id !== cmd.franchiseId ||
+        saved.rows.length !== cmd.lines.length ||
+        !saved.rows.every((line) =>
+          cmd.lines.some(
+            (input) =>
+              input.supplyCatalogItemId === line.supply_catalog_item_id &&
+              Number(input.qtyBase) === Number(line.qty_base),
+          ),
+        )
+      ) {
+        throw new StockError(
+          'conflict',
+          'This order reference already belongs to another basket. Open order history to review it.',
+        );
+      }
+      return {
+        id: existing.id,
+        subtotalPaise: Number(existing.subtotal_paise),
+        taxPaise: Number(existing.tax_paise),
+        deliveryPaise: Number(existing.delivery_paise),
+        totalPaise: Number(existing.total_paise),
+      };
+    }
     let subtotal = 0;
     let tax = 0;
     let deliveryRuleId: string | null = null;
@@ -537,6 +587,8 @@ function extractCurrency(payload: Record<string, unknown>): string | null {
 
 export interface StockOrderView {
   id: string;
+  outletId: string;
+  createdAt: string;
   orderNumber: string;
   status: string;
   subtotalPaise: number;
@@ -547,6 +599,8 @@ export interface StockOrderView {
   lines: {
     supplyCatalogItemId: string;
     itemId: string;
+    itemName: string;
+    baseUnit: string;
     qtyBase: string;
     unitPricePaise: number;
     allocatedQtyBase: string;
@@ -563,6 +617,8 @@ export async function getStockOrder(
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
     const { rows } = await client.query<{
       id: string;
+      outlet_id: string;
+      created_at: Date;
       order_number: string;
       status: string;
       subtotal_paise: string;
@@ -574,6 +630,8 @@ export async function getStockOrder(
     const o = rows[0];
     if (!o) throw new StockError('not_found', 'Stock order not found');
     const lines = await client.query<{
+      item_name: string;
+      base_unit: string;
       supply_catalog_item_id: string;
       item_id: string;
       qty_base: string;
@@ -582,13 +640,16 @@ export async function getStockOrder(
       dispatched_qty_base: string;
       received_qty_base: string;
     }>(
-      `select supply_catalog_item_id, item_id, qty_base, unit_price_paise,
-              allocated_qty_base, dispatched_qty_base, received_qty_base
-         from stock.stock_order_lines where stock_order_id = $1`,
+      `select l.supply_catalog_item_id, l.item_id, i.name as item_name, i.base_unit, l.qty_base, l.unit_price_paise,
+              l.allocated_qty_base, l.dispatched_qty_base, l.received_qty_base
+         from stock.stock_order_lines l join stock.items i on i.id = l.item_id
+         where l.stock_order_id = $1 order by i.name, l.id`,
       [orderId],
     );
     return {
       id: o.id,
+      outletId: o.outlet_id,
+      createdAt: o.created_at.toISOString(),
       orderNumber: o.order_number,
       status: o.status,
       subtotalPaise: Number(o.subtotal_paise),
@@ -599,6 +660,8 @@ export async function getStockOrder(
       lines: lines.rows.map((l) => ({
         supplyCatalogItemId: l.supply_catalog_item_id,
         itemId: l.item_id,
+        itemName: l.item_name,
+        baseUnit: l.base_unit,
         qtyBase: l.qty_base,
         unitPricePaise: Number(l.unit_price_paise),
         allocatedQtyBase: l.allocated_qty_base,

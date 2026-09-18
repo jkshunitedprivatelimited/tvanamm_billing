@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { identityTokenSecret } from '@jksh/config';
-import { withActorContext, type Pool } from '@jksh/db';
+import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
 import type { ActorContext, CreateInvitationCommand } from '@jksh/contracts';
 import { contextForActor, systemContext } from './db-context';
 import { ensureAllowed } from './authz';
@@ -23,84 +23,93 @@ export async function createFranchiseOwnerInvitation(
   cmd: CreateInvitationCommand,
   meta: RequestMeta = {},
 ): Promise<{ invitationId: string; token: string; accountId: string }> {
+  return withActorContext(pool, contextForActor(actor), (client) =>
+    createFranchiseOwnerInvitationWithClient(client, actor, cmd, meta),
+  );
+}
+
+export async function createFranchiseOwnerInvitationWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  cmd: CreateInvitationCommand,
+  meta: RequestMeta = {},
+): Promise<{ invitationId: string; token: string; accountId: string }> {
   ensureAllowed(actor, 'identity.account.manage', { organizationId: actor.scope.organizationId });
   const secret = identityTokenSecret();
   const { token, tokenHash } = mintInvitationToken(secret);
 
-  return withActorContext(pool, contextForActor(actor), async (client) => {
-    const fr = await client.query<{ organization_id: string; brand_id: string }>(
-      `select organization_id, brand_id from billing.franchises where id = $1`,
-      [cmd.franchiseId],
-    );
-    if (fr.rows[0]?.organization_id !== actor.scope.organizationId) {
-      throw new IdentityError('validation', 'Franchise is outside your organization');
-    }
-    const brandId = fr.rows[0].brand_id;
+  const fr = await client.query<{ organization_id: string; brand_id: string }>(
+    `select organization_id, brand_id from billing.franchises where id = $1`,
+    [cmd.franchiseId],
+  );
+  if (fr.rows[0]?.organization_id !== actor.scope.organizationId) {
+    throw new IdentityError('validation', 'Franchise is outside your organization');
+  }
+  const brandId = fr.rows[0].brand_id;
 
-    const existing = await client.query<{ id: string; status: string; is_internal: boolean }>(
-      `select id, status, is_internal from identity.account_profiles where mobile = $1`,
-      [cmd.phone],
+  const existing = await client.query<{ id: string; status: string; is_internal: boolean }>(
+    `select id, status, is_internal from identity.account_profiles where mobile = $1`,
+    [cmd.phone],
+  );
+  const existingRow = existing.rows[0];
+  if (existingRow?.is_internal) {
+    throw new IdentityError(
+      'conflict',
+      'That mobile belongs to an internal JKSH account; it cannot become a Franchise Owner',
     );
-    const existingRow = existing.rows[0];
-    if (existingRow?.is_internal) {
-      throw new IdentityError(
-        'conflict',
-        'That mobile belongs to an internal JKSH account; it cannot become a Franchise Owner',
-      );
-    }
-    let accountId = existingRow?.id;
-    if (!accountId) {
-      accountId = randomUUID();
-      await client.query(
-        `insert into identity.account_profiles
+  }
+  let accountId = existingRow?.id;
+  if (!accountId) {
+    accountId = randomUUID();
+    await client.query(
+      `insert into identity.account_profiles
            (id, mobile, display_name, email, status, is_internal, created_by)
          values ($1,$2,$3,$4,'invited',false,$5)`,
-        [accountId, cmd.phone, cmd.fullName, cmd.email ?? null, actor.accountId ?? null],
-      );
-    }
+      [accountId, cmd.phone, cmd.fullName, cmd.email ?? null, actor.accountId ?? null],
+    );
+  }
 
-    await client.query(
-      `insert into identity.memberships
+  await client.query(
+    `insert into identity.memberships
          (account_id, role_key, organization_id, brand_id, franchise_id, created_by)
        values ($1,'franchise_owner',$2,$3,$4,$5)
        on conflict do nothing`,
-      [accountId, actor.scope.organizationId, brandId, cmd.franchiseId, actor.accountId ?? null],
-    );
+    [accountId, actor.scope.organizationId, brandId, cmd.franchiseId, actor.accountId ?? null],
+  );
 
-    // Supersede any still-open invitation for this account so only one is valid.
-    await client.query(
-      `update identity.invitations
+  // Supersede any still-open invitation for this account so only one is valid.
+  await client.query(
+    `update identity.invitations
          set status = 'cancelled', cancelled_at = now()
        where account_id = $1 and status in ('pending','delivered')`,
-      [accountId],
-    );
+    [accountId],
+  );
 
-    const invitationId = randomUUID();
-    await client.query(
-      `insert into identity.invitations
+  const invitationId = randomUUID();
+  await client.query(
+    `insert into identity.invitations
          (id, account_id, mobile, token_hash, status, expires_at, created_by)
        values ($1,$2,$3,$4,'pending',$5,$6)`,
-      [
-        invitationId,
-        accountId,
-        cmd.phone,
-        tokenHash,
-        new Date(Date.now() + INVITE_TTL_HOURS * 3_600_000),
-        actor.accountId ?? null,
-      ],
-    );
-    await recordAudit(client, {
-      action: 'invitation.created',
-      result: 'success',
-      actorAccountId: actor.accountId,
-      subjectId: accountId,
-      organizationId: actor.scope.organizationId,
-      franchiseId: cmd.franchiseId,
-      correlationId: meta.correlationId ?? randomUUID(),
-      metadata: { invitationId },
-    });
-    return { invitationId, token, accountId };
+    [
+      invitationId,
+      accountId,
+      cmd.phone,
+      tokenHash,
+      new Date(Date.now() + INVITE_TTL_HOURS * 3_600_000),
+      actor.accountId ?? null,
+    ],
+  );
+  await recordAudit(client, {
+    action: 'invitation.created',
+    result: 'success',
+    actorAccountId: actor.accountId,
+    subjectId: accountId,
+    organizationId: actor.scope.organizationId,
+    franchiseId: cmd.franchiseId,
+    correlationId: meta.correlationId ?? randomUUID(),
+    metadata: { invitationId },
   });
+  return { invitationId, token, accountId };
 }
 
 /**

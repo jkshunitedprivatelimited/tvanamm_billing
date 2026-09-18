@@ -48,64 +48,74 @@ export async function createOutlet(
   await ensureAllowedAudited(pool, 'outlet.created', actor, 'billing.outlet.create', {
     organizationId: actor.scope.organizationId,
   });
+  return withActorContext(pool, contextForActor(actor), (client) =>
+    createOutletWithClient(client, actor, cmd, meta),
+  );
+}
 
-  return withActorContext(pool, contextForActor(actor), async (client) => {
-    const { organizationId } = await loadBrandOrg(client, cmd.brandId);
-    if (organizationId !== actor.scope.organizationId) {
-      throw new IdentityError('forbidden', 'Brand is outside your organization');
-    }
-    if (cmd.ownershipType === 'franchise_owned') {
-      const fr = await client.query(
-        `select 1 from billing.franchises where id = $1 and organization_id = $2 and brand_id = $3`,
-        [cmd.franchiseId, organizationId, cmd.brandId],
-      );
-      if (fr.rowCount === 0)
-        throw new IdentityError('validation', 'Franchise does not match brand/org');
-    }
+export async function createOutletWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  cmd: CreateOutletCommand,
+  meta: RequestMeta = {},
+): Promise<{ id: string }> {
+  ensureAllowed(actor, 'billing.outlet.create', { organizationId: actor.scope.organizationId });
 
-    const id = randomUUID();
-    await client.query(
-      `insert into billing.outlets
+  const { organizationId } = await loadBrandOrg(client, cmd.brandId);
+  if (organizationId !== actor.scope.organizationId) {
+    throw new IdentityError('forbidden', 'Brand is outside your organization');
+  }
+  if (cmd.ownershipType === 'franchise_owned') {
+    const fr = await client.query(
+      `select 1 from billing.franchises where id = $1 and organization_id = $2 and brand_id = $3`,
+      [cmd.franchiseId, organizationId, cmd.brandId],
+    );
+    if (fr.rowCount === 0)
+      throw new IdentityError('validation', 'Franchise does not match brand/org');
+  }
+
+  const id = randomUUID();
+  await client.query(
+    `insert into billing.outlets
          (id, organization_id, brand_id, franchise_id, ownership_type, status,
           display_name, legal_name, slug, phone, gstin, address_line, city, state,
           postal_code, nearest_bus_stop, transport_charge_paise, country, timezone,
           payment_methods, created_by, managed_by)
        values ($1,$2,$3,$4,$5,'draft',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$20)`,
-      [
-        id,
-        organizationId,
-        cmd.brandId,
-        cmd.ownershipType === 'franchise_owned' ? cmd.franchiseId : null,
-        cmd.ownershipType,
-        cmd.displayName,
-        cmd.legalName ?? null,
-        slugify(cmd.displayName),
-        cmd.phone ?? '',
-        cmd.gstin ?? null,
-        cmd.addressLine,
-        cmd.city,
-        cmd.state,
-        cmd.postalCode,
-        cmd.nearestBusStop ?? null,
-        cmd.transportChargePaise ?? 0,
-        cmd.country,
-        cmd.timezone,
-        cmd.paymentMethods,
-        actor.accountId ?? null,
-      ],
-    );
-    await recordAudit(client, {
-      action: 'outlet.created',
-      result: 'success',
-      actorAccountId: actor.accountId,
+    [
+      id,
       organizationId,
-      franchiseId: cmd.ownershipType === 'franchise_owned' ? cmd.franchiseId : null,
-      outletId: id,
-      correlationId: meta.correlationId ?? randomUUID(),
-      metadata: { ownershipType: cmd.ownershipType, displayName: cmd.displayName },
-    });
-    return { id };
+      cmd.brandId,
+      cmd.ownershipType === 'franchise_owned' ? cmd.franchiseId : null,
+      cmd.ownershipType,
+      cmd.displayName,
+      cmd.legalName ?? null,
+      slugify(cmd.displayName),
+      cmd.phone ?? '',
+      cmd.gstin ?? null,
+      cmd.addressLine,
+      cmd.city,
+      cmd.state,
+      cmd.postalCode,
+      cmd.nearestBusStop ?? null,
+      cmd.transportChargePaise ?? 0,
+      cmd.country,
+      cmd.timezone,
+      cmd.paymentMethods,
+      actor.accountId ?? null,
+    ],
+  );
+  await recordAudit(client, {
+    action: 'outlet.created',
+    result: 'success',
+    actorAccountId: actor.accountId,
+    organizationId,
+    franchiseId: cmd.ownershipType === 'franchise_owned' ? cmd.franchiseId : null,
+    outletId: id,
+    correlationId: meta.correlationId ?? randomUUID(),
+    metadata: { ownershipType: cmd.ownershipType, displayName: cmd.displayName },
   });
+  return { id };
 }
 
 const LIFECYCLE: Record<

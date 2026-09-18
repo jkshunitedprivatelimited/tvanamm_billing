@@ -1,3 +1,4 @@
+import { ACTIVITY_CATEGORIES, type ActivityCategory } from '@jksh/contracts';
 import { NextResponse } from 'next/server';
 import { listAuditEvents } from '@jksh/identity';
 import { db } from '@/server/pool';
@@ -9,6 +10,11 @@ export async function GET(request: Request) {
   try {
     const actor = await actorOrThrow();
     const u = new URL(request.url);
+    const categoryRaw = u.searchParams.get('category');
+    const category =
+      categoryRaw && Object.hasOwn(ACTIVITY_CATEGORIES, categoryRaw)
+        ? (categoryRaw as ActivityCategory)
+        : undefined;
     const action = u.searchParams.get('action') ?? undefined;
     const outletId = u.searchParams.get('outletId') ?? undefined;
     const from = u.searchParams.get('from') ?? undefined;
@@ -18,6 +24,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(
       await listAuditEvents(db(), actor, {
+        ...(category ? { category } : {}),
         ...(action ? { action } : {}),
         ...(outletId ? { outletId } : {}),
         ...(from && DATE.test(from) ? { from } : {}),

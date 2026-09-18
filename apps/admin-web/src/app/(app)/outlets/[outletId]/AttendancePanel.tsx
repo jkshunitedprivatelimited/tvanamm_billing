@@ -13,7 +13,7 @@ function fmtDuration(min: number | null): string {
   return h > 0 ? `${String(h)}h ${String(m)}m` : `${String(m)}m`;
 }
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 }
 
 export function AttendancePanel({ outletId }: { outletId: string }) {
@@ -76,6 +76,9 @@ export function AttendancePanel({ outletId }: { outletId: string }) {
     <section className="card">
       <div className="spread">
         <h2 style={{ margin: 0 }}>Attendance &amp; shift times</h2>
+        <button className="secondary" disabled={loading} onClick={() => void load()}>
+          {loading ? 'Loading…' : 'Refresh attendance'}
+        </button>
         <input
           type="date"
           value={date}
@@ -185,7 +188,9 @@ export function AttendancePanel({ outletId }: { outletId: string }) {
             {!loading && sessions.length === 0 ? (
               <tr>
                 <td colSpan={6} className="muted">
-                  {err ? 'Unavailable.' : 'No check-ins for this date.'}
+                  {err
+                    ? 'Unavailable.'
+                    : 'No check-ins for this date. Employees can use Check in on the billing screen.'}
                 </td>
               </tr>
             ) : null}

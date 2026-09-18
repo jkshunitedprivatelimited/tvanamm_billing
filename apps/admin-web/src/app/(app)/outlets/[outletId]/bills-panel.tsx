@@ -200,7 +200,7 @@ function BillDetailModal({
         </div>
         {showRefund ? (
           <AdminRefundForm
-            billId={bill.id}
+            bill={bill}
             onClose={() => setShowRefund(false)}
             onDone={() => {
               setShowRefund(false);
@@ -214,33 +214,45 @@ function BillDetailModal({
 }
 
 function AdminRefundForm({
-  billId,
+  bill,
   onClose,
   onDone,
 }: {
-  billId: string;
+  bill: BillView;
   onClose: () => void;
   onDone: () => void;
 }) {
+  const [kind, setKind] = useState<'full' | 'partial'>('full');
   const [payoutMethod, setPayoutMethod] = useState<'cash' | 'upi'>('cash');
   const [payoutReference, setPayoutReference] = useState('');
   const [reason, setReason] = useState('');
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const refundableLines = bill.lines.filter((l) => l.quantity - l.refundedQuantity > 0);
+  const partialHasAnyQty = refundableLines.some((l) => (quantities[l.id] ?? 0) > 0);
 
   async function submit() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/bills/${billId}/refunds`, {
+      const lines =
+        kind === 'partial'
+          ? refundableLines
+              .map((l) => ({ billLineId: l.id, quantity: quantities[l.id] ?? 0 }))
+              .filter((l) => l.quantity > 0)
+          : undefined;
+      const res = await fetch(`/api/v1/bills/${bill.id}/refunds`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           idempotencyKey: crypto.randomUUID() + crypto.randomUUID(),
-          kind: 'full',
+          kind,
           payoutMethod,
           reason,
           ...(payoutMethod === 'upi' ? { payoutReference } : {}),
+          ...(lines ? { lines } : {}),
         }),
       });
       if (!res.ok) {
@@ -254,12 +266,68 @@ function AdminRefundForm({
     }
   }
 
+  const canSubmit =
+    !busy &&
+    reason.trim() &&
+    !(payoutMethod === 'upi' && !payoutReference.trim()) &&
+    (kind === 'full' || partialHasAnyQty);
+
   return (
     <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-      <h3 style={{ margin: '0 0 8px' }}>Full refund</h3>
+      <h3 style={{ margin: '0 0 8px' }}>Refund</h3>
       <p className="muted">
         Franchise Owner refunds are limited to a 60-day window from the bill&apos;s original date.
       </p>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <button className={kind === 'full' ? '' : 'secondary'} onClick={() => setKind('full')}>
+          Full
+        </button>
+        <button
+          className={kind === 'partial' ? '' : 'secondary'}
+          onClick={() => setKind('partial')}
+        >
+          Partial
+        </button>
+      </div>
+      {kind === 'partial' ? (
+        <div style={{ marginBottom: 10 }}>
+          {refundableLines.map((l) => {
+            const left = l.quantity - l.refundedQuantity;
+            return (
+              <div
+                key={l.id}
+                className="row"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginBottom: 6,
+                  gap: 8,
+                }}
+              >
+                <span>
+                  {l.itemName} ({left} left)
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  max={left}
+                  style={{ width: 70, marginBottom: 0 }}
+                  value={quantities[l.id] ?? 0}
+                  onChange={(e) =>
+                    setQuantities((prev) => ({
+                      ...prev,
+                      [l.id]: Math.max(0, Math.min(left, Number(e.target.value) || 0)),
+                    }))
+                  }
+                />
+              </div>
+            );
+          })}
+          {refundableLines.length === 0 ? (
+            <p className="muted">Nothing left on this bill to refund.</p>
+          ) : null}
+        </div>
+      ) : null}
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <button
           className={payoutMethod === 'cash' ? '' : 'secondary'}
@@ -290,10 +358,7 @@ function AdminRefundForm({
       />
       {error ? <p className="error">{error}</p> : null}
       <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          disabled={busy || !reason.trim() || (payoutMethod === 'upi' && !payoutReference.trim())}
-          onClick={() => void submit()}
-        >
+        <button disabled={!canSubmit} onClick={() => void submit()}>
           Confirm refund
         </button>
         <button className="secondary" onClick={onClose}>

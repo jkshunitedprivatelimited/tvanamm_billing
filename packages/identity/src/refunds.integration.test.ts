@@ -356,6 +356,32 @@ describe.skipIf(!RUN)('Billing V1 Stage 5 - history, printing, refunds', () => {
     ).rejects.toThrow(/exceeds what remains/i);
   }, 30_000);
 
+  it('rejects a single refund request that lists the same bill line twice and together exceeds what remains', async () => {
+    const opA = await loginAs(pinA);
+    const bill = await ringUpBill(opA, 2);
+    const billLineId = await lineIdOf(bill.id);
+
+    // Each entry alone (1 <= 2 remaining) would pass an independent check,
+    // but together they ask for 3 of the 2 units on this line.
+    await expect(
+      createRefund(pool, opA, {
+        idempotencyKey: `idem-dup-${S}`,
+        billId: bill.id,
+        kind: 'partial',
+        payoutMethod: 'cash',
+        reason: 'duplicate line entries',
+        lines: [
+          { billLineId, quantity: 1 },
+          { billLineId, quantity: 2 },
+        ],
+      }),
+    ).rejects.toThrow(/exceeds what remains/i);
+
+    const after = await getBill(pool, opA, bill.id);
+    expect(after.status).toBe('completed');
+    expect(after.remainingRefundable).toBe('100.00');
+  }, 30_000);
+
   it('prevents a concurrent refund from exceeding the original quantity', async () => {
     const opA = await loginAs(pinA);
     const bill = await ringUpBill(opA, 2);

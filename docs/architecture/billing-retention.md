@@ -61,8 +61,8 @@ audited.
 - Export ready/failed: notify job status.
 - Archive failed: alert JKSH operations; never delete the source records.
 
-Email notification is optional per Franchise Owner settings. In-app notification
-is retained as the authoritative delivery channel.
+In-app notification is the only operational delivery channel in the initial
+product. No archive/export email or SMS is sent; SMS remains reserved for OTP.
 
 ## Archive Job Safety
 

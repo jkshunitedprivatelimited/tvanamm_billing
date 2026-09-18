@@ -298,6 +298,12 @@ export async function openStockCount(
     ]);
     const l = loc.rows[0];
     if (!l) throw new StockError('not_found', 'Stock location not found');
+    // Same object-level check `recordWastage` already does for this same
+    // table — without it, the capability check alone lets any actor with
+    // `stock.count.operate` open a count against an outlet/warehouse that
+    // isn't theirs.
+    if (l.warehouse_id) assertWarehouseAccess(actor, l.warehouse_id);
+    else if (l.outlet_id) await assertOutletInFranchise(pool, actor, l.outlet_id);
     const ins = await client.query<{ id: string }>(
       `insert into stock.stock_counts
          (organization_id, stock_location_id, warehouse_id, outlet_id, franchise_id,
@@ -333,12 +339,19 @@ export async function enterCountLine(
 ): Promise<{ varianceQtyBase: string }> {
   ensureStockAllowed(actor, 'stock.count.operate');
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
-    const count = await client.query<{ stock_location_id: string; status: string }>(
-      'select stock_location_id, status from stock.stock_counts where id = $1',
+    const count = await client.query<{
+      stock_location_id: string;
+      status: string;
+      warehouse_id: string | null;
+      outlet_id: string | null;
+    }>(
+      'select stock_location_id, status, warehouse_id, outlet_id from stock.stock_counts where id = $1',
       [stockCountId],
     );
     const c = count.rows[0];
     if (!c) throw new StockError('not_found', 'Stock count not found');
+    if (c.warehouse_id) assertWarehouseAccess(actor, c.warehouse_id);
+    else if (c.outlet_id) await assertOutletInFranchise(pool, actor, c.outlet_id);
     if (!['open', 'counting'].includes(c.status)) {
       throw new StockError('conflict', `Count is ${c.status}`);
     }
@@ -383,6 +396,15 @@ export async function submitCountForReview(
 ): Promise<void> {
   ensureStockAllowed(actor, 'stock.count.operate');
   await withStockActorContext(pool, stockSystemContext(), async (client) => {
+    const count = await client.query<{ warehouse_id: string | null; outlet_id: string | null }>(
+      'select warehouse_id, outlet_id from stock.stock_counts where id = $1',
+      [stockCountId],
+    );
+    const c = count.rows[0];
+    if (!c) throw new StockError('not_found', 'Stock count not found');
+    if (c.warehouse_id) assertWarehouseAccess(actor, c.warehouse_id);
+    else if (c.outlet_id) await assertOutletInFranchise(pool, actor, c.outlet_id);
+
     const r = await client.query(
       `update stock.stock_counts set status = 'review'
         where id = $1 and status in ('open','counting')`,
@@ -408,17 +430,27 @@ export async function approveCountAdjustments(
   actor: StockActor,
   stockCountId: string,
 ): Promise<{ adjustments: number }> {
-  ensureStockAllowed(actor, 'stock.adjustment.approve');
+  if (actor.role !== 'franchise_owner') ensureStockAllowed(actor, 'stock.adjustment.approve');
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
     const count = await client.query<{
       status: string;
       stock_location_id: string;
       organization_id: string;
-    }>('select status, stock_location_id, organization_id from stock.stock_counts where id = $1', [
-      stockCountId,
-    ]);
+      warehouse_id: string | null;
+      outlet_id: string | null;
+    }>(
+      `select status, stock_location_id, organization_id, warehouse_id, outlet_id
+         from stock.stock_counts where id = $1 for update`,
+      [stockCountId],
+    );
     const c = count.rows[0];
     if (!c) throw new StockError('not_found', 'Stock count not found');
+    if (actor.role === 'franchise_owner' && !c.outlet_id)
+      throw new StockError('forbidden', 'Only your outlet counts can be reviewed');
+    if (c.organization_id !== actor.organizationId)
+      throw new StockError('forbidden', 'Count is outside your workspace');
+    if (c.warehouse_id) assertWarehouseAccess(actor, c.warehouse_id);
+    else if (c.outlet_id) await assertOutletInFranchise(pool, actor, c.outlet_id);
     if (c.status !== 'review')
       throw new StockError('conflict', `Count is ${c.status}, not in review`);
 

@@ -12,7 +12,15 @@ const DB_TESTS = ['packages/*/src/**/*integration.test.ts'];
 function isolateLocalDb(name: string): string | undefined {
   const raw = process.env[name];
   if (!raw) return undefined;
-  if (!/@(localhost|127\.0\.0\.1)[:/]/.test(raw)) return raw;
+  if (!/@(localhost|127\.0\.0\.1)[:/]/.test(raw)) {
+    // Shared app databases must never receive integration-test fixtures.
+    if (process.env.ALLOW_REMOTE_INTEGRATION_TESTS !== 'true') {
+      throw new Error(
+        `${name} points to a remote database. Use an isolated local test database, or explicitly set ALLOW_REMOTE_INTEGRATION_TESTS=true for a dedicated remote test project.`,
+      );
+    }
+    return raw;
+  }
   if (/\/[a-z0-9_]+_test(\?|$)/i.test(raw)) return raw;
   return raw.replace(/\/([a-z0-9_]+)(\?|$)/i, '/$1_test$2');
 }

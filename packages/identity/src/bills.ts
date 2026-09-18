@@ -503,7 +503,9 @@ export async function createBill(
     throw new IdentityError('forbidden', 'A store operator session is required');
   }
   const outletId = actor.outletId;
-  const employeeId = actor.employeeId;
+  // Reassigned below (3a) for an offline bill: attribution follows the
+  // employee the device recorded, not the session creating this request.
+  let employeeId = actor.employeeId;
   const terminalId = actor.terminalId;
   const correlationId = meta.correlationId ?? randomUUID();
   ensureAllowed(actor, 'billing.sale.create', {
@@ -563,7 +565,45 @@ export async function createBill(
       });
     }
 
-    // 3. An open cash session and the operator's own open shift are required.
+    // 3. Authoritative pricing from the published menu version.
+    const menu = await loadMenuVersion(client, outletId, cmd.menuVersion, cmd.offline ?? false);
+    // Scheduled offers apply only to online bills - an offline device would
+    // need its offer versions cached in the signed bundle, which is deferred.
+    const offers = cmd.offline
+      ? new Map<string, ResolvedOffer>()
+      : await resolveOffersForOutlet(client, outletId, outlet.timezone, new Date());
+    const resolved = resolveLines(cmd, menu.items, menu.combos, offers);
+
+    // 3a. Offline bills must present a valid, matching authorization bundle,
+    // and are attributed to the employee the *device* recorded as having
+    // rung up the sale - not to whoever happens to be logged in when the
+    // terminal reconnects and syncs. A shift handover between those two
+    // moments must never relabel someone else's sale.
+    let discountCeiling: DiscountPolicy | null = null;
+    if (cmd.offline) {
+      if (!cmd.offlineAuthBundle || !cmd.offlineEmployeeId) {
+        throw new IdentityError('offline_auth_invalid', 'Offline authorization is required');
+      }
+      const bundle = parseOfflineAuthBundle(identityTokenSecret(), cmd.offlineAuthBundle);
+      if (!bundle) {
+        throw new IdentityError('offline_auth_invalid', 'Offline authorization is not valid');
+      }
+      const covers = assertOfflineAuthCovers(bundle, {
+        outletId,
+        terminalId,
+        employeeId: cmd.offlineEmployeeId,
+        menuVersion: menu.version,
+        menuChecksum: menu.checksum,
+        terminalOccurredAt: cmd.terminalOccurredAt,
+      });
+      if (!covers.ok) throw new IdentityError('offline_auth_invalid', covers.reason);
+      employeeId = cmd.offlineEmployeeId;
+      discountCeiling = bundle.discountPolicy;
+    }
+
+    // 4. An open cash session and the billed employee's own open shift are
+    // required (for an offline bill, the employee it was actually rung up
+    // under - see 3a - not necessarily whoever is syncing right now).
     const cash = await client.query<{ id: string }>(
       `select id from billing.cash_sessions where outlet_id = $1 and status = 'open'`,
       [outletId],
@@ -581,37 +621,6 @@ export async function createBill(
       throw new IdentityError('conflict', 'Start your shift before billing', {
         details: { code: 'shift_required' },
       });
-    }
-
-    // 4. Authoritative pricing from the published menu version.
-    const menu = await loadMenuVersion(client, outletId, cmd.menuVersion, cmd.offline ?? false);
-    // Scheduled offers apply only to online bills - an offline device would
-    // need its offer versions cached in the signed bundle, which is deferred.
-    const offers = cmd.offline
-      ? new Map<string, ResolvedOffer>()
-      : await resolveOffersForOutlet(client, outletId, outlet.timezone, new Date());
-    const resolved = resolveLines(cmd, menu.items, menu.combos, offers);
-
-    // 4a. Offline bills must present a valid, matching authorization bundle.
-    let discountCeiling: DiscountPolicy | null = null;
-    if (cmd.offline) {
-      if (!cmd.offlineAuthBundle) {
-        throw new IdentityError('offline_auth_invalid', 'Offline authorization is required');
-      }
-      const bundle = parseOfflineAuthBundle(identityTokenSecret(), cmd.offlineAuthBundle);
-      if (!bundle) {
-        throw new IdentityError('offline_auth_invalid', 'Offline authorization is not valid');
-      }
-      const covers = assertOfflineAuthCovers(bundle, {
-        outletId,
-        terminalId,
-        employeeId,
-        menuVersion: menu.version,
-        menuChecksum: menu.checksum,
-        terminalOccurredAt: cmd.terminalOccurredAt,
-      });
-      if (!covers.ok) throw new IdentityError('offline_auth_invalid', covers.reason);
-      discountCeiling = bundle.discountPolicy;
     }
 
     const calc = calculateBill({
@@ -766,12 +775,18 @@ export async function createBill(
         ],
       );
       for (const a of line.addons) {
-        const total = (Number(a.snap.price) * a.quantity).toFixed(2);
+        // `a.quantity` off the wire is per unit of the item (same as
+        // bill-calc.ts's pricing); store the full quantity actually
+        // consumed across this line so `quantity * unit_price = total`
+        // holds here the same way it does for the item line itself, and the
+        // receipt shows a real total rather than a lone per-unit price.
+        const totalQuantity = a.quantity * line.quantity;
+        const total = (Number(a.snap.price) * totalQuantity).toFixed(2);
         await client.query(
           `insert into billing.bill_line_addons
              (bill_line_id, addon_id, addon_name, quantity, unit_price, total)
            values ($1,$2,$3,$4,$5,$6)`,
-          [lineId, a.snap.addonId, a.snap.name, a.quantity, a.snap.price, total],
+          [lineId, a.snap.addonId, a.snap.name, totalQuantity, a.snap.price, total],
         );
       }
       if (line.lineDiscount && Number(lc.discount) > 0) {
@@ -852,6 +867,7 @@ export async function createBill(
         outletId,
         receiptNumber,
         businessDate: today,
+        committedAt: cmd.terminalOccurredAt,
         finalTotal: calc.finalTotal,
         lines: resolved.map((l) => ({
           billLineId: billLineIdByLineNo.get(l.lineNo),

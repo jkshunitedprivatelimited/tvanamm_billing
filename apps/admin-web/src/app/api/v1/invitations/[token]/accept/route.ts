@@ -1,3 +1,7 @@
+import { cookies } from 'next/headers';
+import { localSessionAuthEnabled } from '@/dev-auth-flags';
+import { OTP_CHALLENGE_COOKIE, OTP_CHALLENGE_PATH } from '@/server/otp-challenge';
+import { Msg91OtpUnavailable } from '@/server/msg91-otp';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { mobileNumberSchema } from '@jksh/contracts';
@@ -6,7 +10,7 @@ import { db } from '@/server/pool';
 import { jsonError, requestMeta } from '@/server/http';
 import { verifyPhoneOtp } from '@/server/otp';
 import { WS_COOKIE, signWorkspace, wsCookieOptions } from '@/server/ws-cookie';
-import { DEV_COOKIE, devCookieOptions, devOtpEnabled, signDevSession } from '@/server/dev-session';
+import { DEV_COOKIE, devCookieOptions, signDevSession } from '@/server/dev-session';
 
 const bodySchema = z.object({
   phone: mobileNumberSchema,
@@ -19,7 +23,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     const { phone, code } = bodySchema.parse(await request.json());
     const meta = requestMeta(request);
 
-    const otp = await verifyPhoneOtp(phone, code);
+    const challenge = (await cookies()).get(OTP_CHALLENGE_COOKIE)?.value;
+    const otp = await verifyPhoneOtp(phone, code, challenge);
     if (!otp.ok) {
       return NextResponse.json(
         {
@@ -40,7 +45,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
       meta,
     );
     const response = NextResponse.json(result);
-    if (devOtpEnabled() && result.outcome !== 'rejected' && accountId) {
+    response.cookies.set(OTP_CHALLENGE_COOKIE, '', { path: OTP_CHALLENGE_PATH, maxAge: 0 });
+    if (localSessionAuthEnabled() && result.outcome !== 'rejected' && accountId) {
       response.cookies.set(DEV_COOKIE, signDevSession(accountId, phone), devCookieOptions(request));
     }
     if (result.outcome === 'single_workspace') {
@@ -48,6 +54,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     }
     return response;
   } catch (error) {
+    if (error instanceof Msg91OtpUnavailable)
+      return NextResponse.json({ message: error.message }, { status: 503 });
     return jsonError(error);
   }
 }

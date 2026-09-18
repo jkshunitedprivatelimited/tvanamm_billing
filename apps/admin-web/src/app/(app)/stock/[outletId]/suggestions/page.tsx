@@ -35,6 +35,7 @@ export default async function SuggestionsPage({
         outletId={outletId}
         rows={suggestions.map((s) => ({
           id: s.id,
+          itemId: s.itemId,
           itemName: itemName.get(s.itemId) ?? s.itemId,
           suggestedQtyBase: s.suggestedQtyBase,
           status: s.status,

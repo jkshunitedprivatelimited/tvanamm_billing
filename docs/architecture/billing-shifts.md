@@ -50,7 +50,9 @@ The Cash drawer is tracked independently from employees:
    opening Cash amount.
 2. Multiple employee shifts may operate during the same Cash session.
 3. Only one employee is the active operator on a particular terminal at a time.
-4. Cash bills and Cash refunds update the expected shared drawer balance.
+4. Cash bills, Cash refunds, and confirmed operational expenses paid from the
+   shared drawer update its expected balance. Outlet UPI, owner-paid, and
+   employee-paid expenses do not affect the drawer.
 5. At outlet/day closing, an authorized Store Employee or Franchise Owner enters
    one total counted Cash amount.
 6. Denomination details are optional and do not replace the final total.
@@ -65,6 +67,20 @@ The Cash drawer is tracked independently from employees:
 
 The MVP permits one open Cash session per outlet at a time. This avoids assigning
 the same physical money to several employee shifts.
+
+```text
+expected Cash = opening Cash
+              + Cash sales
+              - Cash refunds
+              - operational expenses paid from the shared drawer
+              + Cash top-ups
+              - Cash drops
+              - bank deposits
+```
+
+Every mid-day Cash movement is a separate immutable record with type, amount,
+employee, time, and mandatory reason. Corrections use linked reversals. Details
+are defined in `docs/architecture/cash-movements.md`.
 
 ## Security and Consistency Rules
 

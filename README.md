@@ -37,9 +37,17 @@ npm run db:migrate             # apply database/migrations/*.sql (uses DIRECT_UR
 npm run db:seed                # reference data + demo outlet + optional BOOTSTRAP_* accounts
 ```
 
-Admin login is **Supabase Auth phone OTP**; MSG91 is only the SMS carrier, wired
-as Supabase's **Send SMS** auth hook (`MSG91_AUTHKEY` / `MSG91_SMS_TEMPLATE_ID`).
-MSG91 is **not integrated yet** by explicit product decision.
+Admin login uses the **MSG91 server-side OTP APIs**, without a browser widget or
+CAPTCHA. Set `MSG91_AUTHKEY` and `MSG91_WIDGET_ID` on the server. OTP challenges
+are signed, expire after ten minutes, and are bound to the requested phone;
+the provider's verified mobile must match before a session is issued. Alternatively,
+Supabase Auth can deliver OTPs through the MSG91 **Send SMS** hook.
+
+For hosting, keep `ALLOW_INSECURE_DEV_AUTH=false` and `ADMIN_DEV_OTP` empty, set
+the public app URLs and `ALLOWED_ORIGINS` to the deployed HTTPS origins, and
+configure those domains in MSG91. Let Next choose `NODE_ENV` for `dev` / `build`
+or explicitly use `NODE_ENV=production` for builds. Verify a real SMS login on
+the deployed admin URL before use.
 
 For local development only, a fixed-code bypass is available. It requires **all
 three** of `NODE_ENV=development`, `ALLOW_INSECURE_DEV_AUTH=true`, and a non-empty

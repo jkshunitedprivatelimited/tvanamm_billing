@@ -39,6 +39,27 @@
 - Later Stock mapping may associate an add-on with ingredients or inventory
   consumption without giving Stock access to Billing tables.
 
+## Held Carts
+
+- Employees may hold multiple unpaid carts for the active outlet and resume them
+  on the registered terminal.
+- A held cart stores a short generated label, optional note, lines, add-ons,
+  discounts, menu/price version, creator, and timestamps.
+- Any authenticated Store Employee at the same outlet may resume it. The final
+  bill records the checkout employee and retains cart creator/history.
+- Holding does not allocate a receipt number, create a bill/payment, reserve
+  Stock, or publish a sale event.
+- Lines retain their previously valid same-day menu/price snapshot and revalidate
+  at checkout. An explicit item pause blocks checkout and requires removal; a
+  publication never silently changes the held price.
+- Offline held carts use encrypted durable storage and idempotent synchronization
+  where server-backed holding is enabled.
+- Every unpaid held cart automatically expires at outlet business-day end. The
+  expiry creates an operational audit event but no financial cancellation or
+  refund.
+- Active cart count and payload size are bounded to protect device storage; the
+  UI warns before the limit and supports explicit discard.
+
 ## Primary Sale Flow
 
 1. Employee unlocks the registered terminal using their four-digit PIN.

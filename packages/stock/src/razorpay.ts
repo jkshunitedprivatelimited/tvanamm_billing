@@ -193,21 +193,40 @@ export function httpRazorpayGateway(opts: {
 
 /**
  * Select the gateway from the environment: the real HTTP gateway when a
- * Razorpay key id/secret is configured, otherwise the in-process stub for local
- * dev and tests.
+ * Razorpay key id/secret is configured, otherwise the in-process stub for
+ * local dev and tests.
+ *
+ * The stub signs with a well-known default secret and treats any unknown
+ * payment id as instantly captured — fine for tests, but a live production
+ * deployment must never silently fall back to it (a caller who read this
+ * source could forge a "paid" checkout). So in production, missing real
+ * credentials is a hard failure — stock-order prepayment stays unavailable
+ * rather than accepting spoofable payments.
  */
 export function resolveRazorpayGateway(): RazorpayGateway {
   const keyId = process.env.RAZORPAY_KEY_ID;
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
-  if (keyId && keyId.startsWith('rzp_') && keySecret) {
-    return httpRazorpayGateway({
-      keyId,
-      keySecret,
-      webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET ?? '',
-    });
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  const hasRealCredentials = !!keyId && keyId.startsWith('rzp_') && !!keySecret;
+
+  if (process.env.NODE_ENV === 'production') {
+    if (!hasRealCredentials) {
+      throw new Error(
+        'Razorpay is not configured for production (RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET missing) — refusing to fall back to the test stub.',
+      );
+    }
+    if (!webhookSecret) {
+      throw new Error(
+        'RAZORPAY_WEBHOOK_SECRET is not configured for production — signed webhooks would be unverifiable.',
+      );
+    }
+  }
+
+  if (hasRealCredentials) {
+    return httpRazorpayGateway({ keyId, keySecret, webhookSecret: webhookSecret ?? '' });
   }
   return stubRazorpayGateway({
     keySecret: keySecret ?? 'stub_key_secret',
-    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET ?? 'stub_webhook_secret',
+    webhookSecret: webhookSecret ?? 'stub_webhook_secret',
   });
 }

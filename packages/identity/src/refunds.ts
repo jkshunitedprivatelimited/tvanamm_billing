@@ -177,15 +177,26 @@ export async function createRefund(
       if (requested.length === 0) {
         throw new IdentityError('validation', 'A partial refund needs at least one line');
       }
+      // Merge repeated entries for the same bill line before checking
+      // remainingQuantity - validating each entry independently let two
+      // requests for the same line each pass (both <= remaining) while
+      // together exceeding what was actually left on the line.
+      const mergedByLine = new Map<string, number>();
       for (const r of requested) {
-        const line = byId.get(r.billLineId);
+        if (!byId.has(r.billLineId)) {
+          throw new IdentityError('validation', 'Bill line not found on this bill');
+        }
+        mergedByLine.set(r.billLineId, (mergedByLine.get(r.billLineId) ?? 0) + r.quantity);
+      }
+      for (const [billLineId, quantity] of mergedByLine) {
+        const line = byId.get(billLineId);
         if (!line) throw new IdentityError('validation', 'Bill line not found on this bill');
-        if (r.quantity > line.remainingQuantity) {
+        if (quantity > line.remainingQuantity) {
           throw new IdentityError('conflict', 'Refund quantity exceeds what remains on this line', {
-            details: { code: 'refund_exceeds_remaining', billLineId: r.billLineId },
+            details: { code: 'refund_exceeds_remaining', billLineId },
           });
         }
-        targets.push({ line, quantity: r.quantity });
+        targets.push({ line, quantity });
       }
     }
     if (targets.length === 0 || targets.every((t) => t.quantity === 0)) {

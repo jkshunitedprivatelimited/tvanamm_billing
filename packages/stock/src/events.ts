@@ -103,8 +103,8 @@ export async function ingestInboundEvent(
   await client.query(
     `insert into stock_inbox.events
        (id, source, source_event_id, event_type, event_version, payload, signature,
-        signature_verified, correlation_id)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        signature_verified, correlation_id, source_occurred_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [
       id,
       env.source,
@@ -115,6 +115,7 @@ export async function ingestInboundEvent(
       env.signature ?? null,
       verified,
       env.correlationId,
+      env.occurredAt,
     ],
   );
   return { inboxId: id, duplicate: false, signatureVerified: verified };
