@@ -1,0 +1,14 @@
+.git
+.claude
+.codex
+.agents
+.env
+.env.*
+**/.env
+**/.env.*
+**/node_modules
+**/.next
+**/.next-production
+**/coverage
+**/*.tsbuildinfo
+.DS_Store
