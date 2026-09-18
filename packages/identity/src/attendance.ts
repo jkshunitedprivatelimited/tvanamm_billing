@@ -1,3 +1,4 @@
+import { lockOutletWork } from './work-lock';
 import { randomUUID } from 'node:crypto';
 import { applyContext, withActorContext, type Pool, type PoolClient } from '@jksh/db';
 import type {
@@ -91,6 +92,7 @@ async function checkInWithClient(
   resumeExisting = false,
 ): Promise<{ id: string }> {
   const { employeeId, outletId } = operatorContext(actor);
+  await lockOutletWork(client, outletId);
   ensureAllowed(actor, 'identity.attendance.self', {
     organizationId: actor.scope.organizationId,
     ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
@@ -170,7 +172,17 @@ async function checkOutWithClient(
   cmd: CheckOutCommand,
   meta: RequestMeta = {},
 ): Promise<{ id: string }> {
-  const { employeeId } = operatorContext(actor);
+  const { employeeId, outletId } = operatorContext(actor);
+  await lockOutletWork(client, outletId);
+  const shifts = await client.query(
+    "select 1 from billing.employee_shifts where employee_id = $1 and status = 'open' limit 1",
+    [employeeId],
+  );
+  if (shifts.rowCount)
+    throw new IdentityError(
+      'conflict',
+      'Use Finish shift to finish your billing shift and check out together.',
+    );
   const open = await client.query<{
     id: string;
     organization_id: string;

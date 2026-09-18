@@ -1,21 +1,18 @@
 import { NextResponse } from 'next/server';
-import { closeCashSessionCommandSchema } from '@jksh/contracts';
-import { closeCashSession } from '@jksh/identity';
-import { db } from '@/server/pool';
-import { jsonError, requestMeta } from '@/server/http';
 import { currentOperator } from '@/server/auth';
+import { jsonError } from '@/server/http';
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ sessionId: string }> },
-) {
+/** Older clients must use the combined expense review / handover / closing flow. */
+export async function POST() {
   try {
-    const actor = await currentOperator();
-    if (!actor) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
-    const { sessionId } = await params;
-    const cmd = closeCashSessionCommandSchema.parse(await request.json());
+    if (!(await currentOperator()))
+      return NextResponse.json({ message: 'Please sign in again.' }, { status: 401 });
     return NextResponse.json(
-      await closeCashSession(db(), actor, sessionId, cmd, requestMeta(request)),
+      {
+        message: 'Use Finish shift to review expenses and close or hand over the register.',
+        next: '/close',
+      },
+      { status: 409 },
     );
   } catch (error) {
     return jsonError(error);

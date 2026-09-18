@@ -1,4 +1,9 @@
-import { getOperatorSummary, getOpenCashSession, listExpenses } from '@jksh/identity';
+import {
+  getOperatorSummary,
+  getOpenCashSession,
+  listExpenses,
+  listOutletStaff,
+} from '@jksh/identity';
 import { requireOperator } from '@/server/auth';
 import { db } from '@/server/pool';
 import { CloseRegister } from './close-client';
@@ -6,12 +11,17 @@ import { CloseRegister } from './close-client';
 export default async function ClosePage() {
   const actor = await requireOperator();
   const pool = db();
-  const me = await getOperatorSummary(pool, actor);
-  const cashSession = actor.outletId ? await getOpenCashSession(pool, actor, actor.outletId) : null;
-
-  const expenses = actor.outletId
-    ? await listExpenses(pool, actor, { outletId: actor.outletId, currentEmployeeShiftOnly: true })
-    : [];
+  const [staff, me, cashSession, expenses] = await Promise.all([
+    listOutletStaff(pool, actor),
+    getOperatorSummary(pool, actor),
+    actor.outletId ? getOpenCashSession(pool, actor, actor.outletId) : null,
+    actor.outletId
+      ? listExpenses(pool, actor, { outletId: actor.outletId, currentEmployeeShiftOnly: true })
+      : [],
+  ]);
+  const otherStaff = staff.filter(
+    (person) => !person.isCurrentCashier && (person.checkedIn || person.shiftOpen),
+  );
 
   return (
     <main className="pos">
@@ -19,7 +29,11 @@ export default async function ClosePage() {
       <p className="muted">Signed in as {me?.employeeName ?? 'operator'}</p>
       <a href="/pos">&larr; Back to billing</a>
       <div className="panel" style={{ margin: '20px 0', width: 'auto' }}>
-        <CloseRegister cashSession={cashSession} expenses={expenses} />
+        <CloseRegister
+          cashSession={cashSession}
+          expenses={expenses}
+          otherStaff={otherStaff.map((person) => person.name)}
+        />
       </div>
     </main>
   );

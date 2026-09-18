@@ -25,6 +25,8 @@ export function OpenRegister({ outletName }: { outletName: string }) {
         return;
       }
       router.refresh();
+    } catch {
+      setError('Could not open the register. Check your connection and try again.');
     } finally {
       setBusy(false);
     }
@@ -48,7 +50,9 @@ export function OpenRegister({ outletName }: { outletName: string }) {
           placeholder="0.00"
         />
         <button
-          disabled={busy || !openingCash || Number(openingCash) < 0}
+          disabled={
+            busy || !openingCash || !Number.isFinite(Number(openingCash)) || Number(openingCash) < 0
+          }
           onClick={() => void submit()}
         >
           Open register

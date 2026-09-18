@@ -1,22 +1,26 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { CashSessionSummary, ExpenseView } from '@jksh/contracts';
 import { useRouter } from 'next/navigation';
+import { StaffAttendance } from '@/components/StaffAttendance';
 import { ExpensesClient } from '../expenses/expenses-client';
 import { clearOfflineKit, listOutboxBills } from '@/lib/offline-store';
 
 export function CloseRegister({
   cashSession,
   expenses,
+  otherStaff,
 }: {
   cashSession: CashSessionSummary | null;
   expenses: ExpenseView[];
+  otherStaff: string[];
 }) {
   const router = useRouter();
+  const submitting = useRef(false);
   const [addingExpense, setAddingExpense] = useState(false);
   const [expensePending, setExpensePending] = useState(false);
-  const [closing, setClosing] = useState(Boolean(cashSession));
+  const [closing, setClosing] = useState(Boolean(cashSession) && otherStaff.length === 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [countedCash, setCountedCash] = useState('');
@@ -24,7 +28,8 @@ export function CloseRegister({
   const [result, setResult] = useState<{ cashSession: CashSessionSummary | null } | null>(null);
 
   async function finish(closeStore: boolean) {
-    if (expensePending || addingExpense) return;
+    if (submitting.current || expensePending || addingExpense) return;
+    submitting.current = true;
     setBusy(true);
     setError('');
     try {
@@ -60,6 +65,7 @@ export function CloseRegister({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Connect to the internet and try again.');
     } finally {
+      submitting.current = false;
       setBusy(false);
     }
   }
@@ -87,6 +93,18 @@ export function CloseRegister({
   return (
     <div>
       <h2>Finish shift</h2>
+      {otherStaff.length ? (
+        <section style={{ marginBottom: 20 }}>
+          <p>
+            <strong>Still working:</strong> {otherStaff.join(', ')}
+          </p>
+          <p>
+            Hand over to keep billing open. To close the register, each other employee must check
+            out with their PIN first.
+          </p>
+          <StaffAttendance />
+        </section>
+      ) : null}
       <section aria-labelledby="expense-review" style={{ marginBottom: 24 }}>
         <h3 id="expense-review">Expenses during your shift</h3>
         <p>
@@ -159,7 +177,11 @@ export function CloseRegister({
           </div>
           {cashSession ? (
             <div>
-              <button className="ghost" disabled={busy} onClick={() => setClosing(true)}>
+              <button
+                className="ghost"
+                disabled={busy || otherStaff.length > 0}
+                onClick={() => setClosing(true)}
+              >
                 Count cash & close register
               </button>
               <p className="muted">Finish the day by counting the cash at the counter.</p>
@@ -198,6 +220,7 @@ export function CloseRegister({
           <button
             disabled={
               busy ||
+              otherStaff.length > 0 ||
               addingExpense ||
               expensePending ||
               countedCash === '' ||

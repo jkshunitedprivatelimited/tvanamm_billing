@@ -1,15 +1,19 @@
 import { NextResponse } from 'next/server';
-import { endShift } from '@jksh/identity';
-import { db } from '@/server/pool';
-import { jsonError, requestMeta } from '@/server/http';
 import { currentOperator } from '@/server/auth';
+import { jsonError } from '@/server/http';
 
-export async function POST(request: Request, { params }: { params: Promise<{ shiftId: string }> }) {
+/** Older clients must use the combined expense review / handover / closing flow. */
+export async function POST() {
   try {
-    const actor = await currentOperator();
-    if (!actor) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
-    const { shiftId } = await params;
-    return NextResponse.json(await endShift(db(), actor, shiftId, requestMeta(request)));
+    if (!(await currentOperator()))
+      return NextResponse.json({ message: 'Please sign in again.' }, { status: 401 });
+    return NextResponse.json(
+      {
+        message: 'Use Finish shift to review expenses and close or hand over the register.',
+        next: '/close',
+      },
+      { status: 409 },
+    );
   } catch (error) {
     return jsonError(error);
   }

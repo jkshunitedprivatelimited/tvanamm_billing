@@ -12,9 +12,14 @@ import { migrate } from '@jksh/db/migrate';
 import type { ActorContext } from '@jksh/contracts';
 import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth';
 import { issueActivationCode, registerTerminal } from './terminal';
-import { getOwnOpenAttendance } from './attendance';
+import { checkOut, getOwnOpenAttendance } from './attendance';
 import { createEmployee } from './employee';
-import { pinLogin, loadOperatorContext } from './store-auth';
+import {
+  pinLogin,
+  loadOperatorContext,
+  recordStaffAttendance,
+  listOutletStaff,
+} from './store-auth';
 import {
   openCashSession,
   finishWork,
@@ -289,6 +294,75 @@ describe.skipIf(!RUN)('Billing V1 Stage 2 - shifts + cash session', () => {
       command: { countedCash: '500.00' },
     });
     expect(retry.cashSession?.id).toBe(cash.id);
+  });
+
+  it('checks out a second employee with their PIN and prevents closing over their open work', async () => {
+    const b = await loginAs(pinB);
+    const cash = await openCashSession(pool, b, { openingCash: '200.00' });
+    const bShift = await startShift(pool, b, {});
+    const a = await loginAs(pinA);
+    const aShift = await startShift(pool, a, {});
+    await expect(checkOut(pool, a, {})).rejects.toThrow(/Finish shift/);
+    await expect(
+      recordStaffAttendance(pool, a, {
+        terminalCredential,
+        pin: pinA,
+        employeeId: a.employeeId!,
+        action: 'check-out',
+      }),
+    ).rejects.toThrow(/Finish shift/);
+    await expect(
+      finishWork(pool, a, {
+        sessionId: cash.id,
+        command: { countedCash: '200.00' },
+      }),
+    ).rejects.toThrow(/Check out/);
+    expect((await getOpenCashSession(pool, a, outletId))?.id).toBe(cash.id);
+    await expect(endShift(pool, a, bShift.id)).rejects.toThrow(/own shift|not found/);
+    await recordStaffAttendance(pool, a, {
+      terminalCredential,
+      pin: pinB,
+      employeeId: b.employeeId!,
+      action: 'check-out',
+    });
+    const staff = await listOutletStaff(pool, a);
+    expect(staff.find((person) => person.id === b.employeeId)).toMatchObject({
+      checkedIn: false,
+      shiftOpen: false,
+    });
+    expect(staff.find((person) => person.id === a.employeeId)).toMatchObject({
+      checkedIn: true,
+      shiftOpen: true,
+      isCurrentCashier: true,
+    });
+    expect((await listOpenShifts(pool, a, outletId)).map((shift) => shift.id)).toEqual([aShift.id]);
+    const closed = await finishWork(pool, a, {
+      sessionId: cash.id,
+      command: { countedCash: '200.00' },
+    });
+    expect(closed.cashSession?.status).toBe('closed');
+    expect(await getOwnOpenAttendance(pool, a)).toBeNull();
+    expect(await listOpenShifts(pool, a, outletId)).toHaveLength(0);
+    const next = await loginAs(pinA);
+    expect(await getOwnOpenAttendance(pool, next)).not.toBeNull();
+    expect(await getOpenCashSession(pool, next, outletId)).toBeNull();
+    await finishWork(pool, next);
+  });
+
+  it('requires attendance-only coworkers to check out before final register closing', async () => {
+    const b = await loginAs(pinB);
+    const a = await loginAs(pinA);
+    const cash = await openCashSession(pool, a, { openingCash: '0.00' });
+    await expect(
+      finishWork(pool, a, { sessionId: cash.id, command: { countedCash: '0.00' } }),
+    ).rejects.toThrow(/Check out/);
+    await recordStaffAttendance(pool, a, {
+      terminalCredential,
+      pin: pinB,
+      employeeId: b.employeeId!,
+      action: 'check-out',
+    });
+    await finishWork(pool, a, { sessionId: cash.id, command: { countedCash: '0.00' } });
   });
 
   it('blocks billing while a prior business-date shift or cash session is still open', async () => {

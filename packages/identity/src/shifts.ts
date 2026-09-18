@@ -1,5 +1,6 @@
+import { lockOutletWork } from './work-lock';
 import { randomUUID } from 'node:crypto';
-import { withActorContext, type Pool, type PoolClient } from '@jksh/db';
+import { applyContext, withActorContext, type Pool, type PoolClient } from '@jksh/db';
 import type {
   ActorContext,
   BillingWindow,
@@ -11,7 +12,7 @@ import type {
   StartShiftCommand,
 } from '@jksh/contracts';
 import { recordVerifiedStaffAttendance } from './attendance';
-import { contextForActor } from './db-context';
+import { systemContext, contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 import { recordAudit } from './audit';
 import { IdentityError } from './errors';
@@ -81,6 +82,7 @@ export async function openCashSession(
   });
 
   return withActorContext(pool, contextForActor(actor), async (client) => {
+    await lockOutletWork(client, outletId);
     const outlet = await outletContext(client, outletId);
     if (outlet.status !== 'active') {
       throw new IdentityError('outlet_not_active', 'Outlet is not active');
@@ -308,6 +310,7 @@ export async function startShift(
   });
 
   return withActorContext(pool, contextForActor(actor), async (client) => {
+    await lockOutletWork(client, outletId);
     const outlet = await outletContext(client, outletId);
     // Concurrent page renders must serialize the check-and-create for this employee.
     // The transaction releases this lock after the new shift and audit are committed.
@@ -389,6 +392,8 @@ async function endShiftWithClient(
     ...(shift.franchise_id ? { franchiseId: shift.franchise_id } : {}),
     outletId: shift.outlet_id,
   });
+  if (shift.employee_id !== employeeId)
+    throw new IdentityError('forbidden', 'You can only finish your own shift');
   if (shift.status !== 'open') throw new IdentityError('conflict', 'Shift is not open');
 
   await client.query(
@@ -552,14 +557,31 @@ export async function finishWork(
   meta: RequestMeta = {},
 ): Promise<{ cashSession: CashSessionSummary | null }> {
   const employeeId = operatorEmployeeId(actor);
-  if (!actor.outletId) throw new IdentityError('forbidden', 'No outlet in session');
+  const outletId = actor.outletId;
+  if (!outletId) throw new IdentityError('forbidden', 'No outlet in session');
   const result = await withActorContext(pool, contextForActor(actor), async (client) => {
+    await lockOutletWork(client, outletId);
     // Serialize retries and starts for this employee.
     await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
       `employee-shift:${employeeId}`,
     ]);
     let cashSession: CashSessionSummary | null = null;
     if (cash) {
+      await applyContext(client, systemContext());
+      const others = await client.query<{ name: string }>(
+        `select e.full_name as name from identity.store_employees e
+         where e.outlet_id = $1 and e.id <> $2 and (
+           exists (select 1 from identity.attendance_sessions a where a.employee_id = e.id and a.status = 'open')
+           or exists (select 1 from billing.employee_shifts s where s.employee_id = e.id and s.status = 'open')
+         )`,
+        [actor.outletId, employeeId],
+      );
+      await applyContext(client, contextForActor(actor));
+      if (others.rows.length)
+        throw new IdentityError(
+          'conflict',
+          `Check out ${others.rows.map((person) => person.name).join(', ')} before closing the register, or hand over and finish only your shift.`,
+        );
       const session = await client.query<{ status: string }>(
         'select status from billing.cash_sessions where id = $1 and outlet_id = $2 for update',
         [cash.sessionId, actor.outletId],
@@ -570,18 +592,34 @@ export async function finishWork(
           ? await closeCashSessionWithClient(client, actor, cash.sessionId, cash.command, meta)
           : await loadCashSession(client, cash.sessionId);
     }
-    const shifts = await client.query<{ id: string }>(
-      "select id from billing.employee_shifts where employee_id = $1 and outlet_id = $2 and status = 'open' for update",
-      [employeeId, actor.outletId],
-    );
-    for (const shift of shifts.rows) await endShiftWithClient(client, actor, shift.id, meta);
-    const attendance = await client.query(
-      "select id from identity.attendance_sessions where employee_id = $1 and outlet_id = $2 and status = 'open' for update",
-      [employeeId, actor.outletId],
-    );
-    if (attendance.rowCount) await recordVerifiedStaffAttendance(client, actor, 'check-out', meta);
+    await finishEmployeeWithClient(client, actor, meta);
     return { cashSession };
   });
   if (result.cashSession) await notifyCashDifference(pool, result.cashSession.id);
   return result;
+}
+
+/** Used only after the employee's PIN has been verified, or for their own Finish action. */
+export async function finishEmployeeWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  meta: RequestMeta = {},
+): Promise<void> {
+  const employeeId = operatorEmployeeId(actor);
+  await applyContext(client, contextForActor(actor));
+  if (!actor.outletId) throw new IdentityError('forbidden', 'No outlet in session');
+  await lockOutletWork(client, actor.outletId);
+  await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    `employee-shift:${employeeId}`,
+  ]);
+  const shifts = await client.query<{ id: string }>(
+    "select id from billing.employee_shifts where employee_id = $1 and outlet_id = $2 and status = 'open' for update",
+    [employeeId, actor.outletId],
+  );
+  for (const shift of shifts.rows) await endShiftWithClient(client, actor, shift.id, meta);
+  const attendance = await client.query(
+    "select id from identity.attendance_sessions where employee_id = $1 and outlet_id = $2 and status = 'open' for update",
+    [employeeId, actor.outletId],
+  );
+  if (attendance.rowCount) await recordVerifiedStaffAttendance(client, actor, 'check-out', meta);
 }

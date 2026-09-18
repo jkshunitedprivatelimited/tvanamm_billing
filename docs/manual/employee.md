@@ -13,7 +13,7 @@ Identify who is working and record the cash available before sales begin.
 1. Sign in on the registered billing device with your own PIN and confirm your name.
 2. If the store register is closed, count the money in the drawer and enter the opening cash when prompted.
 3. Start your shift. If another employee already opened the register, use the existing shared register.
-4. Open Staff menu to record attendance. A colleague can identify themselves with their own PIN without changing the cashier.
+4. Signing in records your attendance automatically. Other staff can check in with their own PIN under Team & help → Staff attendance without changing the cashier.
 
 Opening cash belongs to the shared register. Do not enter it again just because a second employee starts work.
 
@@ -87,17 +87,17 @@ Example: if the app shows 6 litres but you have 5 litres, enter 5. If a loss was
 
 ## Finish your shift or close the store
 
-**Where:** Billing → Finish
+**Where:** Billing → Finish shift
 
 Keep staff attendance and shared cash accurate.
 
 1. Review your shift expenses. Add missing expenses or confirm that all expenses are recorded or that there were none.
-2. Choose Finish my work when another employee will continue billing. This ends your own shift and attendance and signs you out; the store register stays open.
-3. Choose Close store only when the shared register should close. Count the actual cash and enter it.
+2. Choose Confirm handover & finish shift when another employee will continue billing. This ends your shift and attendance and signs you out; the register stays open.
+3. To close the day, have other employees check out with their own PIN under Staff attendance first. Count the drawer cash, then choose Close register & finish shift.
 4. If the cash differs from the expected amount, enter a clear reason and complete the close.
 5. Check that your work is finished before leaving the device.
 
-Each employee records their own attendance. Signing out or changing cashier is not the same as closing the store. Sync pending bills before switching or finishing when the app requires it.
+Lock lets another cashier sign in without ending your shift or attendance. Staff checkout ends that employee’s shift and attendance together. The current cashier uses Finish shift to review expenses and hand over or close. Sync pending bills first.
 
 ## Handle offline billing and retries
 

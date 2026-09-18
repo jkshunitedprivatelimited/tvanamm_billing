@@ -38,7 +38,8 @@ export function StartShift({
         <h2>Hello, {employeeName}</h2>
         <p>The shared register is already open. Opening cash has already been recorded.</p>
         <p className="muted">
-          Confirm your billing shift to start making sales. Attendance is recorded separately.
+          Confirm your billing shift to start making sales. Your attendance was recorded when you
+          signed in.
         </p>
         <button disabled={busy} onClick={() => void start()}>
           {busy ? 'Starting…' : 'Start my shift'}

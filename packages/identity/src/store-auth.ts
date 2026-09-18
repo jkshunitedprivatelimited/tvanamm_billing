@@ -21,6 +21,7 @@ import {
   parseTerminalCredential,
 } from './tokens';
 import { recordVerifiedStaffAttendance } from './attendance';
+import { finishEmployeeWithClient } from './shifts';
 import { IdentityError } from './errors';
 import { recordAudit } from './audit';
 import type { RequestMeta } from './admin-auth';
@@ -238,7 +239,11 @@ async function authenticatePin(
         secondsSinceAuth: 0,
       };
       // PIN verification never changes the cashier's operator session.
-      await recordVerifiedStaffAttendance(client, staffActor, attendance.action, meta);
+      if (attendance.action === 'check-out') {
+        await finishEmployeeWithClient(client, staffActor, meta);
+      } else {
+        await recordVerifiedStaffAttendance(client, staffActor, attendance.action, meta);
+      }
       return { attendanceRecorded: true };
     }
     // Switching operator ends any prior open context on this terminal.
@@ -337,6 +342,12 @@ export async function recordStaffAttendance(
   if (actor.kind !== 'operator' || !actor.sessionActive || !actor.outletId) {
     throw new IdentityError('forbidden', 'Sign in to use staff attendance');
   }
+  if (cmd.action === 'check-out' && cmd.employeeId === actor.employeeId) {
+    throw new IdentityError(
+      'validation',
+      'Use Finish shift to review your expenses and close or hand over the register.',
+    );
+  }
   const result = await authenticatePin(pool, cmd, meta, { ...cmd, outletId: actor.outletId });
   if (!('attendanceRecorded' in result)) {
     throw new IdentityError(
@@ -349,18 +360,28 @@ export async function recordStaffAttendance(
 export async function listOutletStaff(
   pool: Pool,
   actor: ActorContext,
-): Promise<{ id: string; name: string; checkedIn: boolean }[]> {
+): Promise<
+  { id: string; name: string; checkedIn: boolean; isCurrentCashier: boolean; shiftOpen: boolean }[]
+> {
   if (actor.kind !== 'operator' || !actor.sessionActive || !actor.outletId) {
     throw new IdentityError('forbidden', 'Sign in to view staff');
   }
   // Deliberately limited roster: no PIN hashes, phone numbers or attendance history.
   return withActorContext(pool, systemContext(), async (client) => {
-    const { rows } = await client.query<{ id: string; name: string; checkedIn: boolean }>(
+    const { rows } = await client.query<{
+      id: string;
+      name: string;
+      checkedIn: boolean;
+      isCurrentCashier: boolean;
+      shiftOpen: boolean;
+    }>(
       `select e.id, e.full_name as name, exists (
          select 1 from identity.attendance_sessions a where a.employee_id = e.id and a.status = 'open'
-       ) as "checkedIn" from identity.store_employees e
+       ) as "checkedIn", e.id = $2 as "isCurrentCashier", exists (
+         select 1 from billing.employee_shifts s where s.employee_id = e.id and s.status = 'open'
+       ) as "shiftOpen" from identity.store_employees e
        where e.outlet_id = $1 and e.status = 'active' order by e.full_name`,
-      [actor.outletId],
+      [actor.outletId, actor.employeeId],
     );
     return rows;
   });
