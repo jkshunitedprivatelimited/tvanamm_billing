@@ -10,10 +10,12 @@ const PAYMENT_SOURCES: { value: string; label: string }[] = [
 ];
 
 export function ExpensesClient({
+  embedded = false,
   onSaved,
   onDraftChange,
   onCancel,
 }: {
+  embedded?: boolean;
   onCancel?: () => void;
   onSaved?: () => void;
   onDraftChange?: (pending: boolean) => void;
@@ -88,8 +90,17 @@ export function ExpensesClient({
       className="card"
       onChange={() => onDraftChange?.(true)}
       onSubmit={submit}
-      style={{ maxWidth: 420 }}
+      style={{ maxWidth: embedded ? undefined : 420 }}
     >
+      {embedded ? (
+        <>
+          <h2>Record an expense</h2>
+          <p>
+            Enter any expense category, amount and reason. This records spending without changing
+            stock.
+          </p>
+        </>
+      ) : null}
       <label>
         <div className="muted" style={{ fontSize: 12 }}>
           What was it for?
@@ -99,25 +110,27 @@ export function ExpensesClient({
           maxLength={120}
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          placeholder="e.g. Milk"
+          placeholder={embedded ? 'e.g. Delivery charge, cleaning supplies, repairs' : 'e.g. Milk'}
           required
         />
       </label>
       <div className="row wrap" style={{ gap: 6, margin: '-8px 0 12px' }}>
-        {QUICK_CATEGORIES.map((c) => (
-          <button
-            key={c}
-            type="button"
-            disabled={busy || attemptKey.current !== null}
-            className={`cat-tab${category === c ? ' active' : ''}`}
-            onClick={() => {
-              setCategory(c);
-              onDraftChange?.(true);
-            }}
-          >
-            {c}
-          </button>
-        ))}
+        {QUICK_CATEGORIES.filter((c) => !embedded || !['Milk', 'Sugar', 'Ice'].includes(c)).map(
+          (c) => (
+            <button
+              key={c}
+              type="button"
+              disabled={busy || attemptKey.current !== null}
+              className={`cat-tab${category === c ? ' active' : ''}`}
+              onClick={() => {
+                setCategory(c);
+                onDraftChange?.(true);
+              }}
+            >
+              {c}
+            </button>
+          ),
+        )}
       </div>
 
       <label>
@@ -163,7 +176,9 @@ export function ExpensesClient({
           maxLength={500}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. 2L milk for the morning batch"
+          placeholder={
+            embedded ? 'What was purchased or paid for?' : 'e.g. 2L milk for the morning batch'
+          }
           required
         />
       </label>

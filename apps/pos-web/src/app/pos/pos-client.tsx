@@ -549,7 +549,7 @@ export function PosClient({
             </Link>
           ) : null}
           <span className="topnav">
-            <a href="/stock">Stock & purchases</a>
+            <a href="/stock">Stock & expenses</a>
             <a href="/history">Bill history</a>
             <Link href="/pos/printer">Printer</Link>
             <a href="/close" className="danger">
