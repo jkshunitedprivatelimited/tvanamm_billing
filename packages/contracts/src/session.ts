@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { mobileNumberSchema } from './identity';
+import { invitationPhoneSchema, mobileNumberSchema } from './identity';
 
 // --- Admin login: Supabase Auth mobile OTP (MSG91 delivers the SMS) --------
 
@@ -74,7 +74,7 @@ export type PinLoginResult = z.infer<typeof pinLoginResultSchema>;
 
 export const createInvitationCommandSchema = z.object({
   fullName: z.string().trim().min(2).max(120),
-  phone: mobileNumberSchema,
+  phone: invitationPhoneSchema,
   franchiseId: z.uuid(),
   email: z.email().optional(),
 });

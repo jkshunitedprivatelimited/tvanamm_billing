@@ -26,6 +26,23 @@ export type EmployeeStatus = z.infer<typeof employeeStatusSchema>;
 /** E.164 mobile number, e.g. +919876543210. */
 export const mobileNumberSchema = z.string().regex(/^\+[1-9]\d{7,14}$/);
 
+/** Human-entered invitation numbers; keep strict E.164 for stored identities. */
+export const invitationPhoneSchema = z
+  .string()
+  .trim()
+  .regex(/^[+0-9 ()-]+$/, 'Enter a valid mobile number')
+  .transform((value) => {
+    const compact = value.replace(/[ ()-]/g, '');
+    if (/^[6-9]\d{9}$/.test(compact)) return `+91${compact}`;
+    if (/^91[6-9]\d{9}$/.test(compact)) return `+${compact}`;
+    return compact;
+  })
+  .pipe(mobileNumberSchema)
+  .refine(
+    (value) => !value.startsWith('+91') || /^\+91[6-9]\d{9}$/.test(value),
+    'Enter a valid 10-digit Indian mobile number',
+  );
+
 /**
  * A resource scope. `organizationId` is always present; the remaining fields
  * narrow it. A membership scope "contains" a request when every field the

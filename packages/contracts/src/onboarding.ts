@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { mobileNumberSchema } from './identity';
+import { invitationPhoneSchema, mobileNumberSchema } from './identity';
 export const inviteOutletOwnerSchema = z.object({
   brandId: z.uuid(),
   name: z.string().trim().min(2).max(120),
   fullName: z.string().trim().min(2).max(120),
-  phone: mobileNumberSchema,
+  phone: invitationPhoneSchema,
 });
 export const ownerOutletDetailsSchema = z
   .object({

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { invitationPhoneSchema } from '@jksh/contracts';
 import { useRouter } from 'next/navigation';
 import type { FranchiseSummary, OutletOnboardingView } from '@jksh/contracts';
 
@@ -25,9 +26,23 @@ export function FranchisePanel({
   const [invite, setInvite] = useState({ fullName: '', phone: '+91' });
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
   const [invitationUrl, setInvitationUrl] = useState('');
+  const [copied, setCopied] = useState(false);
+  async function copyLink(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+    } catch {
+      setError('Select the invitation link and copy it manually.');
+    }
+  }
 
   async function createFranchise(e: React.SyntheticEvent) {
     e.preventDefault();
+    const phone = invitationPhoneSchema.safeParse(owner.phone);
+    if (!phone.success) {
+      setError('Enter a valid owner mobile number, for example 9000145659.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -38,10 +53,7 @@ export function FranchisePanel({
           brandId: TVANAMM_BRAND,
           name,
           fullName: owner.fullName,
-          phone:
-            owner.phone.replace(/\D/g, '').length === 10
-              ? `+91${owner.phone.replace(/\D/g, '')}`
-              : `+${owner.phone.replace(/\D/g, '')}`,
+          phone: phone.data,
         }),
       });
       if (!res.ok) {
@@ -58,6 +70,8 @@ export function FranchisePanel({
       setName('');
       setOwner({ fullName: '', phone: '' });
       router.refresh();
+    } catch {
+      setError('Could not connect. Please try again.');
     } finally {
       setBusy(false);
     }
@@ -68,11 +82,18 @@ export function FranchisePanel({
     setBusy(true);
     setError(null);
     setIssuedToken(null);
+    setNewInviteUrl('');
+    setCopied(false);
     try {
+      const phone = invitationPhoneSchema.safeParse(invite.phone);
+      if (!phone.success) {
+        setError('Enter a valid owner mobile number, for example 9000145659.');
+        return;
+      }
       const res = await fetch('/api/v1/invitations/franchise-owners', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ franchiseId, fullName: invite.fullName, phone: invite.phone }),
+        body: JSON.stringify({ franchiseId, fullName: invite.fullName, phone: phone.data }),
       });
       const body = (await res.json()) as { token?: string; message?: string };
       if (!res.ok || !body.token) {
@@ -87,6 +108,8 @@ export function FranchisePanel({
         ).href,
       );
       setInvite({ fullName: '', phone: '+91' });
+    } catch {
+      setError('Could not connect. Please try again.');
     } finally {
       setBusy(false);
     }
@@ -143,9 +166,16 @@ export function FranchisePanel({
           >
             {newInviteUrl}
           </a>
+          <button type="button" className="secondary" onClick={() => void copyLink(newInviteUrl)}>
+            {copied ? 'Copied' : 'Copy link'}
+          </button>
         </p>
       ) : null}
-      {error ? <p className="error">{error}</p> : null}
+      {error && !inviteFor ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
 
       <button type="button" className="secondary" onClick={() => router.refresh()}>
         Refresh progress
@@ -189,11 +219,15 @@ export function FranchisePanel({
                       disabled={busy}
                       onClick={() => {
                         setInviteFor(inviteFor === f.id ? null : f.id);
+                        setInvite({ fullName: '', phone: setup?.phone ?? '+91' });
+                        setCopied(false);
                         setIssuedToken(null);
                         setError(null);
                       }}
                     >
-                      Invite owner
+                      {setup?.stage === 'invited' && setup.phone
+                        ? 'Generate new link'
+                        : 'Invite owner'}
                     </button>
                   )}
                 </td>
@@ -213,6 +247,14 @@ export function FranchisePanel({
       {inviteFor ? (
         <form className="card" style={{ marginTop: 12 }} onSubmit={(e) => sendInvite(inviteFor, e)}>
           <h2>Invite Franchise Owner</h2>
+          <p>
+            Lost the previous link? Generate a new one below. It replaces the previous unused link.
+          </p>
+          {error ? (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          ) : null}
           <label htmlFor="ifn">Owner full name</label>
           <input
             id="ifn"
@@ -223,6 +265,10 @@ export function FranchisePanel({
           <label htmlFor="iph">Owner mobile</label>
           <input
             id="iph"
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            required
             value={invite.phone}
             onChange={(e) => setInvite((v) => ({ ...v, phone: e.target.value.trim() }))}
           />
@@ -241,6 +287,13 @@ export function FranchisePanel({
               >
                 {invitationUrl}
               </a>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => void copyLink(invitationUrl)}
+              >
+                {copied ? 'Copied' : 'Copy link'}
+              </button>
             </p>
           ) : null}
         </form>
