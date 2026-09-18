@@ -32,8 +32,13 @@ export function SessionControls() {
   return (
     <div style={{ maxWidth: 380 }}>
       <div style={{ display: 'flex', gap: 12 }}>
-        <button className="ghost" disabled={busy} onClick={() => void lock()}>
-          Switch cashier
+        <button
+          className="ghost"
+          title="Lock billing and return to PIN login"
+          disabled={busy}
+          onClick={() => void lock()}
+        >
+          {busy ? 'Locking…' : 'Lock'}
         </button>
       </div>
       {error ? (

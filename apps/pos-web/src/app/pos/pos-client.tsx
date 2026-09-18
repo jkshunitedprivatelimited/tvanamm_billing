@@ -16,6 +16,7 @@ import { buildOfflineTicketEscPos } from '@/lib/escpos';
 import { BrandMark } from '@/components/BrandMark';
 import { PrinterStatus } from '@/components/PrinterStatus';
 import { StaffMenu } from '@/components/StaffMenu';
+import { SessionControls } from '@/app/session-controls';
 import { useOffline } from '@/lib/use-offline';
 import {
   enqueueOutboxBill,
@@ -565,6 +566,7 @@ export function PosClient({
               Finish shift
             </a>
           </span>
+          <SessionControls />
           <span className="muted">{employeeName}</span>
         </span>
       </div>
