@@ -163,10 +163,12 @@ describe.skipIf(!RUN)('Workforce attendance', () => {
     await pool.end();
   });
 
-  it('checks in, rejects a duplicate check-in, then checks out', async () => {
+  it('checks in on login, preserves repeat login time, then checks out', async () => {
     const op = await operator();
-    expect(await getOwnOpenAttendance(pool, op)).toBeNull();
-    const { id } = await checkIn(pool, op, {});
+    const original = await getOwnOpenAttendance(pool, op);
+    const id = original?.id;
+    const again = await operator();
+    expect(await getOwnOpenAttendance(pool, again)).toEqual(original);
     expect(id).toBeTruthy();
     expect(await getOwnOpenAttendance(pool, op)).toEqual({
       id,
@@ -210,7 +212,7 @@ describe.skipIf(!RUN)('Workforce attendance', () => {
     expect((await loadOperatorContext(pool, login.operatorToken))?.employeeId).toBe(
       cashier.employeeId,
     );
-    expect(await getOwnOpenAttendance(pool, cashier)).toBeNull();
+    expect(await getOwnOpenAttendance(pool, cashier)).not.toBeNull();
     await recordStaffAttendance(pool, cashier, {
       terminalCredential,
       pin: colleaguePin,

@@ -12,7 +12,7 @@ import { migrate } from '@jksh/db/migrate';
 import type { ActorContext } from '@jksh/contracts';
 import { resolveAdminAfterVerify, buildAdminActor } from './admin-auth';
 import { issueActivationCode, registerTerminal } from './terminal';
-import { checkIn, getOwnOpenAttendance } from './attendance';
+import { getOwnOpenAttendance } from './attendance';
 import { createEmployee } from './employee';
 import { pinLogin, loadOperatorContext } from './store-auth';
 import {
@@ -251,10 +251,8 @@ describe.skipIf(!RUN)('Billing V1 Stage 2 - shifts + cash session', () => {
     const a = await loginAs(pinA);
     const cash = await openCashSession(pool, a, { openingCash: '500.00' });
     const mine = await startShift(pool, a, {});
-    await checkIn(pool, a, {});
     const b = await loginAs(pinB);
     const colleague = await startShift(pool, b, {});
-    await checkIn(pool, b, {});
     const current = await loginAs(pinA);
     expect(await finishWork(pool, current)).toEqual({ cashSession: null });
     expect(await getOwnOpenAttendance(pool, current)).toBeNull();
@@ -272,7 +270,6 @@ describe.skipIf(!RUN)('Billing V1 Stage 2 - shifts + cash session', () => {
     const a = await loginAs(pinA);
     const cash = (await getOpenCashSession(pool, a, outletId))!;
     const shift = await startShift(pool, a, {});
-    await checkIn(pool, a, {});
     await expect(
       finishWork(pool, a, { sessionId: cash.id, command: { countedCash: '400.00' } }),
     ).rejects.toThrow(/reason is required/);
