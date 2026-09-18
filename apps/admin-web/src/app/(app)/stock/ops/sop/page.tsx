@@ -141,6 +141,9 @@ export default async function SopPage() {
       </p>
       <p className="eyebrow">Central admin · SOP review</p>
       <h1>SOP standards & readiness</h1>
+      <p>
+        <Link href="/stock/ops/sop/chef">Create chef workbook & review saved SOPs →</Link>
+      </p>
       <p className="page-intro">
         T VANAMM SOP new changes pdf.pdf · 40 pages · reviewed 16 September 2026. These are source
         findings, not published stock-consumption recipes.

@@ -1,5 +1,6 @@
 'use client';
 
+import { PrinterStatus } from '@/components/PrinterStatus';
 import { useEffect, useState } from 'react';
 import { bluetoothSupported, pairBluetoothPrinter, smartPrintTest } from '@/lib/printer';
 import {
@@ -93,6 +94,7 @@ export function PrinterClient({ allowLocalNetwork = false }: { allowLocalNetwork
 
   return (
     <>
+      <PrinterStatus />
       <div className="card">
         <strong>Current printer</strong>
         <p className="muted" style={{ marginTop: 4 }}>

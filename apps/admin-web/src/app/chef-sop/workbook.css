@@ -1,0 +1,226 @@
+.chef-workbook {
+  max-width: 1320px;
+  margin: auto;
+  padding: 32px 24px 70px;
+  color: #203129;
+}
+.chef-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.chef-heading h1 {
+  font-size: 36px;
+  margin: 8px 0;
+}
+.chef-kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #236943;
+}
+.chef-progress {
+  padding: 20px 28px;
+  background: #e5f1e8;
+  border-radius: 16px;
+  min-width: 200px;
+}
+.chef-progress strong {
+  display: block;
+  font-size: 28px;
+}
+.chef-progress span {
+  font-size: 13px;
+}
+.chef-guide {
+  padding: 20px 24px;
+  border: 1px solid #d8e4dc;
+  border-radius: 14px;
+  background: #f1f6f2;
+  margin-bottom: 24px;
+}
+.chef-guide p {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.chef-layout {
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.chef-menu,
+.chef-editor {
+  border: 1px solid #dde4df;
+  border-radius: 16px;
+  background: white;
+  padding: 22px;
+}
+.chef-menu {
+  position: sticky;
+  top: 20px;
+}
+.chef-item-list {
+  max-height: 60vh;
+  overflow: auto;
+  margin-top: 16px;
+}
+.chef-item-list button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #25382c;
+  border: 0;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 3px 0;
+}
+.chef-item-list button.selected {
+  background: #e4f2e9;
+  color: #176b40;
+}
+.chef-item-list small {
+  font-size: 10px;
+  white-space: nowrap;
+  color: #68776d;
+}
+.chef-workbook label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0;
+}
+.chef-workbook input,
+.chef-workbook select,
+.chef-workbook textarea {
+  width: 100%;
+  padding: 11px;
+  border: 1px solid #cdd8d0;
+  border-radius: 8px;
+  margin: 7px 0 0;
+  font: inherit;
+  background: white;
+  color: #203129;
+  box-sizing: border-box;
+}
+.chef-workbook input:focus,
+.chef-workbook textarea:focus,
+.chef-workbook select:focus {
+  outline: 2px solid #237749;
+  outline-offset: 1px;
+}
+.chef-editor fieldset {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+.chef-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+}
+.chef-editor h3 {
+  margin-top: 28px;
+  border-top: 1px solid #e5eae6;
+  padding-top: 22px;
+}
+.chef-editor p,
+.chef-long small {
+  color: #68746b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.chef-long small {
+  display: block;
+  font-weight: 400;
+  margin: 5px 0;
+}
+.chef-ingredient {
+  display: grid;
+  grid-template-columns: 1.3fr 0.7fr 0.6fr 1fr auto;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid #edf0ed;
+  padding: 10px 0;
+}
+.chef-ingredient button {
+  font-size: 11px;
+  padding: 8px;
+}
+.chef-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  border-top: 1px solid #e1e8e2;
+  padding-top: 20px;
+  margin-top: 24px;
+}
+.chef-actions span {
+  font-size: 12px;
+  color: #68746b;
+}
+.chef-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 24px 0;
+}
+.chef-message {
+  padding: 16px;
+  background: #fff4d9;
+  border-radius: 10px;
+  border: 1px solid #ebd9aa;
+  white-space: pre-wrap;
+}
+.chef-empty {
+  padding: 40px 10px;
+  text-align: center;
+}
+.chef-editor h2 {
+  font-size: 27px;
+  margin: 8px 0;
+}
+.chef-workbook button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+@media (max-width: 800px) {
+  .chef-layout {
+    grid-template-columns: 1fr;
+  }
+  .chef-menu {
+    position: static;
+  }
+  .chef-item-list {
+    max-height: 220px;
+  }
+  .chef-ingredient {
+    grid-template-columns: 1fr 1fr;
+  }
+  .chef-heading,
+  .chef-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .chef-fields {
+    grid-template-columns: 1fr;
+  }
+  .chef-workbook {
+    padding: 20px 14px;
+  }
+  .chef-editor {
+    padding: 18px;
+  }
+  .chef-heading h1 {
+    font-size: 28px;
+  }
+}

@@ -14,6 +14,7 @@ import { terminalPaperWidthMm } from '../terminal-prefs';
 import { smartPrint, smartPrintReceipt } from '@/lib/printer';
 import { buildOfflineTicketEscPos } from '@/lib/escpos';
 import { BrandMark } from '@/components/BrandMark';
+import { PrinterStatus } from '@/components/PrinterStatus';
 import { StaffMenu } from '@/components/StaffMenu';
 import { useOffline } from '@/lib/use-offline';
 import {
@@ -462,9 +463,13 @@ export function PosClient({
               Print again
             </button>
           </div>
+          <PrinterStatus />
           {printerNotice ? (
             <p className="error no-print" style={{ marginTop: 10 }}>
               {printerNotice}
+              <button className="ghost" onClick={() => window.print()}>
+                Use system print dialog
+              </button>
             </p>
           ) : null}
         </div>
@@ -499,9 +504,13 @@ export function PosClient({
           >
             Print again
           </button>
+          <PrinterStatus />
           {printerNotice ? (
             <p className="error" style={{ marginTop: 10 }}>
               {printerNotice}
+              <button className="ghost" onClick={() => window.print()}>
+                Use system print dialog
+              </button>
             </p>
           ) : null}
         </div>
@@ -559,6 +568,7 @@ export function PosClient({
           <span className="muted">{employeeName}</span>
         </span>
       </div>
+      <PrinterStatus />
       <StaffMenu />
       {queuedNotice ? (
         <p className="ok" style={{ margin: '8px 16px 0' }}>

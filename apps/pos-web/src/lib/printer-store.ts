@@ -28,6 +28,7 @@ export function readPrinterConfig(): PrinterConfig {
 export function savePrinterConfig(config: PrinterConfig): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(config));
+    window.dispatchEvent(new Event('jksh-printer-status'));
   } catch {
     /* storage disabled — the choice just won't survive a reload */
   }
@@ -36,6 +37,7 @@ export function savePrinterConfig(config: PrinterConfig): void {
 export function forgetPrinterConfig(): void {
   try {
     localStorage.removeItem(KEY);
+    window.dispatchEvent(new Event('jksh-printer-status'));
   } catch {
     /* ignore */
   }

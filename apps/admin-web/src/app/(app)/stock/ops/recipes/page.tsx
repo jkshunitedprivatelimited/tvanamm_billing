@@ -26,6 +26,9 @@ export default async function RecipesPage() {
       </p>
       <h1>Recipes & serving standards</h1>
       <p>
+        <Link href="/stock/ops/sop/chef">Collect complete menu SOPs from your chef →</Link>
+      </p>
+      <p>
         <Link href="/ai">Draft a recipe or SOP with JKSH AI →</Link>
       </p>
       <p>

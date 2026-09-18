@@ -1,18 +1,48 @@
 import type { ReceiptSnapshot } from '@jksh/contracts';
 import { buildReceiptEscPos } from './escpos';
-import { readPrinterConfig, type PrinterConfig } from './printer-store';
+import { readPrinterConfig, savePrinterConfig, type PrinterConfig } from './printer-store';
 
 /** BLE writes are capped by the negotiated MTU (often as low as 20 bytes on
  *  older stacks); chunking conservatively avoids "value too long" write
  *  failures on cheap thermal printers rather than trying to negotiate MTU. */
-const BLE_CHUNK_BYTES = 100;
+const BLE_CHUNK_BYTES = 20;
 
 // Kept across print calls within the same page load so a second sale reuses
 // the live GATT connection instead of reconnecting every time. Lost on
 // reload, same as any other in-memory browser API handle — see
 // `resolveBluetoothDevice` for how a reload recovers it without re-pairing.
 let cachedDevice: BluetoothDevice | null = null;
+let lastPrintFailed = false;
 let cachedCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
+
+function printerChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('jksh-printer-status'));
+}
+function watchDevice(device: BluetoothDevice) {
+  device.addEventListener('gattserverdisconnected', () => {
+    cachedCharacteristic = null;
+    printerChanged();
+  });
+}
+export function printerConnectionStatus(): string {
+  const config = readPrinterConfig();
+  if (config.kind === 'browser') return 'System printer · status unavailable';
+  if (config.kind === 'network') return 'Network printer · not checked';
+  if (lastPrintFailed) return `${config.deviceName} · needs attention`;
+  return cachedDevice?.id === config.deviceId && cachedDevice.gatt?.connected
+    ? `${config.deviceName} · connected`
+    : `${config.deviceName} · disconnected`;
+}
+export async function reconnectPrinter(): Promise<void> {
+  const paired = await pairBluetoothPrinter();
+  savePrinterConfig({ kind: 'bluetooth', ...paired });
+  if (!cachedDevice?.gatt)
+    throw new Error('This printer does not expose a Bluetooth Low Energy connection.');
+  const server = await cachedDevice.gatt.connect();
+  cachedCharacteristic = await findWritableCharacteristic(server);
+  lastPrintFailed = false;
+  printerChanged();
+}
 
 export function bluetoothSupported(): boolean {
   return typeof navigator !== 'undefined' && !!navigator.bluetooth;
@@ -33,6 +63,8 @@ export async function pairBluetoothPrinter(): Promise<{ deviceId: string; device
     ],
   });
   cachedDevice = device;
+  watchDevice(device);
+  printerChanged();
   cachedCharacteristic = null; // rediscover on next print
   return { deviceId: device.id, deviceName: device.name ?? 'Bluetooth printer' };
 }
@@ -49,6 +81,7 @@ async function resolveBluetoothDevice(deviceId: string): Promise<BluetoothDevice
   const known = await navigator.bluetooth.getDevices();
   const match = known.find((d) => d.id === deviceId) ?? null;
   cachedDevice = match;
+  if (match) watchDevice(match);
   cachedCharacteristic = null;
   return match;
 }
@@ -70,7 +103,9 @@ async function printToBluetooth(deviceId: string, bytes: Uint8Array): Promise<vo
   if (!device?.gatt) {
     throw new Error('Bluetooth printer is not paired with this browser any more — reconnect it.');
   }
+  if (!device.gatt.connected) cachedCharacteristic = null;
   const server = device.gatt.connected ? device.gatt : await device.gatt.connect();
+  printerChanged();
   cachedCharacteristic ??= await findWritableCharacteristic(server);
   const char = cachedCharacteristic;
   for (let offset = 0; offset < bytes.length; offset += BLE_CHUNK_BYTES) {
@@ -154,6 +189,8 @@ async function smartPrintBytes(config: PrinterConfig, bytes: Uint8Array): Promis
   try {
     if (config.kind === 'bluetooth') {
       await printToBluetooth(config.deviceId, bytes);
+      lastPrintFailed = false;
+      printerChanged();
       return { ok: true, via: 'bluetooth' };
     }
     if (config.kind === 'network') {
@@ -161,18 +198,16 @@ async function smartPrintBytes(config: PrinterConfig, bytes: Uint8Array): Promis
       return { ok: true, via: 'network' };
     }
   } catch (error) {
-    // Fall through to the browser dialog so the cashier still gets a copy.
-    try {
-      window.print();
-    } catch {
-      /* nothing more we can do */
-    }
+    cachedCharacteristic = null;
+    lastPrintFailed = true;
+    printerChanged();
     return {
       ok: false,
-      via: 'browser',
-      error: error instanceof Error ? error.message : 'Printer error',
+      via: config.kind,
+      error: `${error instanceof Error ? error.message : 'Printer disconnected'} Reconnect the printer and retry. Some lines may already have printed; check before retrying.`,
     };
   }
+
   try {
     window.print();
   } catch {
