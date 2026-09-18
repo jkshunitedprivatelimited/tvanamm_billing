@@ -935,3 +935,64 @@ a.link-btn:hover {
   font-size: 13px;
   padding: 8px 16px;
 }
+
+/* Keep billing utilities in one compact row, independent of full-width form buttons. */
+.printer-status > button {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  min-height: 40px;
+}
+.pos-utility-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 4px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.pos-utility-bar .printer-status,
+.pos-utility-bar .staff-toolbar,
+.pos-utility-bar .attendance-control {
+  padding: 0;
+  border: 0;
+  gap: 8px;
+  align-items: center;
+}
+.pos-utility-bar .printer-status > a {
+  border: 0;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.pos-utility-bar .staff-toolbar {
+  margin-left: auto;
+  gap: 16px;
+}
+.pos-utility-bar .attendance-control > a {
+  display: none;
+}
+.pos-utility-bar .staff-menu > summary {
+  padding: 8px 12px;
+  min-height: 40px;
+  font-size: 13px;
+}
+.pos-utility-bar .staff-menu-content {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 30;
+  width: min(340px, calc(100vw - 32px));
+  box-shadow: var(--shadow-2);
+}
+.pos-utility-bar .printer-status > [role='alert'] {
+  max-width: 360px;
+  color: var(--danger);
+}
+@media (max-width: 700px) {
+  .pos-utility-bar .staff-toolbar {
+    margin-left: 0;
+    width: 100%;
+  }
+}

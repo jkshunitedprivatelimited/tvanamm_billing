@@ -628,8 +628,10 @@ export function PosClient({
           <span className="muted">{employeeName}</span>
         </span>
       </div>
-      <PrinterStatus />
-      <StaffMenu />
+      <div className="pos-utility-bar no-print">
+        <PrinterStatus />
+        <StaffMenu />
+      </div>
       {queuedNotice ? (
         <p className="ok" style={{ margin: '8px 16px 0' }}>
           {queuedNotice}
