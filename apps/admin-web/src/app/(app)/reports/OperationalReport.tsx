@@ -34,10 +34,7 @@ export function ReportRows({
       </div>
       {note ? <p className="muted">{note}</p> : null}
       {rows === null ? (
-        <p>
-          This report is unavailable for the selected scope. Choose all outlets for central
-          purchasing reports.
-        </p>
+        <p>This report is currently unavailable. Please try again shortly.</p>
       ) : !rows.length ? (
         <p className="muted">No records in this period.</p>
       ) : (

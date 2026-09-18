@@ -30,7 +30,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 { href: '/reports', label: 'Reports' },
                 {
                   href: '/stock',
-                  label: actor.role === 'franchise_owner' ? 'Stock & orders' : 'Stock control',
+                  label: actor.role === 'franchise_owner' ? 'Expenses & wastage' : 'Stock control',
                 },
                 {
                   href: '/audit',

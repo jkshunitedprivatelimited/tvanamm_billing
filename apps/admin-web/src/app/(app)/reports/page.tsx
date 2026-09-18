@@ -128,9 +128,9 @@ export default async function ReportsPage({
     },
     {
       key: 'stock',
-      label: 'Stock & wastage',
+      label: isOwner ? 'Wastage' : 'Stock & wastage',
       description: isOwner
-        ? 'Track stock received, used and wasted at your outlet during the selected period.'
+        ? 'Review wastage recorded by your team during the selected period.'
         : 'Recorded opening balance, additions and removals through the selected end date.',
     },
     {
@@ -155,7 +155,9 @@ export default async function ReportsPage({
       label: 'Exports & records',
       description: 'Download billing records and review archive coverage.',
     },
-  ].filter((category) => !isOwner || !['adjustments', 'attendance'].includes(category.key));
+  ].filter(
+    (category) => !isOwner || !['adjustments', 'attendance', 'supply'].includes(category.key),
+  );
   const requestedCategory =
     isOwner && sp.category === 'attendance'
       ? 'team'
@@ -204,7 +206,14 @@ export default async function ReportsPage({
   const operations =
     (isOwner && category.key === 'team') ||
     ['expenses', 'attendance', 'stock', 'supply', 'purchasing'].includes(category.key)
-      ? await getOperationalReports(actor, combined.from, combined.to, sp.outletId, sp.franchiseId)
+      ? await getOperationalReports(
+          actor,
+          combined.from,
+          combined.to,
+          sp.outletId,
+          sp.franchiseId,
+          ['stock', 'supply', 'purchasing'].includes(category.key),
+        )
       : null;
   const periodDays =
     Math.round((Date.parse(combined.to) - Date.parse(combined.from)) / 86400000) + 1;
@@ -323,15 +332,26 @@ export default async function ReportsPage({
               <ReportRows title="Attendance" rows={operations.billing.attendance} />
             ) : null}
             {['stock', 'supply', 'purchasing'].includes(category.key) && !operations.stock ? (
-              <p className="notice">Stock reports are temporarily unavailable. Please retry.</p>
+              <p className="notice">This report could not be loaded. Please try again shortly.</p>
             ) : null}
             {category.key === 'stock' && operations.stock ? (
               <>
-                <ReportRows
-                  title="Stock movement"
-                  rows={operations.stock.movements}
-                  note="See how much stock you started with, received, used or removed, and had left. Items you haven’t counted yet have no confirmed starting balance."
-                />
+                {!isOwner ? (
+                  <ReportRows
+                    title="Stock movement"
+                    rows={operations.stock.movements}
+                    note="See how much stock you started with, received, used or removed, and had left. Items you haven’t counted yet have no confirmed starting balance."
+                  />
+                ) : (
+                  <section className="card">
+                    <span className="pill">Coming soon</span>
+                    <h2>Stock tracking</h2>
+                    <p>
+                      Stock balances and physical counts will be available in a future update. Your
+                      recorded wastage is shown below.
+                    </p>
+                  </section>
+                )}
                 <ReportRows title="Wastage" rows={operations.stock.wastage} />
               </>
             ) : null}

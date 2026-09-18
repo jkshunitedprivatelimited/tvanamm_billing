@@ -12,6 +12,7 @@ export async function getOperationalReports(
   to: string,
   outletId?: string,
   franchiseId?: string,
+  includeStock = true,
 ) {
   const outlets = (await listOutlets(db(), actor)).filter(
     (o) => (!outletId || o.id === outletId) && (!franchiseId || o.franchiseId === franchiseId),
@@ -29,6 +30,7 @@ export async function getOperationalReports(
     return { expenses: expenses.rows, attendance: attendance.rows };
   });
   const stock = await (async () => {
+    if (!includeStock) return null;
     try {
       const a = await stockActorFor(actor);
       return await withStockActorContext(stockDb(), stockContextForActor(a), async (c) => {

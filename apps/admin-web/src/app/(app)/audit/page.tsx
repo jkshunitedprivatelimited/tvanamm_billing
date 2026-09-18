@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getFinancialReport, listOutlets } from '@jksh/identity';
-import { listCentralLowStockAlerts, getCentralOversight, listLowStockItems } from '@jksh/stock';
+import { listCentralLowStockAlerts, getCentralOversight } from '@jksh/stock';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { stockActorFor, stockDb } from '@/server/stock';
@@ -20,27 +20,9 @@ export default async function BusinessOverview({
     getFinancialReport(db(), actor, { kind: range }),
   ]);
   const stock =
-    actor.role === 'central_admin' || actor.role === 'franchise_owner'
+    actor.role === 'central_admin'
       ? await (async () => {
           try {
-            if (actor.role === 'franchise_owner') {
-              const results = await Promise.all(
-                outlets.map(async (o) => {
-                  const a = await stockActorFor(actor, { outletId: o.id });
-                  const items = await listLowStockItems(stockDb(), a, o.id);
-                  return {
-                    alerts: items.filter((i) => i.low).map((i) => ({ ...i, outletId: o.id })),
-                    uncounted: items.filter((i) => !i.trackingStarted).length,
-                    outletId: o.id,
-                  };
-                }),
-              );
-              return {
-                alerts: results.flatMap((r) => r.alerts),
-                uncounted: results.filter((r) => r.uncounted > 0),
-                summary: { stockValuePaise: null },
-              };
-            }
             const a = await stockActorFor(actor);
             const [alerts, summary] = await Promise.all([
               listCentralLowStockAlerts(stockDb(), a),
@@ -78,7 +60,7 @@ export default async function BusinessOverview({
           </h1>
           <p className="page-intro">
             {isOwner
-              ? 'See your sales, payments and items to restock.'
+              ? 'See your sales, payments and outlet performance.'
               : 'Sales, outlet readiness and stock issues that need your attention.'}
           </p>
         </div>
@@ -125,14 +107,14 @@ export default async function BusinessOverview({
           <small>Net sales per completed bill</small>
         </article>
         <article className="performance-card">
-          <span>Low-stock items</span>
-          <strong>{stock ? shortages.length : '—'}</strong>
+          <span>{isOwner ? 'Stock tracking' : 'Low-stock items'}</span>
+          <strong>{isOwner ? 'Coming soon' : stock ? shortages.length : '—'}</strong>
           <small>
-            {stock
-              ? isOwner
-                ? 'Items at or below your stock limits'
-                : 'Latest stock checks · up to 100 alerts'
-              : 'Stock information is temporarily unavailable'}
+            {isOwner
+              ? 'Expenses and wastage are available in Reports'
+              : stock
+                ? 'Latest stock checks · up to 100 alerts'
+                : 'Stock information is temporarily unavailable'}
           </small>
         </article>
       </div>
@@ -140,15 +122,9 @@ export default async function BusinessOverview({
         <section className="card">
           <div className="section-heading">
             <h2>{isOwner ? 'Your next steps' : 'Needs attention'}</h2>
-            <Link
-              href={
-                isOwner && outlets.length === 1 ? `/stock/${outlets[0]?.id ?? ''}/alerts` : '/stock'
-              }
-            >
-              {isOwner ? 'View your stock →' : 'Stock control →'}
-            </Link>
+            <Link href={'/stock'}>{isOwner ? 'Expenses & wastage →' : 'Stock control →'}</Link>
           </div>
-          {!stock ? (
+          {!isOwner && !stock ? (
             <p className="notice">Stock status is temporarily unavailable. Refresh to retry.</p>
           ) : null}
           {shortages.slice(0, 5).map((a) => (
@@ -178,27 +154,24 @@ export default async function BusinessOverview({
                 <span>Set up →</span>
               </Link>
             ))}
-          {isOwner
-            ? stock?.uncounted.map((entry) => (
-                <Link
-                  key={entry.outletId}
-                  className="attention-row"
-                  href={`/stock/${entry.outletId}/alerts`}
-                >
-                  <span>
-                    <strong>Enter your starting stock</strong>
-                    <small>
-                      {entry.uncounted} items haven’t been counted yet
-                      {outlets.length > 1
-                        ? ` · ${outlets.find((o) => o.id === entry.outletId)?.displayName ?? 'Your outlet'}`
-                        : ''}
-                      . You can enter quantities now or start when your next delivery arrives.
-                    </small>
-                  </span>
-                  <span>Enter stock →</span>
-                </Link>
-              ))
-            : null}
+          {isOwner ? (
+            <>
+              <Link className="attention-row" href="/reports?category=expenses">
+                <span>
+                  <strong>Review outlet expenses</strong>
+                  <small>See your team’s purchases and daily spending.</small>
+                </span>
+                <span>View →</span>
+              </Link>
+              <Link className="attention-row" href="/reports?category=stock">
+                <span>
+                  <strong>Review recorded wastage</strong>
+                  <small>See losses recorded by your team.</small>
+                </span>
+                <span>View →</span>
+              </Link>
+            </>
+          ) : null}
           {!isOwner && stock?.summary.stockValuePaise === 0 ? (
             <div className="attention-row">
               <span>
@@ -219,16 +192,11 @@ export default async function BusinessOverview({
               </Link>
             </div>
           ) : null}
-          {isOwner && stock && shortages.length === 0 && stock.uncounted.length === 0 ? (
-            <p className="muted">
-              No low-stock alerts. You can review quantities and set reminders in your stock page.
-            </p>
-          ) : null}
           {!isOwner &&
           shortages.length === 0 &&
           active.every((o) => o.hasActiveTerminal) &&
           stock &&
-          Number(stock.summary.stockValuePaise) > 0 ? (
+          stock.summary.stockValuePaise > 0 ? (
             <p className="muted">No low-stock or device issues in the latest checks.</p>
           ) : null}
         </section>
@@ -262,7 +230,7 @@ export default async function BusinessOverview({
               <h2>Outlet performance</h2>
               <p className="muted">
                 {isOwner
-                  ? 'Sales and stock reminders for each of your outlets.'
+                  ? 'Sales performance for each of your outlets.'
                   : `${String(active.length)} active outlets · a zero means no bills in this period, not an offline store.`}
               </p>
             </div>
@@ -275,7 +243,7 @@ export default async function BusinessOverview({
                   <th>Outlet</th>
                   <th>Net sales</th>
                   <th>Bills</th>
-                  <th>Stock alerts</th>
+                  {!isOwner ? <th>Stock alerts</th> : null}
                   <th>Next step</th>
                 </tr>
               </thead>
@@ -291,7 +259,7 @@ export default async function BusinessOverview({
                       </td>
                       <td>{money(row?.netSales ?? 0)}</td>
                       <td>{row?.billCount ?? 0}</td>
-                      <td>{stock ? alerts : '—'}</td>
+                      {!isOwner ? <td>{stock ? alerts : '—'}</td> : null}
                       <td>
                         <Link href={`/outlets/${o.id}`}>Open outlet →</Link>
                       </td>

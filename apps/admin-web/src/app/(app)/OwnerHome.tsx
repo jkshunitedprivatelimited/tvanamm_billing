@@ -25,7 +25,7 @@ export async function OwnerHome({
           <p>
             {single
               ? `${single.brandName}${single.city ? ` · ${single.city}` : ''}`
-              : `${String(outlets.length)} outlets · Sales, people and stock in one place`}
+              : `${String(outlets.length)} outlets · Sales, expenses and team in one place`}
           </p>
         </div>
         {single ? (
@@ -104,8 +104,8 @@ export async function OwnerHome({
               ],
               [
                 'stock',
-                'Stock & orders',
-                'Check supplies, set limits and order what you need.',
+                'Wastage & stock',
+                'Review recorded wastage and see upcoming stock features.',
                 `/stock/${single.id}`,
                 '▦',
               ],
@@ -157,16 +157,16 @@ export async function OwnerHome({
         <div className="card">
           <h2>No outlets assigned yet</h2>
           <p className="muted">
-            Your outlet dashboard will appear here once central admin completes your outlet setup.
+            Your outlet dashboard will appear here once your outlet setup is complete.
           </p>
         </div>
       ) : null}
       <div className="owner-footer">
         <div>
           <strong>Keep track of changes</strong>
-          <p>Review sales, expenses and team actions in your activity timeline.</p>
+          <p>Review your outlet’s sales and payments.</p>
         </div>
-        <Link href="/audit">Open outlet activity →</Link>
+        <Link href="/audit">Open outlet overview →</Link>
       </div>
     </main>
   );
