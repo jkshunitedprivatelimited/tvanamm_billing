@@ -13,7 +13,7 @@ Deploy this repository as two Next.js projects. The application source and user 
 | Build command | npm run build | npm run build |
 | Include source files outside root directory | Enabled | Enabled |
 
-Import the same GitHub repository twice, choose the intended team, and set each project's root directory. Keep the framework-managed output configuration; the admin app defines its production build directory in `next.config.mjs`. Shared code is in `packages/*` and dependencies use the root npm workspace lockfile.
+Import the same GitHub repository twice, choose the intended team, and set each project's root directory. Keep the framework-managed output configuration: Vercel builds use `.next`; local admin production checks use `.next-production` to preserve the running development server. Shared code is in `packages/*` and dependencies use the root npm workspace lockfile.
 
 See Vercel's [monorepo deployment documentation](https://vercel.com/docs/monorepos) and [outside-root source setting](https://vercel.com/docs/monorepos/monorepo-faq).
 
