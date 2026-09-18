@@ -157,6 +157,14 @@ export function NotificationBell() {
                     </p>
                   ) : null}
                   <div className="row" style={{ gap: 8, marginTop: 4 }}>
+                    {n.entityType === 'cash_session' && n.outletId ? (
+                      <Link
+                        href={`/reports?category=cash&outletId=${n.outletId}`}
+                        onClick={() => setOpen(false)}
+                      >
+                        Review closing cash →
+                      </Link>
+                    ) : null}
                     {n.entityType === 'stock_low' && n.outletId ? (
                       <Link href={`/stock/${n.outletId}/alerts`} onClick={() => setOpen(false)}>
                         View stock alerts →

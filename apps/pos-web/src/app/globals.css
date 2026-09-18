@@ -865,3 +865,26 @@ a.link-btn:hover {
     margin-left: 0;
   }
 }
+
+.staff-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border, #d8ddd7);
+}
+.staff-toolbar .staff-menu {
+  margin: 0;
+}
+.staff-toolbar .attendance-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.staff-toolbar .staff-menu-content {
+  margin-top: 8px;
+  max-width: 600px;
+}

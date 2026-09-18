@@ -14,10 +14,9 @@ export function CloseRegister({
   expenses: ExpenseView[];
 }) {
   const router = useRouter();
-  const [reviewed, setReviewed] = useState(false);
   const [addingExpense, setAddingExpense] = useState(false);
   const [expensePending, setExpensePending] = useState(false);
-  const [closing, setClosing] = useState(false);
+  const [closing, setClosing] = useState(Boolean(cashSession));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [countedCash, setCountedCash] = useState('');
@@ -25,7 +24,7 @@ export function CloseRegister({
   const [result, setResult] = useState<{ cashSession: CashSessionSummary | null } | null>(null);
 
   async function finish(closeStore: boolean) {
-    if (!reviewed || expensePending || addingExpense) return;
+    if (expensePending || addingExpense) return;
     setBusy(true);
     setError('');
     try {
@@ -67,7 +66,7 @@ export function CloseRegister({
   if (result)
     return (
       <div>
-        <h2>{result.cashSession ? 'Store closed' : 'Your work is finished'}</h2>
+        <h2>{result.cashSession ? 'Register closed' : 'Your shift is finished'}</h2>
         <p>Your shift is ended, any open attendance is checked out, and you are signed out.</p>
         {result.cashSession ? (
           <>
@@ -78,7 +77,7 @@ export function CloseRegister({
             </p>
           </>
         ) : (
-          <p>The register stays available for your colleagues.</p>
+          <p>Your shift has ended.</p>
         )}
         <a className="link-btn" href="/login">
           Go to sign in
@@ -87,7 +86,7 @@ export function CloseRegister({
     );
   return (
     <div>
-      <h2>Finish</h2>
+      <h2>Finish shift</h2>
       <section aria-labelledby="expense-review" style={{ marginBottom: 24 }}>
         <h3 id="expense-review">Expenses during your shift</h3>
         <p>
@@ -123,7 +122,6 @@ export function CloseRegister({
               onDraftChange={setExpensePending}
               onSaved={() => {
                 setAddingExpense(false);
-                setReviewed(false);
                 router.refresh();
               }}
             />
@@ -134,47 +132,37 @@ export function CloseRegister({
             disabled={busy}
             onClick={() => {
               setAddingExpense(true);
-              setReviewed(false);
             }}
           >
             Add expense
           </button>
         )}
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
-          <input
-            type="checkbox"
-            style={{ width: 'auto' }}
-            checked={reviewed}
-            disabled={busy || addingExpense || expensePending}
-            onChange={(event) => setReviewed(event.target.checked)}
-          />
-          {expenses.some((expense) => !expense.reversedAt)
-            ? 'All my expenses are recorded. Nothing else to add.'
-            : 'I had no expenses to record during this shift.'}
-        </label>
       </section>
       {!closing ? (
         <div style={{ display: 'grid', gap: 16 }}>
           <div>
+            {cashSession ? (
+              <p>Leave the register open for the next employee and end only your shift.</p>
+            ) : (
+              <p>No register is currently open. There is no closing cash to enter.</p>
+            )}
             <button
-              disabled={busy || !reviewed || addingExpense || expensePending}
+              disabled={busy || addingExpense || expensePending}
               onClick={() => void finish(false)}
             >
-              Finish my work
+              {busy
+                ? 'Finishing…'
+                : cashSession
+                  ? 'Confirm handover & finish shift'
+                  : 'Finish shift'}
             </button>
-            <p className="muted">
-              Check out, end my shift and sign out. Leave the register open for colleagues.
-            </p>
           </div>
           {cashSession ? (
             <div>
               <button className="ghost" disabled={busy} onClick={() => setClosing(true)}>
-                Close store
+                Count cash & close register
               </button>
-              <p className="muted">
-                Count closing cash, close the register and finish my work. Other employees record
-                their own attendance.
-              </p>
+              <p className="muted">Finish the day by counting the cash at the counter.</p>
             </div>
           ) : null}
         </div>
@@ -185,11 +173,11 @@ export function CloseRegister({
             void finish(true);
           }}
         >
+          <h3>Closing counter cash</h3>
           <p>
-            Count the cash after the final sale. This closes the shared register and finishes your
-            work.
+            Count all cash at the counter after recording expenses. Do not include UPI payments.
           </p>
-          <label htmlFor="counted-cash">Cash in the drawer (₹)</label>
+          <label htmlFor="counted-cash">Cash counted at the counter (₹)</label>
           <input
             id="counted-cash"
             type="number"
@@ -206,10 +194,10 @@ export function CloseRegister({
             value={varianceReason}
             onChange={(event) => setVarianceReason(event.target.value)}
           />
+          <p className="muted">Confirm after adding any remaining expenses above.</p>
           <button
             disabled={
               busy ||
-              !reviewed ||
               addingExpense ||
               expensePending ||
               countedCash === '' ||
@@ -217,10 +205,10 @@ export function CloseRegister({
               Number(countedCash) < 0
             }
           >
-            {busy ? 'Finishing…' : 'Confirm & close store'}
+            {busy ? 'Finishing…' : 'Close register & finish shift'}
           </button>
           <button type="button" className="ghost" disabled={busy} onClick={() => setClosing(false)}>
-            Back
+            Another employee is continuing — hand over
           </button>
         </form>
       )}

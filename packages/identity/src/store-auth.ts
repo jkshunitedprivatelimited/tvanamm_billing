@@ -282,6 +282,28 @@ async function authenticatePin(
       metadata: { surface: 'store' },
     });
 
+    // Successful PIN login records attendance once; returning cashiers retain their original time.
+    await recordVerifiedStaffAttendance(
+      client,
+      {
+        kind: 'operator',
+        role: 'store_employee',
+        employeeId: emp.id,
+        scope: {
+          organizationId: term.organization_id,
+          ...(term.franchise_id ? { franchiseId: term.franchise_id } : {}),
+          outletId: term.outlet_id,
+        },
+        outletId: term.outlet_id,
+        terminalId: term.id,
+        sessionActive: true,
+        secondsSinceAuth: 0,
+      },
+      'check-in',
+      meta,
+      true,
+    );
+
     return {
       result: {
         outcome: 'resolved',

@@ -15,6 +15,7 @@ import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 import { recordAudit } from './audit';
 import { IdentityError } from './errors';
+import { notifyCashDifference } from './cash-notifications';
 import { businessDateString } from './membership';
 import type { RequestMeta } from './admin-auth';
 
@@ -154,9 +155,11 @@ export async function closeCashSession(
   cmd: CloseCashSessionCommand,
   meta: RequestMeta = {},
 ): Promise<CashSessionSummary> {
-  return withActorContext(pool, contextForActor(actor), (client) =>
+  const result = await withActorContext(pool, contextForActor(actor), (client) =>
     closeCashSessionWithClient(client, actor, cashSessionId, cmd, meta),
   );
+  await notifyCashDifference(pool, result.id);
+  return result;
 }
 
 async function closeCashSessionWithClient(
@@ -550,7 +553,7 @@ export async function finishWork(
 ): Promise<{ cashSession: CashSessionSummary | null }> {
   const employeeId = operatorEmployeeId(actor);
   if (!actor.outletId) throw new IdentityError('forbidden', 'No outlet in session');
-  return withActorContext(pool, contextForActor(actor), async (client) => {
+  const result = await withActorContext(pool, contextForActor(actor), async (client) => {
     // Serialize retries and starts for this employee.
     await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
       `employee-shift:${employeeId}`,
@@ -579,4 +582,6 @@ export async function finishWork(
     if (attendance.rowCount) await recordVerifiedStaffAttendance(client, actor, 'check-out', meta);
     return { cashSession };
   });
+  if (result.cashSession) await notifyCashDifference(pool, result.cashSession.id);
+  return result;
 }

@@ -21,14 +21,6 @@ export default async function ClosePage() {
       <div className="panel" style={{ margin: '20px 0', width: 'auto' }}>
         <CloseRegister cashSession={cashSession} expenses={expenses} />
       </div>
-      <div className="row" style={{ gap: 16, marginTop: 16 }}>
-        <a href="/expenses" className="link-btn">
-          Record an expense
-        </a>
-        <a href="/pos/printer" className="link-btn">
-          Printer settings
-        </a>
-      </div>
     </main>
   );
 }

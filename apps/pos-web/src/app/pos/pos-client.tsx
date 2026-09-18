@@ -562,7 +562,7 @@ export function PosClient({
             <a href="/history">Bill history</a>
             <Link href="/pos/printer">Printer</Link>
             <a href="/close" className="danger">
-              Finish
+              Finish shift
             </a>
           </span>
           <span className="muted">{employeeName}</span>

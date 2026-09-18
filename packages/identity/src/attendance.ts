@@ -88,6 +88,7 @@ async function checkInWithClient(
   actor: ActorContext,
   cmd: CheckInCommand,
   meta: RequestMeta = {},
+  resumeExisting = false,
 ): Promise<{ id: string }> {
   const { employeeId, outletId } = operatorContext(actor);
   ensureAllowed(actor, 'identity.attendance.self', {
@@ -95,11 +96,15 @@ async function checkInWithClient(
     ...(actor.scope.franchiseId ? { franchiseId: actor.scope.franchiseId } : {}),
     outletId,
   });
-  const existing = await client.query(
-    `select 1 from identity.attendance_sessions where employee_id = $1 and status = 'open'`,
+  await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    `attendance:${employeeId}`,
+  ]);
+  const existing = await client.query<{ id: string }>(
+    `select id from identity.attendance_sessions where employee_id = $1 and status = 'open'`,
     [employeeId],
   );
   if (existing.rowCount) {
+    if (resumeExisting && existing.rows[0]) return { id: existing.rows[0].id };
     throw new IdentityError('conflict', 'Already checked in - check out first', {
       details: { code: 'already_checked_in' },
     });
@@ -474,7 +479,9 @@ export async function recordVerifiedStaffAttendance(
   actor: ActorContext,
   action: 'check-in' | 'check-out',
   meta: RequestMeta,
+  resumeExisting = false,
 ): Promise<void> {
   await applyContext(client, contextForActor(actor));
-  await (action === 'check-in' ? checkInWithClient : checkOutWithClient)(client, actor, {}, meta);
+  if (action === 'check-in') await checkInWithClient(client, actor, {}, meta, resumeExisting);
+  else await checkOutWithClient(client, actor, {}, meta);
 }

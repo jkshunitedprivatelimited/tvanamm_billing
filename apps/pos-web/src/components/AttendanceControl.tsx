@@ -70,14 +70,18 @@ export function AttendanceControl() {
       <span className="muted">
         {loading
           ? 'Loading attendance…'
-          : session
-            ? 'Attendance: checked in'
-            : 'Attendance: not checked in'}
+          : error
+            ? 'Attendance status unavailable'
+            : session
+              ? `Checked in at ${new Date(session.checkedInAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
+              : 'Attendance: not checked in'}
       </span>
       {error ? (
         <button className="ghost" onClick={() => void load()} disabled={busy}>
           Retry attendance
         </button>
+      ) : session ? (
+        <a href="/close">Finish shift &amp; check out</a>
       ) : (
         <button className="ghost" onClick={() => void record()} disabled={loading || busy}>
           {busy ? 'Saving…' : session ? 'Check out' : 'Check in'}
