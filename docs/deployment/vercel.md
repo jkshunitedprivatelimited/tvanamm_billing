@@ -17,6 +17,17 @@ Import the same GitHub repository twice, choose the intended team, and set each 
 
 See Vercel's [monorepo deployment documentation](https://vercel.com/docs/monorepos) and [outside-root source setting](https://vercel.com/docs/monorepos/monorepo-faq).
 
+## Created production projects
+
+The projects were created in the `jkshunitedpvtltd-7603s-projects` Vercel workspace with Node.js 22.x and source files outside the app root enabled. Vercel assigned these domains:
+
+- Business workspace: `https://tvanamm-admin.vercel.app`
+- Billing app: `https://tvanamm-billing-pi.vercel.app`
+
+These are the configured production application URLs and allowed origins. A created project or assigned domain is not evidence of a successful deployment; confirm a Ready deployment and the health endpoints before use.
+
+Git pushes authenticate as `TRINADHCREATOR`. New repository commits use that account’s GitHub no-reply identity. Vercel must also recognize the commit author through its GitHub login connection or appropriate team access; changing Git push credentials alone does not grant deployment permission.
+
 ## Environment configuration
 
 Configure environment values privately in the intended Vercel projects. Never commit `.env` or paste secrets into the manual. Review `.env.example` and the runtime configuration before deployment.
