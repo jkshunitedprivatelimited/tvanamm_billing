@@ -29,6 +29,7 @@ export default async function MenuPage({
 
   let master: MasterMenuView;
   let ownerOutletId = '';
+  let brandId = TVANAMM_BRAND;
   const firstOutlet = outlets[0];
   if (isCentral) {
     master = await listMasterMenu(db(), actor, TVANAMM_BRAND);
@@ -37,7 +38,9 @@ export default async function MenuPage({
   } else {
     const requested = (await searchParams).outlet;
     const match = outlets.find((o) => o.id === requested);
-    ownerOutletId = (match ?? firstOutlet).id;
+    const selectedOutlet = match ?? firstOutlet;
+    ownerOutletId = selectedOutlet.id;
+    brandId = selectedOutlet.brandId;
     const pricing = await listOutletMenuForPricing(db(), actor, ownerOutletId);
     master = {
       categories: pricing.categories,
@@ -65,12 +68,12 @@ export default async function MenuPage({
           ? 'One common TVANAMM menu. Edit an item and hit Publish — the new version goes live at every outlet instantly. Outlet price overrides are kept unless you reset them.'
           : outlets.length === 0
             ? 'No outlets assigned yet — menu pricing appears once an outlet is set up for you.'
-            : 'Edit names, categories, prices and availability for this outlet. Remove items from sale or restore them, then publish to update billing. Other outlets and the central master menu are unchanged.'}
+            : 'Add items and edit names, categories, prices and availability for this outlet. Publish to update billing. Your items and changes apply only to the selected outlet.'}
       </p>
       <MenuManager
         key={ownerOutletId || 'master'}
         role={actor.role}
-        brandId={TVANAMM_BRAND}
+        brandId={brandId}
         master={master}
         outlets={outlets.map((o) => ({ id: o.id, name: o.displayName, status: o.status }))}
         initialOwnerOutletId={ownerOutletId}

@@ -7,8 +7,12 @@
 - Outlets may set different selling prices and availability.
 - Central supplies a recommended selling price; Franchise Owners may set a
   location-specific final price for one or explicitly selected owned outlets.
-- All entered prices are GST-inclusive. GST/HSN comes from a Central-approved
-  tax profile rather than an arbitrary rate entered at the outlet.
+- All entered prices are GST-inclusive. Owner-created items inherit the active
+  Central master menu's GST/HSN settings when those settings are uniform; no tax
+  selection is required in the owner form. An explicit Central-approved tax
+  profile remains supported. Missing or mixed master settings require Central
+  configuration rather than guessing a rate. GST is never added on top of the
+  entered item price.
 - Franchise Owners may customize the name, image, category, add-ons, price, and
   availability of a Central item for an owned outlet.
 - Franchise-created items belong only to the explicitly selected owned

@@ -13,6 +13,7 @@ import { contextForActor } from './db-context';
 import { ensureAllowed } from './authz';
 import { recordAudit } from './audit';
 import { IdentityError } from './errors';
+import { inheritOutletItemTax } from './outlet-item-tax';
 import type { RequestMeta } from './admin-auth';
 
 /** Central manages master rows; a Franchise Owner manages private outlet rows. */
@@ -200,14 +201,10 @@ export async function createCatalogItem(
   assertCatalogWrite(actor, cmd.outletId);
   return withActorContext(pool, contextForActor(actor), async (client) => {
     await assertBrandInOrg(client, cmd.brandId, actor.scope.organizationId);
-    // The schema's refine() guarantees exactly one path: a master item sets
-    // gstRate/hsnCode directly, an outlet item references a tax profile
-    // instead (`menu-publishing.md` "GST/HSN comes from a Central-approved
-    // tax profile"). Resolve the profile now so gst_rate/hsn_code stay
-    // denormalized on the row for bill-calc/receipts, unchanged elsewhere.
+    // Outlet prices remain GST-inclusive; Central supplies the tax settings.
     let hsnCode = cmd.hsnCode ?? null;
     let gstRate = cmd.gstRate;
-    if (cmd.outletId) {
+    if (cmd.outletId && cmd.taxProfileId) {
       const profile = await client.query<{
         hsn_code: string;
         gst_rate: string;
@@ -223,6 +220,17 @@ export async function createCatalogItem(
       }
       hsnCode = profile.rows[0].hsn_code;
       gstRate = profile.rows[0].gst_rate;
+    }
+    if (cmd.outletId && !cmd.taxProfileId) {
+      const settings = await client.query<{ gst_rate: string; hsn_code: string | null }>(
+        `select distinct gst_rate, hsn_code from billing.catalog_items
+          where brand_id = $1 and owner_scope = 'master' and status = 'active'
+          limit 2`,
+        [cmd.brandId],
+      );
+      const inherited = inheritOutletItemTax(settings.rows);
+      gstRate = inherited.gstRate;
+      hsnCode = inherited.hsnCode;
     }
     const id = randomUUID();
     await client.query(

@@ -15,12 +15,22 @@ async function req(
   method: 'POST' | 'PATCH' | 'PUT',
   body: unknown,
 ): Promise<{ ok: boolean; data: unknown }> {
-  const res = await fetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return { ok: res.ok, data: await res.json().catch(() => ({})) };
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { ok: res.ok, data: await res.json().catch(() => ({})) };
+  } catch {
+    return {
+      ok: false,
+      data: {
+        message:
+          'Could not connect. Refresh the menu to check whether your change was saved before trying again.',
+      },
+    };
+  }
 }
 
 function errText(data: unknown): string {
@@ -49,6 +59,7 @@ export function MenuManager({
 }) {
   const router = useRouter();
   const isCentral = role === 'central_admin';
+  const canAdd = isCentral || (role === 'franchise_owner' && !!initialOwnerOutletId);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
@@ -122,20 +133,29 @@ export function MenuManager({
 
   async function addItem(e: React.SyntheticEvent) {
     e.preventDefault();
-    if (!draft.name.trim() || !draft.price.trim()) return;
+    if (!canAdd || !draft.name.trim() || !draft.price.trim()) return;
+    if (!isCentral && !outletForFo) {
+      setMsg({ kind: 'error', text: 'Select an outlet before adding an item.' });
+      return;
+    }
     setBusy(true);
     setMsg(null);
     const { ok, data } = await req('/api/v1/catalog/items', 'POST', {
       brandId,
       name: draft.name.trim(),
       price: draft.price.trim(),
-      gstRate: '5',
+      ...(isCentral ? { gstRate: '5' } : { outletId: outletForFo }),
       ...(draft.categoryId ? { categoryId: draft.categoryId } : {}),
     });
     setBusy(false);
     if (!ok) return setMsg({ kind: 'error', text: errText(data) });
     setDraft({ categoryId: draft.categoryId, name: '', price: '' });
-    setMsg({ kind: 'ok', text: 'Item added.' });
+    setMsg({
+      kind: 'ok',
+      text: isCentral
+        ? 'Item added.'
+        : 'Item added to this outlet only. Publish to update billing.',
+    });
     router.refresh();
   }
 
@@ -298,14 +318,14 @@ export function MenuManager({
                 : `${String(master.items.length)} items`}
             </span>
             <span className="grow" />
-            {isCentral ? (
+            {canAdd ? (
               <button type="button" className="secondary sm" onClick={() => setAdding((v) => !v)}>
                 {adding ? 'Close' : '+ Add item'}
               </button>
             ) : null}
           </div>
 
-          {isCentral && adding && (
+          {canAdd && adding && (
             <div className="card">
               <form onSubmit={addItem} className="toolbar">
                 <label>
@@ -332,7 +352,7 @@ export function MenuManager({
                   />
                 </label>
                 <label style={{ width: 130 }}>
-                  Price ₹
+                  Price ₹ (GST included)
                   <input
                     inputMode="decimal"
                     value={draft.price}
@@ -345,17 +365,24 @@ export function MenuManager({
                   Add
                 </button>
               </form>
-              <form onSubmit={addCategory} className="row" style={{ marginTop: 10, gap: 8 }}>
-                <input
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value)}
-                  placeholder="New category name"
-                  style={{ margin: 0, maxWidth: 260 }}
-                />
-                <button type="submit" className="secondary sm" disabled={busy}>
-                  Add category
-                </button>
-              </form>
+              {!isCentral && (
+                <p className="muted">
+                  This item will appear only in the selected outlet after you publish.
+                </p>
+              )}
+              {isCentral && (
+                <form onSubmit={addCategory} className="row" style={{ marginTop: 10, gap: 8 }}>
+                  <input
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    placeholder="New category name"
+                    style={{ margin: 0, maxWidth: 260 }}
+                  />
+                  <button type="submit" className="secondary sm" disabled={busy}>
+                    Add category
+                  </button>
+                </form>
+              )}
             </div>
           )}
 
@@ -412,7 +439,7 @@ export function MenuManager({
                   ? 'Try a different term.'
                   : isCentral
                     ? 'Use “Add item” to build the menu.'
-                    : 'Central hasn’t published any master items yet — check back once they have.'}
+                    : 'Use “Add item” to create an item for this outlet.'}
               </p>
             </div>
           )}

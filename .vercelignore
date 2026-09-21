@@ -12,3 +12,5 @@
 **/coverage
 **/*.tsbuildinfo
 .DS_Store
+tmp
+output

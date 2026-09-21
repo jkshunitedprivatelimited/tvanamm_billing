@@ -46,11 +46,8 @@ const createCatalogItemCommandShape = z.object({
   imageUrl: z.url().max(2000).optional(),
   hsnCode: z.string().trim().max(20).optional(),
   gstRate: gstRateSchema.optional(),
-  /** Required instead of `gstRate`/`hsnCode` for a Franchise-created (outlet)
-   *  item - Central is the tax-profile authority, so master items keep
-   *  entering GST/HSN directly (`menu-publishing.md` "GST/HSN comes from a
-   *  Central-approved tax profile rather than an arbitrary rate entered at
-   *  the outlet"). */
+  /** Optional approved profile; outlet items otherwise inherit Central's
+   *  existing master-menu tax settings. Prices always include GST. */
   taxProfileId: z.uuid().optional(),
   price: moneySchema, // GST-inclusive
   isAvailable: z.boolean().default(true),
@@ -59,10 +56,13 @@ const createCatalogItemCommandShape = z.object({
 });
 
 export const createCatalogItemCommandSchema = createCatalogItemCommandShape.refine(
-  (v) => (v.outletId ? !!v.taxProfileId && !v.gstRate : !!v.gstRate && !v.taxProfileId),
+  (v) =>
+    v.outletId
+      ? v.gstRate === undefined && v.hsnCode === undefined
+      : !!v.gstRate && !v.taxProfileId,
   {
     message:
-      'A master item sets gstRate directly; a Franchise-created outlet item must reference a taxProfileId instead',
+      'A master item sets gstRate directly; outlet items inherit Central tax settings or use an approved profile',
   },
 );
 export type CreateCatalogItemCommand = z.infer<typeof createCatalogItemCommandShape>;
