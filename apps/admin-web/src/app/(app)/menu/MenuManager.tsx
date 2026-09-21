@@ -161,18 +161,27 @@ export function MenuManager({
 
   async function addCategory(e: React.SyntheticEvent) {
     e.preventDefault();
-    if (!newCategory.trim()) return;
+    if (!canAdd || busy || !newCategory.trim()) return;
+    if (!isCentral && !outletForFo) {
+      setMsg({ kind: 'error', text: 'Select an outlet before adding a category.' });
+      return;
+    }
     setBusy(true);
     setMsg(null);
     const { ok, data } = await req('/api/v1/catalog/categories', 'POST', {
       brandId,
       name: newCategory.trim(),
       displayOrder: categories.length,
+      ...(!isCentral ? { outletId: outletForFo } : {}),
     });
     setBusy(false);
     if (!ok) return setMsg({ kind: 'error', text: errText(data) });
+    setDraft((current) => ({ ...current, categoryId: (data as { id: string }).id }));
     setNewCategory('');
-    setMsg({ kind: 'ok', text: 'Category added.' });
+    setMsg({
+      kind: 'ok',
+      text: isCentral ? 'Category added.' : 'Category added to this outlet only.',
+    });
     router.refresh();
   }
 
@@ -370,19 +379,24 @@ export function MenuManager({
                   This item will appear only in the selected outlet after you publish.
                 </p>
               )}
-              {isCentral && (
-                <form onSubmit={addCategory} className="row" style={{ marginTop: 10, gap: 8 }}>
-                  <input
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    placeholder="New category name"
-                    style={{ margin: 0, maxWidth: 260 }}
-                  />
-                  <button type="submit" className="secondary sm" disabled={busy}>
-                    Add category
-                  </button>
-                </form>
-              )}
+              <form onSubmit={addCategory} className="row" style={{ marginTop: 10, gap: 8 }}>
+                <input
+                  aria-label="New category name"
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  placeholder="New category name"
+                  maxLength={120}
+                  required
+                  style={{ margin: 0, maxWidth: 260 }}
+                />
+                <button
+                  type="submit"
+                  className="secondary sm"
+                  disabled={busy || !newCategory.trim()}
+                >
+                  Add category
+                </button>
+              </form>
             </div>
           )}
 
