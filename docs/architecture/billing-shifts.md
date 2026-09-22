@@ -23,8 +23,9 @@ drawer session because the outlet uses one common Cash drawer.
 10. `End Shift` records `ended_at` and calculates the employee's activity. It
     does not close the shared outlet Cash drawer.
 11. The employee may start another separate shift later on the same business day.
-12. Forgotten shifts are not silently rewritten. A Franchise Owner can force-close
-   one with a mandatory reason, and the system marks it as `force_closed`.
+12. At midnight in the outlet timezone, the system force-closes prior-day shifts
+   and cash sessions with an explicit reason and audit event. A Franchise Owner
+   can also force-close a shift manually with a mandatory reason.
 
 ## Employee Shift Summary
 
@@ -88,7 +89,9 @@ are defined in `docs/architecture/cash-movements.md`.
   date; browser time is not trusted.
 - The business date is the outlet-local calendar date and ends at midnight.
 - An open employee shift or Cash session cannot continue into the next business
-  date. The POS requires closure before billing resumes on the new date.
+  date. The database job closes expired records on its first tick after local
+  midnight and catches up after downtime. The POS requires a new register and
+  shift before billing resumes on the new date.
 - Only one open shift per employee is permitted at a time.
 - Multiple closed shifts per employee per business date are permitted.
 - Multiple employees may have open shifts simultaneously.
@@ -113,5 +116,13 @@ are defined in `docs/architecture/cash-movements.md`.
   employee is permanently recorded.
 - A closed Cash session is immutable and cannot be reopened by the Franchise
   Owner.
-- Forgotten shifts are force-closed by the Franchise Owner with a reason; there
-  is no silent automatic close in the MVP.
+- Forgotten shifts and cash sessions are automatically force-closed at local
+  midnight, with an audit trail. Cash count and variance remain null because no
+  physical count occurred; expected cash is retained for reconciliation.
+- Automatic closure does not invent attendance checkout times or open a new
+  register. Staff enter the opening cash and start a new shift as usual.
+- The `billing-midnight-close` pg_cron job runs every minute. Monitor
+  `cron.job_run_details` for failures. Environments without pg_cron must schedule
+  `select billing.close_expired_business_days()` externally.
+- Offline sales must still sync before day-end. Unsent sales remain in the device
+  queue and follow the existing new-day register/shift requirements when syncing.

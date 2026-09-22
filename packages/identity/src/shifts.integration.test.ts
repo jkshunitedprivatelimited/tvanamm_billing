@@ -365,21 +365,75 @@ describe.skipIf(!RUN)('Billing V1 Stage 2 - shifts + cash session', () => {
     await finishWork(pool, a, { sessionId: cash.id, command: { countedCash: '0.00' } });
   });
 
-  it('blocks billing while a prior business-date shift or cash session is still open', async () => {
+  it('closes expired registers and shifts at local midnight once, without inventing a cash count', async () => {
     const a = await loginAs(pinA);
     let win = await outletBillingWindow(pool, a, outletId);
     expect(win.blocked).toBe(false);
 
-    await pool.query(
+    const cash = await pool.query<{ id: string; boundary: Date }>(
       `insert into billing.cash_sessions
          (organization_id, franchise_id, outlet_id, business_date, opened_by_employee_id,
           opened_by_name, opening_cash)
-       select $1, $2, $3, (current_date - 1), se.id, se.full_name, 0
-         from identity.store_employees se where se.outlet_id = $3 limit 1`,
+       select $1, $2, $3, (current_date - 1), se.id, se.full_name, 500
+         from identity.store_employees se where se.outlet_id = $3 limit 1
+       returning id, ((business_date + 1)::timestamp at time zone 'Asia/Kolkata') as boundary`,
       [JKSH_ORG, franchiseId, outletId],
     );
     win = await outletBillingWindow(pool, a, outletId);
     expect(win.blocked).toBe(true);
     expect(win.reason).toBe('stale_cash_session');
+    const shift = await pool.query<{ id: string }>(
+      `insert into billing.employee_shifts
+         (organization_id, franchise_id, outlet_id, employee_id, employee_name, business_date)
+       values ($1, $2, $3, $4, 'Midnight test', current_date - 1) returning id`,
+      [JKSH_ORG, franchiseId, outletId, a.employeeId],
+    );
+    const session = cash.rows[0]!;
+    // Asia/Kolkata midnight is 18:30 UTC, not the database's UTC date boundary.
+    expect(session.boundary.toISOString()).toContain('T18:30:00.000Z');
+    await pool.query('select billing.close_expired_business_days($1)', [
+      new Date(session.boundary.getTime() - 1),
+    ]);
+    expect((await getOpenCashSession(pool, a, outletId))?.id).toBe(session.id);
+    const runs = await Promise.all([
+      pool.query('select billing.close_expired_business_days($1) as count', [session.boundary]),
+      pool.query('select billing.close_expired_business_days($1) as count', [session.boundary]),
+    ]);
+    expect(runs.reduce((sum, r) => sum + Number(r.rows[0].count), 0)).toBe(1);
+    const closed = await pool.query('select * from billing.cash_sessions where id = $1', [
+      session.id,
+    ]);
+    expect(closed.rows[0]).toMatchObject({
+      status: 'force_closed',
+      counted_cash: null,
+      variance: null,
+      expected_cash: '500.00',
+      closed_by_employee_id: null,
+    });
+    const ended = await pool.query('select status from billing.employee_shifts where id = $1', [
+      shift.rows[0]!.id,
+    ]);
+    expect(ended.rows[0].status).toBe('force_closed');
+    const audit = await pool.query('select metadata from audit.events where subject_id = $1', [
+      session.id,
+    ]);
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].metadata).toMatchObject({ automatic: true, reconciliationRequired: true });
+    expect((await outletBillingWindow(pool, a, outletId)).blocked).toBe(false);
+
+    const current = await openCashSession(pool, a, { openingCash: '100.00' });
+    await pool.query('select billing.close_expired_business_days()');
+    expect((await getOpenCashSession(pool, a, outletId))?.id).toBe(current.id);
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('set local role identity_api');
+      await expect(client.query('select billing.close_expired_business_days()')).rejects.toThrow(
+        /permission denied/,
+      );
+    } finally {
+      await client.query('rollback');
+      client.release();
+    }
   });
 });

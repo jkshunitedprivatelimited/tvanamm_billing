@@ -10,6 +10,7 @@ import { db } from '@/server/pool';
 import { StartShift } from './start-shift';
 import { OpenRegister } from './open-register';
 import { PosClient } from './pos-client';
+import { SessionControls } from '@/app/session-controls';
 
 export default async function PosPage() {
   const actor = await requireOperator();
@@ -41,9 +42,19 @@ export default async function PosPage() {
           <h1>Billing paused</h1>
           <p className="muted">
             {window_.reason === 'stale_cash_session'
-              ? 'A Cash session from a previous business day is still open. Ask your manager to close it before billing resumes.'
-              : 'A shift from a previous business day is still open. Ask your manager to close it before billing resumes.'}
+              ? `The cash session${cashSession ? ` from ${cashSession.businessDate}` : ' from a previous business day'} is still open. Review expenses and enter the actual cash count to close the register before billing resumes.`
+              : 'A shift from a previous business day is still open. Finish your previous shift. If it belongs to another employee, ask them to finish it or ask your manager to force-close it.'}
           </p>
+          <a className="link-btn" href="/close">
+            {window_.reason === 'stale_cash_session'
+              ? 'Review & close previous register'
+              : 'Finish previous shift'}
+          </a>
+          <p className="muted">
+            After closing, sign in again to start today’s register and shift. Other employees with
+            open shifts must finish them before billing can resume.
+          </p>
+          <SessionControls />
         </div>
       </div>
     );

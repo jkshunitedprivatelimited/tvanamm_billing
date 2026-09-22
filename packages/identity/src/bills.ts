@@ -605,7 +605,7 @@ export async function createBill(
     // required (for an offline bill, the employee it was actually rung up
     // under - see 3a - not necessarily whoever is syncing right now).
     const cash = await client.query<{ id: string }>(
-      `select id from billing.cash_sessions where outlet_id = $1 and status = 'open'`,
+      `select id from billing.cash_sessions where outlet_id = $1 and status = 'open' for update`,
       [outletId],
     );
     if (!cash.rows[0]) {
@@ -614,7 +614,7 @@ export async function createBill(
       });
     }
     const shift = await client.query<{ id: string }>(
-      `select id from billing.employee_shifts where employee_id = $1 and status = 'open'`,
+      `select id from billing.employee_shifts where employee_id = $1 and status = 'open' for update`,
       [employeeId],
     );
     if (!shift.rows[0]) {

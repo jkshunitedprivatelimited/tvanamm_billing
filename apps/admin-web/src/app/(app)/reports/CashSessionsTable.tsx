@@ -56,7 +56,8 @@ const columns: Column<CashSessionRow>[] = [
     width: '100px',
     align: 'right',
     sortValue: (r) => (r.countedCash === null ? -1 : Number(r.countedCash)),
-    render: (r) => money(r.countedCash),
+    render: (r) =>
+      r.status === 'force_closed' && r.countedCash === null ? 'Not counted' : money(r.countedCash),
   },
   {
     key: 'expected',
