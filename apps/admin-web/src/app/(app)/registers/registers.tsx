@@ -24,9 +24,9 @@ export function Registers({ initial }: { initial: OwnerRegisterReview[] }) {
       const response = await fetch(`/api/v1/cash-sessions/${register.id}/owner-close`, {
         cache: 'no-store',
       });
-      const data = await response.json();
+      const data = (await response.json()) as OwnerRegisterReview & { message?: string };
       if (!response.ok) throw new Error(data.message ?? 'Could not load register');
-      setSelected(data as OwnerRegisterReview);
+      setSelected(data);
       setCounted('');
       setReason('');
       setCloseShifts(true);
@@ -53,7 +53,11 @@ export function Registers({ initial }: { initial: OwnerRegisterReview[] }) {
           closeOpenShifts: closeShifts,
         }),
       });
-      const data = await response.json();
+      const data = (await response.json()) as {
+        countedCash: string;
+        variance: string;
+        message?: string;
+      };
       if (!response.ok) throw new Error(data.message ?? 'Could not close register');
       setSuccess(
         `${selected.outletName}: register closed. Counted ${money(data.countedCash)}; difference ${money(data.variance)}. Staff can refresh billing and open a new register now, even today, by entering the opening cash. The previous register stays in closing history.`,
@@ -109,16 +113,18 @@ export function Registers({ initial }: { initial: OwnerRegisterReview[] }) {
             </button>
           </div>
           <div className="grid">
-            {[
-              ['Opening cash', selected.openingCash],
-              ['Cash sales', selected.cashSales],
-              ['Cash refunds', selected.cashRefunds],
-              ['Drawer expenses', selected.drawerExpenses],
-              ['Expected closing cash', selected.expectedCash],
-            ].map(([label, value]) => (
+            {(
+              [
+                ['Opening cash', selected.openingCash],
+                ['Cash sales', selected.cashSales],
+                ['Cash refunds', selected.cashRefunds],
+                ['Drawer expenses', selected.drawerExpenses],
+                ['Expected closing cash', selected.expectedCash],
+              ] as const
+            ).map(([label, value]) => (
               <div className="card" key={label}>
                 <p className="muted">{label}</p>
-                <strong>{money(value!)}</strong>
+                <strong>{money(value)}</strong>
               </div>
             ))}
           </div>

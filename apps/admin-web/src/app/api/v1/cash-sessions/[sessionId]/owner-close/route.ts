@@ -3,7 +3,9 @@ import { closeOwnerRegister, getOwnerRegisterReview } from '@jksh/identity';
 import { db } from '@/server/pool';
 import { actorOrThrow, apiJson, assertSameOrigin, jsonError, requestMeta } from '@/server/http';
 
-type Context = { params: Promise<{ sessionId: string }> };
+interface Context {
+  params: Promise<{ sessionId: string }>;
+}
 export async function GET(_request: Request, { params }: Context) {
   try {
     const actor = await actorOrThrow();
