@@ -20,6 +20,7 @@ import {
   recordStaffAttendance,
   listOutletStaff,
 } from './store-auth';
+import { listOwnerRegisters, getOwnerRegisterReview, closeOwnerRegister } from './owner-registers';
 import {
   openCashSession,
   finishWork,
@@ -363,6 +364,83 @@ describe.skipIf(!RUN)('Billing V1 Stage 2 - shifts + cash session', () => {
       action: 'check-out',
     });
     await finishWork(pool, a, { sessionId: cash.id, command: { countedCash: '0.00' } });
+  });
+
+  it('lets the owner close directly and open a fresh register on the same day', async () => {
+    const a = await loginAs(pinA);
+    const owner = await adminActor(ownerPhone);
+    const otherOwner = await adminActor(otherOwnerPhone);
+    const cash = await openCashSession(pool, a, { openingCash: '500.00' });
+    await startShift(pool, a, {});
+    const cmd = {
+      countedCash: '490.00',
+      expectedCash: '500.00',
+      reason: 'Owner verified cash shortage with outlet',
+      closeOpenShifts: true,
+    };
+    expect((await listOwnerRegisters(pool, owner)).some((r) => r.id === cash.id)).toBe(true);
+    expect(await listOwnerRegisters(pool, otherOwner)).toHaveLength(0);
+    await expect(getOwnerRegisterReview(pool, otherOwner, cash.id)).rejects.toThrow(/not found/i);
+    await expect(closeOwnerRegister(pool, otherOwner, cash.id, cmd)).rejects.toThrow(/not found/i);
+    await expect(closeOwnerRegister(pool, a, cash.id, cmd)).rejects.toThrow(/franchise owner/);
+    await expect(
+      closeOwnerRegister(pool, await adminActor(adminPhone), cash.id, cmd),
+    ).rejects.toThrow(/franchise owner/);
+    await expect(
+      closeOwnerRegister(pool, owner, cash.id, { ...cmd, reason: ' ' }),
+    ).rejects.toThrow();
+    await expect(
+      closeOwnerRegister(pool, owner, cash.id, { ...cmd, expectedCash: '499.00' }),
+    ).rejects.toThrow(/changed during review/);
+    expect((await getOpenCashSession(pool, a, outletId))?.id).toBe(cash.id);
+    const result = await closeOwnerRegister(pool, owner, cash.id, cmd);
+    expect(result).toMatchObject({ variance: '-10.00', closedShifts: 1 });
+    expect(await listOpenShifts(pool, a, outletId)).toHaveLength(0);
+    expect(await getOwnOpenAttendance(pool, a)).not.toBeNull();
+    const closed = await pool.query(
+      'select closed_by_account_id, closed_by_employee_id, status from billing.cash_sessions where id = $1',
+      [cash.id],
+    );
+    expect(closed.rows[0]).toMatchObject({
+      closed_by_account_id: owner.accountId,
+      closed_by_employee_id: null,
+      status: 'closed',
+    });
+    await expect(closeOwnerRegister(pool, owner, cash.id, cmd)).rejects.toThrow(
+      /already.*closed|not found/i,
+    );
+    const next = await openCashSession(pool, a, { openingCash: '490.00' });
+    expect(next.id).not.toBe(cash.id);
+    expect(next.businessDate).toBe(cash.businessDate);
+    await startShift(pool, a, {});
+    expect((await outletBillingWindow(pool, a, outletId)).blocked).toBe(false);
+    await finishWork(pool, a, { sessionId: next.id, command: { countedCash: '490.00' } });
+  });
+
+  it('owner closing also clears a forgotten prior-day register when auto-close has not run', async () => {
+    const a = await loginAs(pinA);
+    const owner = await adminActor(ownerPhone);
+    const cash = await openCashSession(pool, a, { openingCash: '100.00' });
+    await startShift(pool, a, {});
+    await pool.query(
+      'update billing.cash_sessions set business_date = current_date - 1 where id = $1',
+      [cash.id],
+    );
+    await pool.query(
+      "update billing.employee_shifts set business_date = current_date - 1 where outlet_id = $1 and status = 'open'",
+      [outletId],
+    );
+    expect((await outletBillingWindow(pool, a, outletId)).blocked).toBe(true);
+    expect((await getOwnerRegisterReview(pool, owner, cash.id)).overdue).toBe(true);
+    await closeOwnerRegister(pool, owner, cash.id, {
+      countedCash: '100.00',
+      expectedCash: '100.00',
+      reason: 'Manual fallback for missed midnight closure',
+      closeOpenShifts: true,
+    });
+    expect((await outletBillingWindow(pool, a, outletId)).blocked).toBe(false);
+    const next = await openCashSession(pool, a, { openingCash: '100.00' });
+    await finishWork(pool, a, { sessionId: next.id, command: { countedCash: '100.00' } });
   });
 
   it('closes expired registers and shifts at local midnight once, without inventing a cash count', async () => {

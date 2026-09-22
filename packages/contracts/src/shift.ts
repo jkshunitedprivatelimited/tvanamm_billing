@@ -20,6 +20,14 @@ export const closeCashSessionCommandSchema = z.object({
 });
 export type CloseCashSessionCommand = z.infer<typeof closeCashSessionCommandSchema>;
 
+export const ownerCloseRegisterCommandSchema = z.object({
+  countedCash: moneySchema,
+  expectedCash: z.string().regex(/^-?\d+(\.\d{1,2})?$/),
+  reason: z.string().trim().min(1).max(500),
+  closeOpenShifts: z.boolean(),
+});
+export type OwnerCloseRegisterCommand = z.infer<typeof ownerCloseRegisterCommandSchema>;
+
 export const startShiftCommandSchema = z.object({
   terminalId: z.uuid().optional(),
 });

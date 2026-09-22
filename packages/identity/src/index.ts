@@ -181,6 +181,12 @@ export {
   outletBillingWindow,
 } from './shifts';
 export {
+  listOwnerRegisters,
+  getOwnerRegisterReview,
+  closeOwnerRegister,
+  type OwnerRegisterReview,
+} from './owner-registers';
+export {
   calculateBill,
   type CalcInput,
   type CalcResult,

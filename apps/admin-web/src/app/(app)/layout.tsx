@@ -28,6 +28,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             ? [
                 { href: '/menu', label: 'Menu' },
                 { href: '/reports', label: 'Reports' },
+                ...(actor.role === 'franchise_owner'
+                  ? [{ href: '/registers', label: 'Registers' }]
+                  : []),
                 {
                   href: '/stock',
                   label: actor.role === 'franchise_owner' ? 'Expenses & wastage' : 'Stock control',

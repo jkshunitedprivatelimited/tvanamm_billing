@@ -130,7 +130,7 @@ export async function openCashSession(
 /** Expected cash = opening + Cash sales for the session - Cash refunds paid
  *  out of the session. Scalar subqueries (not joins) so summing one table
  *  never fans out rows from the other. */
-async function expectedCashFor(client: PoolClient, cashSessionId: string): Promise<string> {
+export async function expectedCashFor(client: PoolClient, cashSessionId: string): Promise<string> {
   const { rows } = await client.query<{ expected: string }>(
     `select cs.opening_cash
             + coalesce((select sum(p.amount) from billing.payments p

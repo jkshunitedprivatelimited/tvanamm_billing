@@ -448,7 +448,18 @@ export default async function ReportsPage({
             <ReasonBreakdownTable rows={refundReasons} empty="No refunds in this range." />
           </section>
         ) : null}
-        {category.key === 'cash' ? <CashSessionsTable rows={cashSessions} /> : null}
+        {category.key === 'cash' ? (
+          <>
+            {isOwner ? (
+              <p>
+                <a className="btn" href="/registers">
+                  Review & close register
+                </a>
+              </p>
+            ) : null}
+            <CashSessionsTable rows={cashSessions} />
+          </>
+        ) : null}
         {retention ? (
           <>
             <p className="muted">

@@ -126,3 +126,23 @@ are defined in `docs/architecture/cash-movements.md`.
   `select billing.close_expired_business_days()` externally.
 - Offline sales must still sync before day-end. Unsent sales remain in the device
   queue and follow the existing new-day register/shift requirements when syncing.
+
+## Franchise owner register control
+
+Owners use `/registers` in the admin portal, also linked from Cash reports, to
+review and close any open register in their franchise at any time. This works
+independently of the midnight scheduler. The review shows opening cash, cash
+sales, refunds, drawer expenses, expected cash, and remaining shifts. The owner
+enters a verified physical cash count and a required closure note. A changed
+expected balance requires refreshing the review before confirmation.
+
+The owner may end remaining shifts for that business date and earlier in the
+same transaction, without staff PINs or attendance checkout. The closing record
+stores `closed_by_account_id` and audit events identify the owner. Closed records
+stay immutable. Staff can immediately open a new register from billing with a
+fresh opening cash amount, including on the same business date. Refresh an
+already-open billing screen after remote closure.
+
+Migration `0040_owner_register_close.sql` is required for owner closure. It does
+not enable the midnight job or close any live records; scheduler activation is
+separate in migration `0039_midnight_cash_close.sql`.
