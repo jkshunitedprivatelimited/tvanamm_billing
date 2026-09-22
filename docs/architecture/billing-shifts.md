@@ -146,3 +146,8 @@ already-open billing screen after remote closure.
 Migration `0040_owner_register_close.sql` is required for owner closure. It does
 not enable the midnight job or close any live records; scheduler activation is
 separate in migration `0039_midnight_cash_close.sql`.
+
+If owner closure is deployed before the midnight scheduler, apply migration
+`0041_preserve_owner_close_shape.sql` after the delayed `0039` migration. The
+normal migration runner does this automatically; it preserves owner attribution
+when deploying the two features separately.
