@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { listItems, listEmployeeStockEntries } from '@jksh/stock';
 import { requireOperator } from '@/server/auth';
 import { stockDb, operatorStockActor } from '@/server/stock';
+import { ExpensesClient } from '../expenses/expenses-client';
 import { StockEntryClient } from './stock-entry-client';
 export default async function EmployeeStockPage() {
   const actor = await requireOperator();
@@ -33,9 +34,10 @@ export default async function EmployeeStockPage() {
     content = (
       <>
         <p role="alert">
-          Stock entry is temporarily unavailable. You can still record other expenses.
+          Stock entry is unavailable for this outlet. You can still record expenses, including milk
+          and sugar.
         </p>
-        <StockEntryClient items={[]} entries={[]} expenses={expenses} />
+        <ExpensesClient />
       </>
     );
   }

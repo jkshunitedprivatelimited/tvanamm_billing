@@ -31,7 +31,7 @@ interface SyncResult {
   error?: string;
 }
 
-async function primeOnce(
+export async function primeOnce(
   menu: PosMenuSnapshot,
   outletName: string,
   employeeId: string,
@@ -39,15 +39,17 @@ async function primeOnce(
 ): Promise<boolean> {
   try {
     const kit = await readOfflineKit();
-    const needBlock = !kit || kit.receiptNumbers.length < LOW_WATER;
+    const reusableBlock =
+      kit?.menu.outletId === menu.outletId && Date.parse(kit.blockExpiresAt) > Date.now();
+    const needBlock = !reusableBlock || kit.receiptNumbers.length < LOW_WATER;
 
     const authRes = await fetch('/api/v1/offline-auth', { method: 'POST' });
     if (!authRes.ok) return false;
     const auth = (await authRes.json()) as { token: string; expiresAt: string };
 
-    let receiptNumbers = kit?.receiptNumbers ?? [];
-    let businessDate = kit?.businessDate ?? '';
-    let blockExpiresAt = kit?.blockExpiresAt ?? auth.expiresAt;
+    let receiptNumbers = reusableBlock ? kit.receiptNumbers : [];
+    let businessDate = reusableBlock ? kit.businessDate : '';
+    let blockExpiresAt = reusableBlock ? kit.blockExpiresAt : '';
     if (needBlock) {
       const blockRes = await fetch('/api/v1/receipt-blocks', {
         method: 'POST',

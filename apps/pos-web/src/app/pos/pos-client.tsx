@@ -10,8 +10,10 @@ import type {
 } from '@jksh/contracts';
 import Link from 'next/link';
 import { ReceiptView } from '../receipt-view';
+import { RecipeHelp } from './recipe-help';
 import { terminalPaperWidthMm } from '../terminal-prefs';
 import { smartPrint, smartPrintReceipt } from '@/lib/printer';
+import { readPrinterConfig } from '@/lib/printer-store';
 import { buildOfflineTicketEscPos } from '@/lib/escpos';
 import { BrandMark } from '@/components/BrandMark';
 import { PrinterStatus } from '@/components/PrinterStatus';
@@ -110,9 +112,15 @@ export function PosClient({
 }) {
   const router = useRouter();
   const [search, setSearch] = useState('');
+  const [mobileView, setMobileView] = useState<'menu' | 'bill'>('menu');
+  function showMobileView(view: 'menu' | 'bill') {
+    setMobileView(view);
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }));
+  }
   const [category, setCategory] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [addonItem, setAddonItem] = useState<MenuItem | null>(null);
+  const [recipeItem, setRecipeItem] = useState<{ id: string; name: string } | null>(null);
   const [billDiscount, setBillDiscount] = useState<DiscountInput | null>(null);
   const [showBillDiscount, setShowBillDiscount] = useState(false);
   const [discountLineId, setDiscountLineId] = useState<string | null>(null);
@@ -354,7 +362,7 @@ export function PosClient({
           setOfflineDone({ receiptNumber: opts.receiptNumber, total: t.final });
         } else {
           setQueuedNotice(
-            'No connection — bill saved. It sends automatically and the receipt prints once it does.',
+            'No connection — bill saved on this device. It will send automatically when connected.',
           );
           clearSale();
         }
@@ -422,6 +430,7 @@ export function PosClient({
   /** Reset the till for the next customer without leaving the sale screen. */
   const clearSale = useCallback(() => {
     setCart([]);
+    setMobileView('menu');
     setBillDiscount(null);
     setPayment(null);
     setCustomerName('');
@@ -499,9 +508,11 @@ export function PosClient({
     const key = receiptBillId ?? (offlineDone ? offlineDone.receiptNumber : null);
     if (!key || printedRef.current === key) return;
     printedRef.current = key;
+    // System print / PDF is optional, never an automatic checkout step.
+    if (readPrinterConfig().kind === 'browser') return;
     if (receipt) void printReceipt();
     else if (offlineDone) void printOfflineTicket(offlineDone);
-  }, [receipt, offlineDone, receiptBillId, printReceipt]);
+  }, [receipt, offlineDone, receiptBillId, printReceipt, printOfflineTicket]);
 
   if (receipt) {
     return (
@@ -523,7 +534,16 @@ export function PosClient({
                 <p className="muted">You can print this saved bill later from Bill history.</p>
               </>
             ) : (
-              <p role="status">{printing ? 'Sending receipt to printer…' : 'Preparing receipt…'}</p>
+              <div>
+                <h2>{printing ? 'Printing receipt…' : 'Sale saved'}</h2>
+                <p>Your bill is saved. Printing is optional.</p>
+                <button disabled={printing} onClick={newSale}>
+                  Next customer →
+                </button>
+                <button className="ghost" disabled={printing} onClick={() => void printReceipt()}>
+                  Print / Save PDF
+                </button>
+              </div>
             )}
           </div>
           <PrinterStatus />
@@ -531,7 +551,7 @@ export function PosClient({
             <p className="error no-print" style={{ marginTop: 10 }}>
               {printerNotice}
               <button className="ghost" onClick={() => window.print()}>
-                Use system print dialog
+                Print / Save PDF (optional)
               </button>
             </p>
           ) : null}
@@ -569,14 +589,26 @@ export function PosClient({
               </button>
             </div>
           ) : (
-            <p role="status">Sending receipt to printer…</p>
+            <div>
+              <p role="status">{printing ? 'Printing receipt…' : 'Sale saved on this device'}</p>
+              <button disabled={printing} onClick={newSale}>
+                Next customer →
+              </button>
+              <button
+                className="ghost"
+                disabled={printing}
+                onClick={() => void printOfflineTicket(offlineDone)}
+              >
+                Print / Save PDF
+              </button>
+            </div>
           )}
           <PrinterStatus />
           {printerNotice ? (
             <p className="error" style={{ marginTop: 10 }}>
               {printerNotice}
               <button className="ghost" onClick={() => window.print()}>
-                Use system print dialog
+                Print / Save PDF (optional)
               </button>
             </p>
           ) : null}
@@ -587,7 +619,7 @@ export function PosClient({
 
   return (
     <>
-      <div className="statusbar">
+      <div className="statusbar billing-statusbar">
         <span>
           <strong>{outletName}</strong>{' '}
           <span className={`chip ${offline.online ? 'online' : 'offline'}`}>
@@ -618,34 +650,37 @@ export function PosClient({
             </span>
           ) : null}
         </span>
-        <span className="row" style={{ gap: 10 }}>
-          {offline.pending > 0 || offline.failed > 0 ? (
-            <Link href="/pos/recovery" className="link-btn">
-              Recovery
-            </Link>
-          ) : null}
-          <span className="topnav billing-actions">
-            <Link href="/stock">Stock & expenses</Link>
-            <Link href="/history">Bill history</Link>
-            <Link href="/pos/printer">Printer</Link>
-            <Link href="/close" className="danger">
-              Finish shift
-            </Link>
-          </span>
-          <SessionControls />
-          <span className="muted">{employeeName}</span>
-        </span>
+        <details className="billing-more">
+          <summary>More</summary>
+          <div className="row" style={{ gap: 10 }}>
+            {offline.pending > 0 || offline.failed > 0 ? (
+              <Link href="/pos/recovery" className="link-btn">
+                Recovery
+              </Link>
+            ) : null}
+            <span className="topnav billing-actions">
+              <Link href="/expenses">Record expense</Link>
+              <Link href="/stock">Stock entries</Link>
+              <Link href="/history">Bill history</Link>
+              <Link href="/pos/printer">Printer</Link>
+              <Link href="/close" className="danger">
+                Finish shift
+              </Link>
+            </span>
+            <SessionControls />
+            <span className="muted">{employeeName}</span>
+            <PrinterStatus />
+            <StaffMenu />
+          </div>
+        </details>
       </div>
-      <div className="pos-utility-bar no-print">
-        <PrinterStatus />
-        <StaffMenu />
-      </div>
+
       {queuedNotice ? (
         <p className="ok" style={{ margin: '8px 16px 0' }}>
           {queuedNotice}
         </p>
       ) : null}
-      <div className="pos-layout">
+      <div className={`pos-layout mobile-${mobileView}`}>
         <div className="menu-pane">
           <div className="search-row">
             <input
@@ -724,6 +759,9 @@ export function PosClient({
           ) : null}
         </div>
         <div className="cart-pane">
+          <button className="mobile-only ghost" onClick={() => showMobileView('menu')}>
+            ← Add more items
+          </button>
           <div className="cart-header">
             <h1>Current sale</h1>
             {cart.length > 0 ? (
@@ -751,6 +789,19 @@ export function PosClient({
                 <div className="cart-line" key={line.clientLineId}>
                   <div style={{ flex: 1 }}>
                     <div className="item-name">{line.name}</div>
+                    {line.catalogItemId ? (
+                      <button
+                        type="button"
+                        className="link-btn"
+                        aria-label={`Recipe help for ${line.name}`}
+                        onClick={() => {
+                          if (line.catalogItemId)
+                            setRecipeItem({ id: line.catalogItemId, name: line.name });
+                        }}
+                      >
+                        Recipe / SOP
+                      </button>
+                    ) : null}
                     {line.addons.map((a) => (
                       <div className="meta" key={a.addonId}>
                         + {a.quantity} x {a.name}
@@ -796,33 +847,37 @@ export function PosClient({
             })}
           </div>
 
-          <div className="row" style={{ gap: 14, margin: '10px 0 2px' }}>
-            <button
-              className="link-btn"
-              disabled={cart.length === 0}
-              onClick={() => setShowBillDiscount(true)}
-            >
-              {billDiscount ? 'Edit bill discount' : 'Add bill discount'}
-            </button>
-            <button className="link-btn" onClick={() => setShowCustomer((v) => !v)}>
-              {showCustomer ? 'Hide customer details' : '+ Customer details'}
-            </button>
-          </div>
-          {showCustomer ? (
-            <div style={{ marginBottom: 8 }}>
-              <input
-                placeholder="Customer name (optional)"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-              />
-              <input
-                placeholder="Mobile (optional)"
-                value={customerMobile}
-                onChange={(e) => setCustomerMobile(e.target.value)}
-              />
+          <details className="bill-options">
+            <summary>
+              More options <span className="muted">· Discount &amp; customer</span>
+            </summary>
+            <div className="row" style={{ gap: 14, margin: '10px 0 2px' }}>
+              <button
+                className="link-btn"
+                disabled={cart.length === 0}
+                onClick={() => setShowBillDiscount(true)}
+              >
+                {billDiscount ? 'Edit bill discount' : 'Add bill discount'}
+              </button>
+              <button className="link-btn" onClick={() => setShowCustomer((v) => !v)}>
+                {showCustomer ? 'Hide customer details' : '+ Customer details'}
+              </button>
             </div>
-          ) : null}
-
+            {showCustomer ? (
+              <div style={{ marginBottom: 8 }}>
+                <input
+                  placeholder="Customer name (optional)"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                />
+                <input
+                  placeholder="Mobile (optional)"
+                  value={customerMobile}
+                  onChange={(e) => setCustomerMobile(e.target.value)}
+                />
+              </div>
+            ) : null}
+          </details>
           <div className="totals-card">
             <div className="totals-row">
               <span>Subtotal</span>
@@ -880,6 +935,20 @@ export function PosClient({
         </div>
       </div>
 
+      {mobileView === 'menu' ? (
+        <div className="mobile-cart-bar no-print">
+          <Link href="/expenses" className="mobile-expense-link">
+            Record expense
+          </Link>
+          <button disabled={!cart.length} onClick={() => showMobileView('bill')}>
+            View bill · {cart.reduce((sum, line) => sum + line.quantity, 0)} items{' '}
+            <strong>₹{totals.final} →</strong>
+          </button>
+        </div>
+      ) : null}
+      {recipeItem ? (
+        <RecipeHelp key={recipeItem.id} item={recipeItem} onClose={() => setRecipeItem(null)} />
+      ) : null}
       {addonItem ? (
         <AddonModal
           item={addonItem}

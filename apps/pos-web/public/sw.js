@@ -21,19 +21,37 @@
  * (`offline-store.ts`) after mounting — so the stale-identity risk that
  * rules out caching `/pos` itself doesn't apply to it.
  */
-const CACHE = 'jksh-pos-v3';
-const SHELL = ['/', '/login', '/pos-offline', '/manifest.webmanifest', '/brand/tvanamm-logo.png'];
-const PUBLIC_NAV_PATHS = new Set(['/', '/login']);
-const OFFLINE_FALLBACK_PATHS = new Set(['/pos']);
+const CACHE = 'jksh-pos-v4';
+const SHELL = ['/login', '/pos-offline', '/manifest.webmanifest', '/brand/tvanamm-logo.png'];
+const PUBLIC_NAV_PATHS = new Set(['/login']);
+const OFFLINE_FALLBACK_PATHS = new Set(['/', '/pos', '/pos-offline']);
+
+async function prepareOfflineShell() {
+  const cache = await caches.open(CACHE);
+  // Fetching HTML alone does not load its JavaScript/CSS. Warm the fallback's
+  // dependencies explicitly so the first offline reload can actually boot.
+  const response = await fetch(new Request('/pos-offline', { cache: 'reload' }));
+  if (!response.ok || response.redirected) throw new Error('Offline page unavailable');
+  const html = await response.clone().text();
+  const assets = new Set();
+  for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
+    const url = new URL(match[1].replaceAll('&amp;', '&'), self.location.origin);
+    if (url.origin === self.location.origin && url.pathname.startsWith('/_next/static/'))
+      assets.add(url.href);
+  }
+  if (!assets.size) throw new Error('Offline page assets missing');
+  await cache.addAll([...assets].map((url) => new Request(url, { cache: 'reload' })));
+  await cache.put('/pos-offline', response);
+  // Optional public assets must not prevent the billing fallback from installing.
+  await Promise.allSettled(
+    SHELL.filter((url) => url !== '/pos-offline').map((url) =>
+      cache.add(new Request(url, { cache: 'reload' })),
+    ),
+  );
+}
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
-      .catch(() => {}),
-  );
-  self.skipWaiting();
+  event.waitUntil(prepareOfflineShell().then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (event) => {
@@ -91,7 +109,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE).then((c) => c.put(request, copy));
           return res;
         })
-        .catch(() => caches.match(request).then((hit) => hit || caches.match('/'))),
+        .catch(() => caches.match(request).then((hit) => hit || caches.match('/pos-offline'))),
     );
   }
 });

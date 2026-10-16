@@ -258,3 +258,4 @@ export {
   submitOutletOnboarding,
   approveOutletOnboarding,
 } from './onboarding';
+export { getPosRecipeHelp } from './pos-recipe-help';

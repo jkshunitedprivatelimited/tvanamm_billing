@@ -34,12 +34,12 @@ const GUC_KEYS: Record<string, keyof DbContext> = {
 
 export async function applyContext(client: PoolClient, ctx: DbContext): Promise<void> {
   await client.query('set local role identity_api');
-  for (const [guc, key] of Object.entries(GUC_KEYS)) {
-    const value = ctx[key];
-    if (value != null && value !== '') {
-      await client.query('select set_config($1, $2, true)', [guc, value]);
-    }
-  }
+  // One round trip for all settings; clear omitted values on pooled connections.
+  const entries = Object.entries(GUC_KEYS);
+  await client.query(
+    `select ${entries.map((_, i) => `set_config($${String(i * 2 + 1)}, $${String(i * 2 + 2)}, true)`).join(', ')}`,
+    entries.flatMap(([guc, key]) => [guc, ctx[key] ?? '']),
+  );
 }
 
 /** Run `fn` in one transaction with the authorization context applied. */

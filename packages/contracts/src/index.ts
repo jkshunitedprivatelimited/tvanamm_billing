@@ -21,3 +21,4 @@ export * from './stock';
 export * from './tax-profile';
 export * from './terminal';
 export * from './onboarding';
+export * from './chef-sop';

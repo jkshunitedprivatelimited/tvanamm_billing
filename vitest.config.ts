@@ -35,6 +35,9 @@ export default defineConfig({
   test: {
     projects: [
       {
+        test: { name: 'pos-web', include: ['apps/pos-web/src/**/*.test.ts'], environment: 'node' },
+      },
+      {
         test: {
           name: 'packages',
           include: ['packages/*/src/**/*.{test,spec}.ts'],

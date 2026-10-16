@@ -137,6 +137,8 @@ button:disabled {
   gap: 12px;
 }
 .keys button {
+  touch-action: manipulation;
+  user-select: none;
   background: var(--panel);
   color: var(--text);
   border-color: var(--border-strong);
@@ -994,5 +996,192 @@ a.link-btn:hover {
   .pos-utility-bar .staff-toolbar {
     margin-left: 0;
     width: 100%;
+  }
+}
+
+/* Mobile billing: pick items, then review the bill in a separate pane. */
+.mobile-only,
+.mobile-cart-bar {
+  display: none;
+}
+.billing-more {
+  position: relative;
+}
+.billing-more > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  list-style: none;
+}
+.billing-more[open] > div {
+  position: absolute;
+  right: 0;
+  top: 48px;
+  z-index: 30;
+  width: min(360px, calc(100vw - 24px));
+  padding: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-1);
+  flex-direction: column;
+  align-items: stretch;
+}
+.billing-more .billing-actions {
+  display: grid;
+  gap: 8px;
+}
+.bill-options {
+  margin: 14px 0;
+}
+.bill-options summary {
+  cursor: pointer;
+  padding: 12px 0;
+}
+.billing-loading {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.loading-search,
+.loading-items > div {
+  background: var(--panel-3);
+  border-radius: 12px;
+}
+.loading-search {
+  height: 48px;
+  margin: 24px 0 16px;
+}
+.loading-items {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.loading-items > div {
+  height: 110px;
+}
+@media (max-width: 700px) {
+  .mobile-only {
+    display: block;
+  }
+  .billing-statusbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--panel);
+  }
+  .billing-statusbar > span {
+    min-width: 0;
+    flex: 1;
+    font-size: 12px;
+  }
+  .billing-statusbar > span > strong {
+    display: block;
+    font-size: 17px;
+    margin-bottom: 4px;
+  }
+  .billing-statusbar .chip {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+  .pos-layout {
+    height: auto;
+    min-height: calc(100dvh - 80px);
+  }
+  .pos-layout.mobile-menu .cart-pane,
+  .pos-layout.mobile-bill .menu-pane {
+    display: none;
+  }
+  .pos-layout .menu-pane {
+    padding: 16px 14px 150px;
+    overflow: visible;
+  }
+  .pos-layout .cart-pane {
+    padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
+    border: 0;
+    overflow: visible;
+  }
+  .cat-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+  .cat-tab {
+    flex-shrink: 0;
+    min-height: 44px;
+  }
+  .item-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .item-card {
+    min-width: 0;
+    min-height: 112px;
+    padding: 14px;
+  }
+  .item-card .name {
+    font-size: 15px;
+    overflow-wrap: anywhere;
+  }
+  .search-row input {
+    min-height: 48px;
+    font-size: 16px;
+  }
+  .mobile-cart-bar {
+    display: grid;
+    position: fixed;
+    z-index: 25;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    gap: 8px;
+    padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+  }
+  .mobile-cart-bar > button {
+    min-height: 54px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-radius: 12px;
+  }
+  .mobile-expense-link {
+    display: block;
+    text-align: center;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .cart-pane > .mobile-only {
+    margin-bottom: 16px;
+    min-height: 44px;
+    text-align: left;
+  }
+  .cart-pane .qty-pill button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .cart-pane .pay-row {
+    position: sticky;
+    bottom: 0;
+    padding: 12px 0;
+    background: var(--panel);
+    gap: 12px;
+  }
+  .cart-pane .charge-btn {
+    min-height: 64px;
+    font-size: 18px;
+  }
+  .print-recovery button {
+    width: 100%;
+    min-height: 48px;
+    margin-top: 8px;
   }
 }

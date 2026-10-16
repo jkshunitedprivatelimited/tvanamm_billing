@@ -201,12 +201,12 @@ export function StockEntryClient({
                 <option value="other">Other item — enter its name</option>
               ) : null}
               {kind === 'purchase' ? (
-                <option value="other-expense">Other expense — transport, cleaning, repairs…</option>
+                <option value="other-expense">Expense only — milk, sugar, transport…</option>
               ) : null}
             </select>
             <p>
               {kind === 'purchase'
-                ? 'Milk and sugar purchases update stock and expenses together. For other spending, choose Other expense and enter any category.'
+                ? 'Stock purchases need stock setup for this outlet. To record spending only, choose Expense only — including milk or sugar.'
                 : 'Record only the quantity that was lost.'}
             </p>
           </section>

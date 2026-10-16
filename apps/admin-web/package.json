@@ -15,7 +15,7 @@
     "@jksh/db": "*",
     "@jksh/identity": "*",
     "@jksh/stock": "*",
-    "next": "^16.3.4",
+    "next": "~16.3.8",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "@supabase/ssr": "^0.5.2",

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { PosClient } from '../pos/pos-client';
 import { kitUsable, readOfflineKit, type OfflineKit } from '@/lib/offline-store';
+import Loading from '../loading';
 
 /**
  * The offline fallback shell for `/pos`. `/pos/page.tsx` is a Server
@@ -44,7 +45,7 @@ export default function PosOfflineShell() {
     });
   }, []);
 
-  if (state.status === 'loading') return null;
+  if (state.status === 'loading') return <Loading />;
 
   if (state.status === 'unavailable') {
     return (
