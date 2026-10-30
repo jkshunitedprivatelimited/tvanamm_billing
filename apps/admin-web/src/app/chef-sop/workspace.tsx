@@ -154,8 +154,9 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
           checked. Your saved work stays here when you return.
         </p>
         <p>
-          Use grams (g), millilitres (ml) or pieces. Weigh each spoon or scoop separately. Do not
-          guess missing values. These entries do not change live billing or stock.
+          Use grams (g), millilitres (ml), pieces or scoops. Record the scoop size in the
+          measurements below. Do not guess missing values. These entries do not change live billing
+          or stock.
         </p>
       </section>
       {message ? (
@@ -259,6 +260,7 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
                         <option value="ml">ml</option>
                         <option value="g">g</option>
                         <option value="pieces">pieces</option>
+                        <option value="scoops">scoops</option>
                       </select>
                     </label>
                     <label>
@@ -296,6 +298,7 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
                           <option value="ml">ml</option>
                           <option value="g">g</option>
                           <option value="pieces">pieces</option>
+                          <option value="scoops">scoops</option>
                         </select>
                       </label>
                       <label>
@@ -366,6 +369,7 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
                           <option>g</option>
                           <option>ml</option>
                           <option>pieces</option>
+                          <option>scoops</option>
                         </select>
                       </label>
                       <label>
@@ -421,7 +425,7 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
                       [
                         'measurements',
                         'Spoon, scoop and pump measurements',
-                        'Example format: sugar spoon = __ g; syrup pump = __ ml. Measure separately for every ingredient.',
+                        'Example format: sugar spoon = __ g; ice cream scoop = __ g; syrup pump = __ ml. Measure separately for every ingredient.',
                       ],
                       [
                         'packaging',

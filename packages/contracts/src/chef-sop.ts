@@ -13,10 +13,10 @@ export const chefDraftSchema = z
     chefName: z.string().trim().max(120),
     basis: z.enum(['serving', 'batch']),
     servingQuantity: quantity,
-    servingUnit: z.enum(['ml', 'g', 'pieces']),
+    servingUnit: z.enum(['ml', 'g', 'pieces', 'scoops']),
     portionName: z.string().trim().max(100),
     batchYield: quantity,
-    batchUnit: z.enum(['ml', 'g', 'pieces']),
+    batchUnit: z.enum(['ml', 'g', 'pieces', 'scoops']),
     servingsPerBatch: quantity,
     ingredients: z
       .array(
@@ -24,7 +24,7 @@ export const chefDraftSchema = z
           .object({
             name: z.string().trim().max(160),
             quantity,
-            unit: z.enum(['g', 'ml', 'pieces']),
+            unit: z.enum(['g', 'ml', 'pieces', 'scoops']),
             note: z.string().trim().max(250),
           })
           .strict(),
