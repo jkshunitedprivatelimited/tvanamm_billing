@@ -2,9 +2,11 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   chefDraftSchema,
+  chefItemInputSchema,
   emptyChefDraft,
   type ChefCollection,
   type ChefDraft,
+  type ChefItem,
 } from '@/server/chef-sop-schema';
 import './workbook.css';
 export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
@@ -18,6 +20,9 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
+  const [addingItem, setAddingItem] = useState(false);
+  const [itemName, setItemName] = useState('');
+  const [itemCategory, setItemCategory] = useState('Other');
   const readOnly = !!reviewId || !!data?.closed || !!data?.submitted;
   useEffect(() => {
     token.current = window.location.hash.slice(1);
@@ -103,6 +108,80 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
       setBusy(false);
     }
   }
+  async function addItem() {
+    if (readOnly || busy) return;
+    const valid = chefItemInputSchema.safeParse({ name: itemName, category: itemCategory });
+    if (!valid.success) {
+      setMessage(valid.error.issues.map((issue) => issue.message).join(' '));
+      return;
+    }
+    if (dirty && !confirm('Discard unsaved changes and open the new item?')) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const r = await fetch('/api/chef-sop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.current}` },
+        body: JSON.stringify({ action: 'add_item', item: valid.data }),
+      });
+      const b = (await r.json()) as { item: ChefItem; menu: ChefItem[]; message?: string };
+      if (!r.ok) throw Error(b.message ?? 'Could not add item');
+      setData((d) => (d ? { ...d, menu: b.menu } : d));
+      setSelected(b.item.id);
+      setDraft({ ...emptyChefDraft(), chefName: draft.chefName });
+      setRevision(0);
+      setDirty(false);
+      setSearch('');
+      setCategory('All');
+      setItemName('');
+      setAddingItem(false);
+      setMessage(`${b.item.name} added. Enter its recipe and save a draft when ready.`);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not add item');
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteItem() {
+    if (readOnly || busy || !current) return;
+    if (
+      !confirm(
+        `Delete "${current.name}" and its saved recipe from this workbook? This cannot be undone.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const r = await fetch('/api/chef-sop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token.current}` },
+        body: JSON.stringify({ action: 'delete_item', itemId: current.id, revision }),
+      });
+      const b = (await r.json()) as { itemId: string; menu: ChefItem[]; message?: string };
+      if (!r.ok) throw Error(b.message ?? 'Could not delete item');
+      setData((d) =>
+        d
+          ? {
+              ...d,
+              menu: b.menu,
+              entries: d.entries.filter((entry) => b.menu.some((item) => item.id === entry.itemId)),
+            }
+          : d,
+      );
+      setSelected('');
+      setDraft({ ...emptyChefDraft(), chefName: draft.chefName });
+      setRevision(0);
+      setDirty(false);
+      setSearch('');
+      setCategory('All');
+      setMessage(`${current.name} deleted from this workbook.`);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not delete item');
+    } finally {
+      setBusy(false);
+    }
+  }
   async function submit() {
     if (dirty) {
       setMessage('Save this recipe first.');
@@ -127,7 +206,10 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
       setBusy(false);
     }
   }
-  const ready = data?.entries.filter((e) => e.draft.status === 'ready').length ?? 0;
+  const ready =
+    data?.menu.filter((item) =>
+      data.entries.some((entry) => entry.itemId === item.id && entry.draft.status === 'ready'),
+    ).length ?? 0;
   const current = data?.menu.find((i) => i.id === selected);
   return (
     <main className="chef-workbook">
@@ -170,6 +252,71 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
       {data ? (
         <div className="chef-layout">
           <aside className="chef-menu">
+            {!readOnly ? (
+              <div className="chef-item-tools">
+                {addingItem ? (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void addItem();
+                    }}
+                  >
+                    <h3>Add workbook item</h3>
+                    <label>
+                      Item name
+                      <input
+                        required
+                        maxLength={160}
+                        value={itemName}
+                        onChange={(e) => setItemName(e.target.value)}
+                        disabled={busy}
+                        placeholder="e.g. Mango ice cream"
+                      />
+                    </label>
+                    <label>
+                      Item category
+                      <input
+                        required
+                        maxLength={120}
+                        list="chef-item-categories"
+                        value={itemCategory}
+                        onChange={(e) => setItemCategory(e.target.value)}
+                        disabled={busy}
+                      />
+                      <datalist id="chef-item-categories">
+                        {[...new Set(data.menu.map((item) => item.category))].map((name) => (
+                          <option key={name} value={name} />
+                        ))}
+                      </datalist>
+                    </label>
+                    <div className="chef-item-buttons">
+                      <button type="submit" disabled={busy}>
+                        Add item
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => setAddingItem(false)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      setItemCategory(category === 'All' ? 'Other' : category);
+                      setAddingItem(true);
+                    }}
+                  >
+                    + Add item
+                  </button>
+                )}
+                <p>Items added here belong to this SOP workbook.</p>
+              </div>
+            ) : null}
             <label>
               Find a menu item
               <input
@@ -217,7 +364,19 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
             {current ? (
               <>
                 <span className="chef-kicker">{current.category}</span>
-                <h2>{current.name}</h2>
+                <div className="chef-editor-heading">
+                  <h2>{current.name}</h2>
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      className="secondary chef-delete-item"
+                      disabled={busy}
+                      onClick={() => void deleteItem()}
+                    >
+                      Delete item
+                    </button>
+                  ) : null}
+                </div>
                 <fieldset disabled={readOnly || busy}>
                   <h3>1. Serving standard</h3>
                   <div className="chef-fields">
@@ -474,8 +633,14 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
               </>
             ) : (
               <div className="chef-empty">
-                <h2>Start with any menu item</h2>
-                <p>Choose an item from the menu to enter its recipe.</p>
+                <h2>{data.menu.length ? 'Start with any menu item' : 'No workbook items yet'}</h2>
+                <p>
+                  {data.menu.length
+                    ? 'Choose an item from the menu to enter its recipe.'
+                    : readOnly
+                      ? 'This workbook has no items.'
+                      : 'Use Add item to start a recipe.'}
+                </p>
               </div>
             )}
           </section>
@@ -488,7 +653,7 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
             every item is complete.
           </p>
           <button
-            disabled={busy || dirty || ready !== data.menu.length}
+            disabled={busy || dirty || !data.menu.length || ready !== data.menu.length}
             onClick={() => void submit()}
           >
             Submit complete workbook

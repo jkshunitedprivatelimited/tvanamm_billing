@@ -68,6 +68,34 @@
   overflow: auto;
   margin-top: 16px;
 }
+.chef-item-tools {
+  border-bottom: 1px solid #dde4df;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+}
+.chef-item-tools h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.chef-item-tools p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #68746b;
+  margin-bottom: 0;
+}
+.chef-item-buttons,
+.chef-editor-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.chef-editor-heading {
+  justify-content: space-between;
+}
+.chef-delete-item {
+  color: #a12626;
+}
 .chef-item-list button {
   display: flex;
   justify-content: space-between;

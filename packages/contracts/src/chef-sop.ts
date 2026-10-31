@@ -1,4 +1,10 @@
 import { z } from 'zod';
+export const chefItemInputSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Enter an item name').max(160),
+    category: z.string().trim().min(1, 'Enter a category').max(120),
+  })
+  .strict();
 const text = z.string().trim().max(3000);
 const quantity = z
   .string()

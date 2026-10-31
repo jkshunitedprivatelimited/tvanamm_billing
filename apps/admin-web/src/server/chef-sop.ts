@@ -1,10 +1,12 @@
 import 'server-only';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { ActorContext } from '@jksh/contracts';
+import type { PoolClient } from '@jksh/db';
 import { IdentityError } from '@jksh/identity';
 import { db } from './pool';
 import {
   chefDraftSchema,
+  chefItemInputSchema,
   type ChefCollection,
   type ChefItem,
   type ChefEntry,
@@ -143,6 +145,84 @@ export async function saveChefEntry(
     c.release();
   }
 }
+async function changeChefMenu<T>(
+  token: string,
+  change: (client: PoolClient, collection: CollectionRow) => Promise<T>,
+): Promise<T> {
+  const client = await db().connect();
+  try {
+    await client.query('begin');
+    const collection = (
+      await client.query<CollectionRow>(
+        `select id,menu,submitted_at from billing.sop_collections where token_hash=$1 and revoked_at is null and expires_at>now() for update`,
+        [hashChefToken(token)],
+      )
+    ).rows[0];
+    if (!collection || collection.submitted_at)
+      throw new IdentityError('forbidden', 'This collection is closed for editing.');
+    const result = await change(client, collection);
+    await client.query('commit');
+    return result;
+  } catch (error) {
+    await client.query('rollback');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+export async function addChefItem(token: string, input: unknown) {
+  const value = chefItemInputSchema.parse(input);
+  return changeChefMenu(token, async (client, collection) => {
+    if (collection.menu.length >= 500)
+      throw new IdentityError('validation', 'A workbook can contain up to 500 items.');
+    const normalize = (v: string) => v.trim().replace(/\s+/g, ' ').toLowerCase();
+    if (
+      collection.menu.some(
+        (item) =>
+          normalize(item.name) === normalize(value.name) &&
+          normalize(item.category) === normalize(value.category),
+      )
+    )
+      throw new IdentityError('conflict', 'This item already exists in this category.');
+    const item: ChefItem = { id: randomUUID(), ...value };
+    const menu = [...collection.menu, item];
+    await client.query('update billing.sop_collections set menu=$2 where id=$1', [
+      collection.id,
+      JSON.stringify(menu),
+    ]);
+    return { item, menu };
+  });
+}
+export async function deleteChefItem(token: string, itemId: string, revision: number) {
+  return changeChefMenu(token, async (client, collection) => {
+    if (!collection.menu.some((item) => item.id === itemId))
+      throw new IdentityError(
+        'not_found',
+        'Item is not in this workbook. Reload to update the list.',
+      );
+    const entry = (
+      await client.query<{ revision: number }>(
+        'select revision from billing.sop_collection_entries where collection_id=$1 and item_id=$2',
+        [collection.id, itemId],
+      )
+    ).rows[0];
+    if ((entry?.revision ?? 0) !== revision)
+      throw new IdentityError(
+        'conflict',
+        'This recipe changed in another tab. Reload and review it before deleting.',
+      );
+    const menu = collection.menu.filter((item) => item.id !== itemId);
+    await client.query(
+      'delete from billing.sop_collection_entries where collection_id=$1 and item_id=$2',
+      [collection.id, itemId],
+    );
+    await client.query('update billing.sop_collections set menu=$2 where id=$1', [
+      collection.id,
+      JSON.stringify(menu),
+    ]);
+    return { itemId, menu };
+  });
+}
 export async function submitChefCollection(token: string) {
   const c = await db().connect();
   try {
@@ -154,6 +234,11 @@ export async function submitChefCollection(token: string) {
       )
     ).rows[0];
     if (!s) throw new IdentityError('forbidden', 'This link is closed');
+    if (!s.menu.length)
+      throw new IdentityError(
+        'validation',
+        'Add at least one item before submitting the workbook.',
+      );
     const rows = (
       await c.query<{ item_id: string; draft: ChefDraft }>(
         `select item_id,draft from billing.sop_collection_entries where collection_id=$1`,

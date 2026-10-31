@@ -1,5 +1,6 @@
 export {
   chefDraftSchema,
+  chefItemInputSchema,
   emptyChefDraft,
   type ChefDraft,
   type ChefItem,

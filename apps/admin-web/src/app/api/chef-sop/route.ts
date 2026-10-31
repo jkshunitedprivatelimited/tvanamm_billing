@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { apiJson, jsonError } from '@/server/http';
-import { readChefCollection, saveChefEntry, submitChefCollection } from '@/server/chef-sop';
+import {
+  readChefCollection,
+  saveChefEntry,
+  submitChefCollection,
+  addChefItem,
+  deleteChefItem,
+} from '@/server/chef-sop';
+import { chefItemInputSchema } from '@/server/chef-sop-schema';
 function token(r: Request) {
   return z
     .string()
@@ -32,12 +39,22 @@ export async function POST(r: Request) {
           })
           .strict(),
         z.object({ action: z.literal('submit') }).strict(),
+        z.object({ action: z.literal('add_item'), item: chefItemInputSchema }).strict(),
+        z
+          .object({
+            action: z.literal('delete_item'),
+            itemId: z.uuid(),
+            revision: z.number().int().min(0),
+          })
+          .strict(),
       ])
       .parse(JSON.parse(raw));
     if (b.action === 'submit') {
       await submitChefCollection(t);
       return apiJson({ ok: true });
     }
+    if (b.action === 'add_item') return apiJson(await addChefItem(t, b.item));
+    if (b.action === 'delete_item') return apiJson(await deleteChefItem(t, b.itemId, b.revision));
     return apiJson(await saveChefEntry(t, b.itemId, b.revision, b.draft));
   } catch (e) {
     return jsonError(e);
