@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent, type MouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { BrandMark } from '@/components/BrandMark';
 
 const CREDENTIAL_KEY = 'jksh_terminal_credential';
 const OUTLET_KEY = 'jksh_terminal_outlet';
 const HOLD_MS = 1800;
+const LOGIN_TIMEOUT_MS = 15000;
 
 export default function StoreLoginPage() {
   const router = useRouter();
@@ -22,6 +23,30 @@ export default function StoreLoginPage() {
   // should never see (or accidentally tap) a way to deregister the device.
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const touchHandled = useRef(false);
+
+  // Some tablet browsers delay or omit the compatibility click after a tap.
+  // Handle touch/pen release directly and consume its follow-up click once.
+  function keyHandlers(action: () => void) {
+    return {
+      onPointerDown: () => {
+        touchHandled.current = false;
+      },
+      onPointerUp: (event: PointerEvent<HTMLButtonElement>) => {
+        if (event.pointerType === 'mouse' || busy) return;
+        touchHandled.current = true;
+        action();
+      },
+      onClick: (event: MouseEvent<HTMLButtonElement>) => {
+        if (touchHandled.current && event.detail !== 0) {
+          touchHandled.current = false;
+          return;
+        }
+        action();
+      },
+    };
+  }
 
   function startHold() {
     holdTimer.current = setTimeout(() => setShowResetConfirm(true), HOLD_MS);
@@ -87,9 +112,12 @@ export default function StoreLoginPage() {
     if (!credential) return;
     setBusy(true);
     setError(null);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), LOGIN_TIMEOUT_MS);
     try {
       const res = await fetch('/api/v1/operator-sessions/pin-login', {
         method: 'POST',
+        signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ terminalCredential: credential, pin: nextPin }),
       });
@@ -126,7 +154,11 @@ export default function StoreLoginPage() {
       setConfirmName(body.employeeName);
       setOutletName(body.outletName);
       setPhase('confirm');
+    } catch {
+      setPin('');
+      setError('Unable to connect. Check your internet connection and enter your PIN again.');
     } finally {
+      clearTimeout(timeout);
       setBusy(false);
     }
   }
@@ -241,21 +273,34 @@ export default function StoreLoginPage() {
         </div>
         <div className="keys">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d) => (
-            <button key={d} onClick={() => press(d)} disabled={busy}>
+            <button key={d} {...keyHandlers(() => press(d))} disabled={busy}>
               {d}
             </button>
           ))}
-          <button className="ghost" onClick={() => setPin('')} disabled={busy}>
+          <button className="ghost" {...keyHandlers(() => setPin(''))} disabled={busy}>
             Clear
           </button>
-          <button onClick={() => press('0')} disabled={busy}>
+          <button {...keyHandlers(() => press('0'))} disabled={busy}>
             0
           </button>
-          <button className="ghost" onClick={() => setPin(pin.slice(0, -1))} disabled={busy}>
+          <button
+            className="ghost"
+            {...keyHandlers(() => setPin(pin.slice(0, -1)))}
+            disabled={busy}
+          >
             ⌫
           </button>
         </div>
-        {error ? <p className="error">{error}</p> : null}
+        {busy ? (
+          <p className="muted" role="status">
+            Checking PIN…
+          </p>
+        ) : null}
+        {error ? (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
     </div>
   );

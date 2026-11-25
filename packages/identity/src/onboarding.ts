@@ -12,6 +12,7 @@ import { contextForActor } from './db-context';
 import { createFranchiseWithClient } from './franchise';
 import { createFranchiseOwnerInvitationWithClient } from './invitations';
 import { createOutletWithClient } from './outlet';
+import { initializeOutletMenuWithClient } from './menu-publish';
 import { ensureAllowedAudited } from './authz';
 import { FRESH_AUTH_SECONDS } from './authorize';
 import { IdentityError } from './errors';
@@ -177,6 +178,7 @@ export async function approveOutletOnboarding(
       "update billing.outlets set status='active', billing_enabled=true where id=$1",
       [outlet.id],
     );
+    await initializeOutletMenuWithClient(client, actor, outlet.id, meta);
     await client.query(
       'update identity.outlet_onboarding set outlet_id=$2, reviewed_by=$3, reviewed_at=now() where franchise_id=$1',
       [franchiseId, outlet.id, actor.accountId],

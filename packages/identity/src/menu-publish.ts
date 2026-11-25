@@ -473,6 +473,189 @@ export async function createAndApplyPublication(
   return finalizePublication(pool, actor, publicationId);
 }
 
+/** Publish the initial menu in the activation transaction. Never replace an existing menu. */
+export async function initializeOutletMenuWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  outletId: string,
+  meta: RequestMeta = {},
+): Promise<void> {
+  ensureAllowed(actor, 'catalog.menu.manage.master', {
+    organizationId: actor.scope.organizationId,
+  });
+  const outlet = await client.query<{ brand_id: string }>(
+    `select brand_id from billing.outlets where id = $1 and organization_id = $2 for update`,
+    [outletId, actor.scope.organizationId],
+  );
+  if (!outlet.rows[0]) throw new IdentityError('not_found', 'Outlet not found');
+  const existing = await client.query(
+    `select 1 from billing.outlet_menu_versions where outlet_id = $1`,
+    [outletId],
+  );
+  if (existing.rowCount) return;
+  const brandId = outlet.rows[0].brand_id;
+  const publicationId = randomUUID();
+  const correlationId = meta.correlationId ?? randomUUID();
+  await client.query(
+    `insert into billing.menu_publications
+       (id, organization_id, brand_id, initiator_scope, actor_account_id,
+        overwrite_price, forced_fields, status, correlation_id, notes)
+     values ($1,$2,$3,'master',$4,false,'{}','applying',$5,'Initial standard menu on activation')`,
+    [publicationId, actor.scope.organizationId, brandId, actor.accountId ?? null, correlationId],
+  );
+  await client.query(
+    `insert into billing.menu_publication_targets (publication_id, outlet_id, status)
+     values ($1,$2,'pending')`,
+    [publicationId, outletId],
+  );
+  await recordAudit(client, {
+    action: 'menu.publication_created',
+    result: 'success',
+    actorAccountId: actor.accountId,
+    organizationId: actor.scope.organizationId,
+    outletId,
+    correlationId,
+    metadata: { publicationId, source: 'outlet_activation', outletCount: 1 },
+  });
+  await applyTargetWithClient(client, actor, publicationId, brandId, outletId, correlationId);
+  await client.query(
+    `update billing.menu_publications set status = 'completed', completed_at = now() where id = $1`,
+    [publicationId],
+  );
+}
+
+async function applyTargetWithClient(
+  client: PoolClient,
+  actor: ActorContext,
+  publicationId: string,
+  brandId: string,
+  outletId: string,
+  correlationId: string,
+): Promise<void> {
+  const t = await client.query<{ id: string; status: string }>(
+    `select id, status from billing.menu_publication_targets
+      where publication_id = $1 and outlet_id = $2 for update`,
+    [publicationId, outletId],
+  );
+  const target = t.rows[0];
+  if (!target) throw new IdentityError('not_found', 'Publication target missing');
+  if (target.status === 'succeeded' || target.status === 'skipped') return; // idempotent
+
+  await client.query(
+    `update billing.menu_publication_targets
+        set status = 'applying', attempts = attempts + 1, error = null
+      where id = $1`,
+    [target.id],
+  );
+
+  const items = await resolveEffectiveItems(client, brandId, outletId);
+  const combos = await resolveEffectiveCombos(client, brandId, outletId);
+  const checksum = checksumOf(items, combos);
+
+  const cur = await client.query<{ id: string; checksum: string }>(
+    `select id, checksum from billing.outlet_menu_versions where outlet_id = $1 and is_current`,
+    [outletId],
+  );
+  if (cur.rows[0]?.checksum === checksum) {
+    await client.query(
+      `update billing.menu_publication_targets
+          set status = 'skipped', outlet_menu_version_id = $2 where id = $1`,
+      [target.id, cur.rows[0].id],
+    );
+    return;
+  }
+
+  const maxV = await client.query<{ next: string }>(
+    `select coalesce(max(version), 0) + 1 as next from billing.outlet_menu_versions
+      where outlet_id = $1`,
+    [outletId],
+  );
+  const nextVersion = maxV.rows[0]?.next ?? '1';
+  const versionId = randomUUID();
+  await client.query(
+    `insert into billing.outlet_menu_versions
+       (id, outlet_id, version, publication_id, item_count, checksum, is_current)
+     values ($1,$2,$3,$4,$5,$6,false)`,
+    [versionId, outletId, nextVersion, publicationId, items.length, checksum],
+  );
+  for (const it of items) {
+    await client.query(
+      `insert into billing.outlet_menu_version_items
+         (outlet_menu_version_id, catalog_item_id, category_name, category_order, item_name,
+          description, image_url, gst_rate, price, is_available, availability_note, addons,
+          stock_recipe_id, stock_recipe_version, offline_sale_allowed)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15)`,
+      [
+        versionId,
+        it.catalogItemId,
+        it.categoryName,
+        it.categoryOrder,
+        it.name,
+        it.description,
+        it.imageUrl,
+        it.gstRate,
+        it.price,
+        it.isAvailable,
+        it.availabilityNote,
+        JSON.stringify(it.addons),
+        it.stockRecipeId,
+        it.stockRecipeVersion,
+        it.offlineSaleAllowed,
+      ],
+    );
+  }
+  for (const c of combos) {
+    await client.query(
+      `insert into billing.outlet_menu_version_combos
+         (outlet_menu_version_id, combo_id, category_name, category_order, combo_name,
+          description, image_url, price, is_available, availability_note, offline_sale_allowed,
+          components)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
+      [
+        versionId,
+        c.comboId,
+        c.categoryName,
+        c.categoryOrder,
+        c.name,
+        c.description,
+        c.imageUrl,
+        c.price,
+        c.isAvailable,
+        c.availabilityNote,
+        c.offlineSaleAllowed,
+        JSON.stringify(c.components),
+      ],
+    );
+  }
+  await client.query(
+    `update billing.outlet_menu_versions set is_current = false
+      where outlet_id = $1 and is_current`,
+    [outletId],
+  );
+  await client.query(`update billing.outlet_menu_versions set is_current = true where id = $1`, [
+    versionId,
+  ]);
+  await client.query(
+    `update billing.menu_publication_targets
+        set status = 'succeeded', outlet_menu_version_id = $2 where id = $1`,
+    [target.id, versionId],
+  );
+  await recordAudit(client, {
+    action: 'menu.publication_applied',
+    result: 'success',
+    actorAccountId: actor.accountId,
+    organizationId: actor.scope.organizationId,
+    outletId,
+    correlationId,
+    metadata: {
+      publicationId,
+      version: nextVersion,
+      itemCount: items.length,
+      comboCount: combos.length,
+    },
+  });
+}
+
 async function applyOneTarget(
   pool: Pool,
   actor: ActorContext,
@@ -483,129 +666,7 @@ async function applyOneTarget(
 ): Promise<void> {
   try {
     await withActorContext(pool, contextForActor(actor), async (client) => {
-      const t = await client.query<{ id: string; status: string }>(
-        `select id, status from billing.menu_publication_targets
-          where publication_id = $1 and outlet_id = $2 for update`,
-        [publicationId, outletId],
-      );
-      const target = t.rows[0];
-      if (!target) throw new IdentityError('not_found', 'Publication target missing');
-      if (target.status === 'succeeded' || target.status === 'skipped') return; // idempotent
-
-      await client.query(
-        `update billing.menu_publication_targets
-            set status = 'applying', attempts = attempts + 1, error = null
-          where id = $1`,
-        [target.id],
-      );
-
-      const items = await resolveEffectiveItems(client, brandId, outletId);
-      const combos = await resolveEffectiveCombos(client, brandId, outletId);
-      const checksum = checksumOf(items, combos);
-
-      const cur = await client.query<{ id: string; checksum: string }>(
-        `select id, checksum from billing.outlet_menu_versions where outlet_id = $1 and is_current`,
-        [outletId],
-      );
-      if (cur.rows[0]?.checksum === checksum) {
-        await client.query(
-          `update billing.menu_publication_targets
-              set status = 'skipped', outlet_menu_version_id = $2 where id = $1`,
-          [target.id, cur.rows[0].id],
-        );
-        return;
-      }
-
-      const maxV = await client.query<{ next: string }>(
-        `select coalesce(max(version), 0) + 1 as next from billing.outlet_menu_versions
-          where outlet_id = $1`,
-        [outletId],
-      );
-      const nextVersion = maxV.rows[0]?.next ?? '1';
-      const versionId = randomUUID();
-      await client.query(
-        `insert into billing.outlet_menu_versions
-           (id, outlet_id, version, publication_id, item_count, checksum, is_current)
-         values ($1,$2,$3,$4,$5,$6,false)`,
-        [versionId, outletId, nextVersion, publicationId, items.length, checksum],
-      );
-      for (const it of items) {
-        await client.query(
-          `insert into billing.outlet_menu_version_items
-             (outlet_menu_version_id, catalog_item_id, category_name, category_order, item_name,
-              description, image_url, gst_rate, price, is_available, availability_note, addons,
-              stock_recipe_id, stock_recipe_version, offline_sale_allowed)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15)`,
-          [
-            versionId,
-            it.catalogItemId,
-            it.categoryName,
-            it.categoryOrder,
-            it.name,
-            it.description,
-            it.imageUrl,
-            it.gstRate,
-            it.price,
-            it.isAvailable,
-            it.availabilityNote,
-            JSON.stringify(it.addons),
-            it.stockRecipeId,
-            it.stockRecipeVersion,
-            it.offlineSaleAllowed,
-          ],
-        );
-      }
-      for (const c of combos) {
-        await client.query(
-          `insert into billing.outlet_menu_version_combos
-             (outlet_menu_version_id, combo_id, category_name, category_order, combo_name,
-              description, image_url, price, is_available, availability_note, offline_sale_allowed,
-              components)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
-          [
-            versionId,
-            c.comboId,
-            c.categoryName,
-            c.categoryOrder,
-            c.name,
-            c.description,
-            c.imageUrl,
-            c.price,
-            c.isAvailable,
-            c.availabilityNote,
-            c.offlineSaleAllowed,
-            JSON.stringify(c.components),
-          ],
-        );
-      }
-      await client.query(
-        `update billing.outlet_menu_versions set is_current = false
-          where outlet_id = $1 and is_current`,
-        [outletId],
-      );
-      await client.query(
-        `update billing.outlet_menu_versions set is_current = true where id = $1`,
-        [versionId],
-      );
-      await client.query(
-        `update billing.menu_publication_targets
-            set status = 'succeeded', outlet_menu_version_id = $2 where id = $1`,
-        [target.id, versionId],
-      );
-      await recordAudit(client, {
-        action: 'menu.publication_applied',
-        result: 'success',
-        actorAccountId: actor.accountId,
-        organizationId: actor.scope.organizationId,
-        outletId,
-        correlationId,
-        metadata: {
-          publicationId,
-          version: nextVersion,
-          itemCount: items.length,
-          comboCount: combos.length,
-        },
-      });
+      await applyTargetWithClient(client, actor, publicationId, brandId, outletId, correlationId);
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
