@@ -3,11 +3,22 @@ import Link from 'next/link';
 import { listOutlets } from '@jksh/identity';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
+import { listOwnerPilotOutlets } from '@jksh/stock';
+import { stockDb } from '@/server/stock';
 
 /** Phase-one owner workspace. Keep unfinished inventory workflows out of customer navigation. */
 export default async function StockLayout({ children }: { children: ReactNode }) {
   const actor = await requireAdminActor();
   if (actor.role !== 'franchise_owner') return children;
+  // A Stock outage must not take away the existing expense/report links.
+  const pilotOutlets = actor.scope.franchiseId
+    ? await listOwnerPilotOutlets(
+        stockDb(),
+        actor.scope.organizationId,
+        actor.scope.franchiseId,
+      ).catch(() => [])
+    : [];
+  if (pilotOutlets.length) return children;
   const outlets = await listOutlets(db(), actor);
   return (
     <main>

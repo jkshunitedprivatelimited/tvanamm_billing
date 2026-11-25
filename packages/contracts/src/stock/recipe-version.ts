@@ -5,6 +5,8 @@ const positiveQuantity = z
   .refine((v) => Number(v) > 0, 'Quantity must be greater than zero');
 export const publishRecipeVersionSchema = z
   .object({
+    expectedDraftRevision: z.int().nonnegative().optional(),
+    expectedCurrentVersion: z.int().nonnegative().optional(),
     servingQtyBase: positiveQuantity,
     servingUnit: z.enum(['g', 'ml', 'each']),
     batchYieldBase: positiveQuantity.nullish(),

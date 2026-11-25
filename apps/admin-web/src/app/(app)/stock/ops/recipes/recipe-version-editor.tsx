@@ -1,7 +1,12 @@
 'use client';
-import { useState } from 'react';
-import { recipeServingQuantity, recipeYieldPreview } from '@jksh/contracts';
+import { useEffect, useState } from 'react';
+import {
+  recipeEditorDraftSchema,
+  recipeServingQuantity,
+  recipeYieldPreview,
+} from '@jksh/contracts';
 import { apiPost } from '../api';
+import type { ChefDraft } from '@/server/chef-sop-schema';
 export interface RecipeItemOption {
   id: string;
   name: string;
@@ -15,6 +20,9 @@ interface Line {
   kind: ComponentKind;
   group: string;
   isDefault: boolean;
+  sourceName?: string | undefined;
+  sourceUnit?: string | undefined;
+  sourceQuantity?: string | undefined;
 }
 const emptyLine = (key: number): Line => ({
   key,
@@ -30,20 +38,107 @@ export function RecipeVersionEditor({
   recipeName,
   items,
   onPublished,
+  chefDraft,
 }: {
   recipeId: string;
   recipeName: string;
   items: RecipeItemOption[];
   onPublished: () => void;
+  chefDraft?: ChefDraft | undefined;
 }) {
-  const [basis, setBasis] = useState('serving');
-  const [serving, setServing] = useState('');
-  const [unit, setUnit] = useState('ml');
-  const [yieldQty, setYieldQty] = useState('');
-  const [lines, setLines] = useState<Line[]>([emptyLine(1)]);
+  const [basis, setBasis] = useState<string>(chefDraft?.basis ?? 'serving');
+  const scoopServing = chefDraft?.servingUnit === 'scoops';
+  const [serving, setServing] = useState(scoopServing ? '' : (chefDraft?.servingQuantity ?? ''));
+  const [unit, setUnit] = useState<string>(
+    scoopServing
+      ? 'g'
+      : chefDraft?.servingUnit === 'pieces'
+        ? 'each'
+        : (chefDraft?.servingUnit ?? 'ml'),
+  );
+  const [yieldQty, setYieldQty] = useState(
+    !scoopServing && chefDraft?.batchUnit === chefDraft?.servingUnit
+      ? (chefDraft?.batchYield ?? '')
+      : '',
+  );
+  const [lines, setLines] = useState<Line[]>(
+    chefDraft
+      ? chefDraft.ingredients.map((i, n) => ({
+          ...emptyLine(n + 1),
+          quantity: i.quantity,
+          sourceName: i.name,
+          sourceUnit: i.unit === 'pieces' ? 'each' : i.unit,
+          sourceQuantity: i.quantity,
+        }))
+      : [emptyLine(1)],
+  );
   const [verified, setVerified] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [draftRevision, setDraftRevision] = useState(0);
+  const [baseVersion, setBaseVersion] = useState(0);
+  useEffect(() => {
+    const abort = new AbortController();
+    void fetch(`/api/v1/stock/recipes/${recipeId}/draft`, {
+      cache: 'no-store',
+      signal: abort.signal,
+    })
+      .then(async (r) => {
+        if (!r.ok) throw new Error('Could not load the saved draft. Reopen this editor to retry.');
+        const b = (await r.json()) as {
+          draft: unknown;
+          revision: number;
+          currentVersion: number;
+          baseVersion: number;
+        };
+        if (abort.signal.aborted) return;
+        setDraftRevision(b.revision);
+        setBaseVersion(b.currentVersion);
+        if (b.draft) {
+          const d = recipeEditorDraftSchema.parse(b.draft);
+          setBasis(d.basis);
+          setServing(d.serving);
+          setUnit(d.unit);
+          setYieldQty(d.yieldQty);
+          setLines(d.lines);
+          setMessage(
+            b.baseVersion === b.currentVersion
+              ? 'Saved draft restored.'
+              : 'A newer recipe version was published. Review this saved draft against it before publishing.',
+          );
+        }
+        setLoading(false);
+      })
+      .catch((e: unknown) => {
+        if (!abort.signal.aborted)
+          setMessage(e instanceof Error ? e.message : 'Could not load draft.');
+      });
+    return () => abort.abort();
+  }, [recipeId]);
+  async function saveDraft() {
+    if (busy || loading) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/v1/stock/recipes/${recipeId}/draft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          revision: draftRevision,
+          baseVersion,
+          draft: { basis, serving, unit, yieldQty, lines },
+        }),
+      });
+      const b = (await r.json()) as { revision: number; message?: string };
+      if (!r.ok) throw new Error(b.message ?? 'Could not save draft');
+      setDraftRevision(b.revision);
+      setMessage('Mapped draft saved. You can return to this recipe later.');
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not save draft');
+    } finally {
+      setBusy(false);
+    }
+  }
   const change = (key: number, patch: Partial<Line>) => {
     setLines((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
     setVerified(false);
@@ -92,10 +187,12 @@ export function RecipeVersionEditor({
   }
   async function publish(e: React.FormEvent) {
     e.preventDefault();
-    if (busy || error || !verified) return;
+    if (busy || loading || error || !verified) return;
     setBusy(true);
     setMessage('');
     const result = await apiPost(`/api/v1/stock/recipes/${recipeId}/versions`, {
+      expectedDraftRevision: draftRevision,
+      expectedCurrentVersion: baseVersion,
       servingQtyBase: serving,
       servingUnit: unit,
       ...(basis === 'batch' ? { batchYieldBase: yieldQty } : {}),
@@ -113,7 +210,8 @@ export function RecipeVersionEditor({
         Use measured quantities. Spoon sizes, ranges and “as required” must be standardized before
         publishing.
       </p>
-      <fieldset disabled={busy}>
+      {loading && !message ? <p role="status">Loading saved draft…</p> : null}
+      <fieldset disabled={busy || loading}>
         <div className="grid">
           <label>
             Ingredient quantities describe
@@ -130,6 +228,12 @@ export function RecipeVersionEditor({
           </label>
           <label>
             Serving quantity
+            {scoopServing ? (
+              <small>
+                Chef: {chefDraft.servingQuantity} scoops. Enter the measured serving quantity in the
+                selected stock unit.
+              </small>
+            ) : null}
             <input
               required
               type="number"
@@ -184,10 +288,26 @@ export function RecipeVersionEditor({
           <div className="recipe-ingredient-row" key={line.key}>
             <label>
               Stock item
+              {line.sourceName ? (
+                <small>
+                  Chef: {line.sourceName} · {line.sourceQuantity} {line.sourceUnit}
+                </small>
+              ) : null}
               <select
                 required
                 value={line.itemId}
-                onChange={(e) => change(line.key, { itemId: e.target.value })}
+                onChange={(e) => {
+                  const item = items.find((i) => i.id === e.target.value);
+                  change(line.key, {
+                    itemId: e.target.value,
+                    ...(line.sourceUnit
+                      ? {
+                          quantity:
+                            item?.baseUnit === line.sourceUnit ? (line.sourceQuantity ?? '') : '',
+                        }
+                      : {}),
+                  });
+                }}
               >
                 <option value="">Choose ingredient</option>
                 {items.map((i) => (
@@ -291,12 +411,20 @@ export function RecipeVersionEditor({
           Publishing creates a new version. Historical bills keep their original recipe. Quantities
           are stored to six decimal places.
         </p>
-        <button disabled={busy || !!error || !verified}>
+        <button
+          type="button"
+          className="secondary"
+          disabled={busy || loading}
+          onClick={() => void saveDraft()}
+        >
+          Save mapped draft
+        </button>
+        <button disabled={busy || loading || !!error || !verified}>
           {busy ? 'Publishing…' : 'Publish verified version'}
         </button>
       </fieldset>
       {message ? (
-        <p role="alert" className="error">
+        <p role="status" className="muted">
           {message}
         </p>
       ) : null}

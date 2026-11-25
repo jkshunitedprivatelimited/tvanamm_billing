@@ -24,6 +24,7 @@ export const STOCK_CAPABILITIES = [
   'stock.inward.operate',
   'stock.local_inward.record',
   'stock.local_inward.review',
+  'stock.preparation.record',
   'stock.return.request',
   'stock.return.approve',
   'stock.return.collect',
@@ -90,6 +91,7 @@ const FRANCHISE_OWNER: readonly StockCapability[] = [
   'stock.inward.operate',
   'stock.local_inward.record',
   'stock.local_inward.review',
+  'stock.preparation.record',
   'stock.return.request',
   'stock.count.operate',
   'stock.wastage.operate',
@@ -101,6 +103,7 @@ const FRANCHISE_OWNER: readonly StockCapability[] = [
 const STORE_EMPLOYEE: readonly StockCapability[] = [
   'stock.inward.operate',
   'stock.local_inward.record',
+  'stock.preparation.record',
   'stock.return.request',
   'stock.count.operate',
   'stock.wastage.operate',

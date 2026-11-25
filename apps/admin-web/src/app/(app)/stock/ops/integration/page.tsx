@@ -1,6 +1,9 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { listOutlets } from '@jksh/identity';
 import { requireAdminActor } from '@/server/auth';
+import { db } from '@/server/pool';
+import { DayCheck } from './day-check';
 import { IntegrationClient } from './integration-client';
 
 export const dynamic = 'force-dynamic';
@@ -8,6 +11,9 @@ export const dynamic = 'force-dynamic';
 export default async function IntegrationHealthPage() {
   const actor = await requireAdminActor();
   if (actor.role !== 'central_admin') redirect('/stock/ops');
+  const outlets = (await listOutlets(db(), actor))
+    .map((o) => ({ id: o.id, name: o.displayName }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   return (
     <main>
       <p className="muted">
@@ -19,6 +25,7 @@ export default async function IntegrationHealthPage() {
         Billing can continue while stock updates are being processed.
       </p>
       <IntegrationClient />
+      <DayCheck outlets={outlets} />
     </main>
   );
 }

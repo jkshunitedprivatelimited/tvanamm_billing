@@ -52,6 +52,7 @@ interface RecipeVersionRow {
 }
 
 interface ComponentRow {
+  id: string;
   component_type: string;
   item_id: string;
   qty_base: string;
@@ -80,6 +81,7 @@ async function consumeRecipeLine(
     recipeVersion: number;
     unitsSold: number;
     correlationId: string | null;
+    consumptionKey: string;
   },
 ): Promise<{ shortfall: number }> {
   const rv = await client.query<RecipeVersionRow>(
@@ -92,62 +94,76 @@ async function consumeRecipeLine(
 
   let totalShortfall = 0;
 
-  // Prepared-base path: consume the intermediate if enough is on hand.
+  // Lock all candidate prepared batches before choosing them. Two sales must
+  // never spend the same remaining quantity. Packaging is still per sale.
+  let usedPrepared = false;
   if (version.prepared_base_item_id && version.prepared_base_qty_base) {
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `stock-start:${args.locationId}:${version.prepared_base_item_id}`,
+    ]);
     const need = Number(version.prepared_base_qty_base) * args.unitsSold;
     const prep = await client.query<{
       id: string;
       qty_base_remaining: string;
       batch_id: string | null;
     }>(
-      `select id, qty_base_remaining, batch_id from stock.prepared_batches
-        where stock_location_id = $1 and item_id = $2 and qty_base_remaining > 0 and recorded_at <= $3::timestamptz
-        order by recorded_at asc limit 1`,
+      `select p.id, p.qty_base_remaining, p.batch_id from stock.prepared_batches p
+        left join stock.batches b on b.id = p.batch_id
+        where p.stock_location_id = $1 and p.item_id = $2
+          and p.qty_base_remaining > 0 and p.recorded_at <= $3::timestamptz
+          and (p.batch_id is null or (b.status = 'active' and b.recall_id is null
+            and (b.expiry_date is null or b.expiry_date >= current_date)))
+        order by p.recorded_at asc, p.id for update of p`,
       [args.locationId, version.prepared_base_item_id, args.occurredAt],
     );
-    const pb = prep.rows[0];
-    if (pb && Number(pb.qty_base_remaining) >= need) {
-      await client.query(
-        'update stock.prepared_batches set qty_base_remaining = qty_base_remaining - $2 where id = $1',
-        [pb.id, need.toFixed(6)],
-      );
-      await postMovement(client, {
-        organizationId: args.organizationId,
-        stockLocationId: args.locationId,
-        itemId: version.prepared_base_item_id,
-        batchId: pb.batch_id,
-        quantity: (-need).toFixed(6),
-        movementType: 'consumption',
-        sourceDocType: 'sale_consumption',
-        sourceDocId: args.saleConsumptionId,
-        idempotencyKey: `sale:${args.saleConsumptionId}:${args.billLineId ?? args.recipeId}:prepared`,
-        correlationId: args.correlationId,
-        actorRequest: 'system',
-        notes: 'prepared base',
-      });
-      await client.query(
-        `insert into stock.sale_consumption_lines
-           (sale_consumption_id, bill_line_id, catalog_item_id, recipe_id, recipe_version, item_id,
-            batch_id, qty_base, from_prepared)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,true)`,
-        [
-          args.saleConsumptionId,
-          args.billLineId,
-          args.catalogItemId,
-          args.recipeId,
-          args.recipeVersion,
-          version.prepared_base_item_id,
-          pb.batch_id,
-          need.toFixed(6),
-        ],
-      );
-      return { shortfall: 0 };
+    if (prep.rows.reduce((sum, p) => sum + Number(p.qty_base_remaining), 0) >= need) {
+      let remaining = need;
+      for (const pb of prep.rows) {
+        if (remaining <= 0) break;
+        const taken = Math.min(remaining, Number(pb.qty_base_remaining));
+        remaining = Number((remaining - taken).toFixed(6));
+        await client.query(
+          'update stock.prepared_batches set qty_base_remaining = qty_base_remaining - $2 where id = $1',
+          [pb.id, taken.toFixed(6)],
+        );
+        await postMovement(client, {
+          organizationId: args.organizationId,
+          stockLocationId: args.locationId,
+          itemId: version.prepared_base_item_id,
+          batchId: pb.batch_id,
+          quantity: (-taken).toFixed(6),
+          movementType: 'consumption',
+          sourceDocType: 'sale_consumption',
+          sourceDocId: args.saleConsumptionId,
+          idempotencyKey: `sale:${args.saleConsumptionId}:${args.consumptionKey}:prepared:${pb.id}`,
+          correlationId: args.correlationId,
+          actorRequest: 'system',
+          notes: 'prepared base',
+        });
+        await client.query(
+          `insert into stock.sale_consumption_lines
+             (sale_consumption_id, bill_line_id, catalog_item_id, recipe_id, recipe_version,
+              item_id, batch_id, qty_base, from_prepared)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,true)`,
+          [
+            args.saleConsumptionId,
+            args.billLineId,
+            args.catalogItemId,
+            args.recipeId,
+            args.recipeVersion,
+            version.prepared_base_item_id,
+            pb.batch_id,
+            taken.toFixed(6),
+          ],
+        );
+      }
+      usedPrepared = true;
     }
   }
 
   // Raw path: fixed + packaging + default alternative components.
   const comps = await client.query<ComponentRow>(
-    `select component_type, item_id, qty_base, is_default, process_loss_pct
+    `select id, component_type, item_id, qty_base, is_default, process_loss_pct
        from stock.recipe_components where recipe_version_id = $1`,
     [version.id],
   );
@@ -155,8 +171,8 @@ async function consumeRecipeLine(
     const consumed =
       c.component_type === 'fixed' ||
       c.component_type === 'packaging' ||
-      (c.component_type === 'alternative' && c.is_default);
-    if (!consumed) continue;
+      ((c.component_type === 'alternative' || c.component_type === 'optional') && c.is_default);
+    if (!consumed || (usedPrepared && c.component_type !== 'packaging')) continue;
     // Do not invent historical consumption before the first physical stock entry.
     await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
       `stock-start:${args.locationId}:${c.item_id}`,
@@ -187,7 +203,7 @@ async function consumeRecipeLine(
         movementType: 'consumption',
         sourceDocType: 'sale_consumption',
         sourceDocId: args.saleConsumptionId,
-        idempotencyKey: `sale:${args.saleConsumptionId}:${args.billLineId ?? args.recipeId}:${c.item_id}:${pick.batchId ?? 'nb'}`,
+        idempotencyKey: `sale:${args.saleConsumptionId}:${args.consumptionKey}:${c.id}:${pick.batchId ?? 'nb'}`,
         correlationId: args.correlationId,
         actorRequest: 'system',
       });
@@ -202,7 +218,7 @@ async function consumeRecipeLine(
         movementType: 'consumption',
         sourceDocType: 'sale_consumption',
         sourceDocId: args.saleConsumptionId,
-        idempotencyKey: `sale:${args.saleConsumptionId}:${args.billLineId ?? args.recipeId}:${c.item_id}:shortfall`,
+        idempotencyKey: `sale:${args.saleConsumptionId}:${args.consumptionKey}:${c.id}:shortfall`,
         correlationId: args.correlationId,
         actorRequest: 'system',
         notes: 'negative-stock shortfall',
@@ -262,6 +278,9 @@ export async function processSaleCompleted(
   sourceEventId: string,
 ): Promise<ProcessResult> {
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `stock-consume:${sourceEventId}`,
+    ]);
     const existing = await client.query<{ id: string; status: string }>(
       'select id, status from stock.sale_consumptions where source_event_id = $1',
       [sourceEventId],
@@ -324,6 +343,7 @@ export async function processSaleCompleted(
             recipeId: line.stockRecipeId,
             recipeVersion: line.stockRecipeVersion,
             unitsSold: line.quantity,
+            consumptionKey: `${line.billLineId}:menu`,
             correlationId: inbox.correlation_id,
           });
           totalShortfall += res.shortfall;
@@ -341,7 +361,8 @@ export async function processSaleCompleted(
               catalogItemId: line.catalogItemId,
               recipeId: addon.stockRecipeId,
               recipeVersion: addon.stockRecipeVersion,
-              unitsSold: addon.quantity,
+              unitsSold: line.quantity * addon.quantity,
+              consumptionKey: `${line.billLineId}:addon:${addon.addonId}`,
               correlationId: inbox.correlation_id,
             });
             totalShortfall += res.shortfall;
@@ -366,6 +387,8 @@ export async function processSaleCompleted(
       eventType: 'SaleConsumptionProcessed',
       correlationId: inbox.correlation_id,
       payload: {
+        sourceEventId,
+        eventType: 'SaleCompleted',
         billId: payload.billId,
         outletId: payload.outletId,
         status,
@@ -397,6 +420,9 @@ export async function processSaleRefunded(
   sourceEventId: string,
 ): Promise<{ saleConsumptionId: string; duplicate: boolean }> {
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `stock-consume:${sourceEventId}`,
+    ]);
     const existing = await client.query<{ id: string }>(
       'select id from stock.sale_consumptions where source_event_id = $1',
       [sourceEventId],
@@ -424,6 +450,8 @@ export async function processSaleRefunded(
       eventType: 'SaleConsumptionProcessed',
       correlationId: inbox.correlation_id,
       payload: {
+        sourceEventId,
+        eventType: 'SaleRefunded',
         billId: parsed.data.billId,
         refundId: parsed.data.refundId,
         status: 'refund_noop',

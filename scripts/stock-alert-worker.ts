@@ -1,10 +1,14 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createPool, createStockPool } from '@jksh/db';
-import { scanLowStockRules, deliverLowStockEvents } from '@jksh/stock';
+import { runLowStockAlertCycle, monitorStockWorker } from '@jksh/stock';
 import { receiveLowStockNotification } from '@jksh/identity';
 
 // Run under a process supervisor, or use --once from a one-minute scheduler.
 // Supply DATABASE_URL and STOCK_DATABASE_URL through the deployment environment.
+// Requires stock.enabled and stock.alerts.enabled. The latter must carry
+// config: { organizationId: UUID, outletIds: UUID[] } for the reviewed pilot.
+// Missing scope pauses all scans/delivery; it never expands to every outlet.
+// A pause preserves queued notices, and takes effect at the next bounded cycle.
 const billing = createPool();
 const stock = createStockPool();
 const once = process.argv.includes('--once');
@@ -16,16 +20,15 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const)
 try {
   do {
     try {
-      const scanned = await scanLowStockRules(stock);
-      const delivery = await deliverLowStockEvents(stock, (event) =>
-        receiveLowStockNotification(billing, event),
+      const result = await monitorStockWorker(stock, 'alerts', () =>
+        runLowStockAlertCycle(stock, (event) => receiveLowStockNotification(billing, event)),
       );
-      console.info('[stock-alerts]', { scanned, ...delivery });
-      if (delivery.failed && once) process.exitCode = 1;
-    } catch (error) {
+      console.info('[stock-alerts]', result);
+      if (once && (result.failed || result.reason === 'invalid_scope')) process.exitCode = 1;
+    } catch {
       console.error(
         '[stock-alerts] cycle failed',
-        error instanceof Error ? error.message : 'Unknown error',
+        'Check worker configuration and database health',
       );
       if (once) process.exitCode = 1;
     }

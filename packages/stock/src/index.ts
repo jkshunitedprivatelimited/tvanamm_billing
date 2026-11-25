@@ -93,6 +93,7 @@ export {
 export {
   getIntegrationHealth,
   retryInboxDeadLetter,
+  retryBillingDeadLetter,
   type IntegrationHealth,
   type DeadLetter,
 } from './integration-health';
@@ -269,6 +270,17 @@ export {
   type InitiateSupplierReturnCommand,
 } from './procurement';
 export * from './low-stock';
+export { runLowStockAlertCycle } from './alert-cycle';
+export { listOwnerPilotOutlets } from './owner-rollout';
+export { runStockEventCycle } from './event-cycle';
+export { monitorStockWorker } from './worker-status';
+export {
+  getShipmentPreparation,
+  saveShipmentPreparation,
+  shipmentPreparationMissing,
+  shipmentPreparationSchema,
+  type ShipmentPreparationDetails,
+} from './shipment-preparation';
 
 export { listOutletOrders } from './reads';
 export { listPendingDeliveries, type PendingDelivery } from './reads';
@@ -281,3 +293,39 @@ export {
   type EmployeeStockEntry,
   type EntryExpense,
 } from './employee-entry';
+export { readRecipeEditorDraft, saveRecipeEditorDraft } from './recipe-editor-drafts';
+export { getTransferWorkspace, type TransferWorkspace } from './transfer-workspace';
+export { getWarehouseWork, type WarehouseWork } from './warehouse-workspace';
+export { purgeOutletStock, type StockOutletPurge } from './outlet-purge';
+export {
+  recordPreparedBatchSchema,
+  discardPreparedBatchSchema,
+  listPreparationRecipes,
+  listPreparedBatches,
+  recordPreparedBatch,
+  discardPreparedBatch,
+  type RecordPreparedBatchCommand,
+  type DiscardPreparedBatchCommand,
+  type PreparedBatchInput,
+  type PreparedBatchResult,
+  type PreparationRecipe,
+  type PreparedBatchView,
+} from './preparation';
+export {
+  consumeStockResults,
+  reconcileOutletDay,
+  reconcileOutletDaySchema,
+  type SyncCategory,
+  type ReconciliationProblem,
+  type LedgerMismatch,
+  type OutletDayReconciliation,
+} from './sync-results';
+export {
+  cancelStockOrder,
+  cancelStockOrderSchema,
+  applyRefundWebhook,
+  listStockOrderRefunds,
+  type CancelStockOrderResult,
+  type StockOrderRefundView,
+} from './order-refunds';
+export type { RazorpayRefund } from './razorpay';

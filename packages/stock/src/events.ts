@@ -89,6 +89,9 @@ export async function ingestInboundEvent(
   const env: StockInboundEnvelope = parsed.data;
   const { verified } = verifyEventSignature(env.payload, env.signature);
 
+  await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+    `stock-ingest:${env.source}:${env.eventId}`,
+  ]);
   const existing = await client.query<{ id: string; signature_verified: boolean }>(
     `select id, signature_verified from stock_inbox.events
       where source = $1 and source_event_id = $2`,

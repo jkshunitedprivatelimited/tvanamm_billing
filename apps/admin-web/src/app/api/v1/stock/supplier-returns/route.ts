@@ -4,6 +4,7 @@ import { apiJson, assertSameOrigin, jsonError } from '@/server/http';
 import { currentStockActor, stockDb } from '@/server/stock';
 
 const schema = z.object({
+  submissionId: z.uuid().optional(),
   supplierId: z.uuid(),
   warehouseId: z.uuid(),
   itemId: z.uuid(),

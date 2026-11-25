@@ -29,6 +29,8 @@ export interface StockActor {
    *  assertOutletInFranchise before use. */
   outletId?: string;
   warehouseIds: string[];
+  /** Server-selected owner pilot scope. Undefined preserves internal/service callers. */
+  allowedOutletIds?: string[];
 }
 
 export function stockCapabilities(actor: StockActor): readonly StockCapability[] {
@@ -78,6 +80,8 @@ export async function assertOutletInFranchise(
   actor: StockActor,
   outletId: string,
 ): Promise<void> {
+  if (actor.allowedOutletIds && !actor.allowedOutletIds.includes(outletId))
+    throw new StockError('forbidden', 'Stock is not enabled for this outlet yet');
   if (actor.request === 'system' || actor.role === 'central_admin' || actor.role === 'accountant') {
     return;
   }
@@ -89,8 +93,9 @@ export async function assertOutletInFranchise(
     if (!actor.franchiseId) throw new StockError('forbidden', 'No franchise in scope');
     const { rowCount } = await withStockActorContext(pool, stockSystemContext(), (client) =>
       client.query(
-        `select 1 from stock.outlet_stock_settings where outlet_id = $1 and franchise_id = $2`,
-        [outletId, actor.franchiseId],
+        `select 1 from stock.outlet_stock_settings
+         where outlet_id = $1 and franchise_id = $2 and organization_id = $3`,
+        [outletId, actor.franchiseId, actor.organizationId],
       ),
     );
     if (!rowCount) {
@@ -117,6 +122,9 @@ export function stockContextForActor(actor: StockActor): StockDbContext {
     // must pass assertOutletInFranchise for outlet-level reads.
     ...(actor.request === 'operator' && actor.outletId ? { outletId: actor.outletId } : {}),
     ...(actor.employeeId ? { operatorEmployeeId: actor.employeeId } : {}),
+    ...(actor.allowedOutletIds
+      ? { ownerRolloutEnforced: 'true', ownerOutletIds: actor.allowedOutletIds.join(',') }
+      : {}),
     ...(actor.warehouseIds.length > 0 ? { warehouseIds: actor.warehouseIds.join(',') } : {}),
   };
 }

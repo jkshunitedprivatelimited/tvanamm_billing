@@ -5,6 +5,8 @@ const items = [
   ['', 'Overview'],
   ['catalog', 'Items & prices'],
   ['warehouses', 'Warehouses'],
+  ['transfers', 'Warehouse transfers'],
+  ['warehouse-work', 'Production & supplier returns'],
   ['suppliers', 'Suppliers'],
   ['purchase-orders', 'Purchases'],
   ['fulfilment', 'Outlet deliveries'],

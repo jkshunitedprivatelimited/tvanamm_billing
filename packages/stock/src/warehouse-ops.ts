@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { lockWarehouseItem, assertWarehouseAvailable } from './warehouse-availability';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   withStockActorContext,
   stockSystemContext,
@@ -48,7 +49,15 @@ export async function createProductionOrder(
 ): Promise<{ id: string }> {
   ensureStockAllowed(actor, 'stock.production.operate');
   assertWarehouseAccess(actor, cmd.warehouseId);
+  if (cmd.organizationId !== actor.organizationId)
+    throw new StockError('forbidden', 'Organization does not match');
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
+    const scope = await client.query(
+      `select 1 from stock.warehouses w,stock.items i
+      where w.id=$1 and i.id=$2 and w.organization_id=$3 and i.organization_id=$3 and w.is_active and i.is_active`,
+      [cmd.warehouseId, cmd.outputItemId, actor.organizationId],
+    );
+    if (!scope.rowCount) throw new StockError('not_found', 'Warehouse or output item not found');
     const ins = await client.query<{ id: string }>(
       `insert into stock.production_orders
          (organization_id, warehouse_id, output_item_id, planned_qty_base, recipe_id,
@@ -87,23 +96,46 @@ export async function issueProductionMaterials(
       status: string;
       warehouse_id: string;
       organization_id: string;
-    }>('select status, warehouse_id, organization_id from stock.production_orders where id = $1', [
-      productionOrderId,
-    ]);
+    }>(
+      'select status, warehouse_id, organization_id from stock.production_orders where id = $1 for update',
+      [productionOrderId],
+    );
     const order = po.rows[0];
-    if (!order) throw new StockError('not_found', 'Production order not found');
+    if (order?.organization_id !== actor.organizationId)
+      throw new StockError('not_found', 'Production order not found');
     assertWarehouseAccess(actor, order.warehouse_id);
-    if (!['draft', 'materials_issued'].includes(order.status)) {
+    if (order.status !== 'draft') {
       throw new StockError('conflict', `Cannot issue materials to a ${order.status} order`);
     }
     const locs = await warehouseLocations(client, order.warehouse_id);
     const sellable = locs.sellable;
     if (!sellable) throw new StockError('not_found', 'Warehouse sellable location missing');
 
+    if (!inputs.length) throw new StockError('validation', 'Provide at least one material');
+    for (const itemId of [...new Set(inputs.map((i) => i.itemId))].sort())
+      await lockWarehouseItem(client, sellable, itemId);
     for (const [index, input] of inputs.entries()) {
-      const picks = input.batchId
-        ? [{ batchId: input.batchId, quantity: input.qtyBase }]
-        : (await pickFefo(client, sellable, input.itemId, input.qtyBase)).picks;
+      if (!/^\d+(\.\d{1,6})?$/.test(input.qtyBase) || Number(input.qtyBase) <= 0)
+        throw new StockError('validation', 'Material quantity must be positive');
+      let picks;
+      if (input.batchId) {
+        await assertWarehouseAvailable(
+          client,
+          sellable,
+          input.itemId,
+          input.batchId,
+          input.qtyBase,
+        );
+        picks = [{ batchId: input.batchId, quantity: input.qtyBase }];
+      } else {
+        const result = await pickFefo(client, sellable, input.itemId, input.qtyBase);
+        if (Number(result.shortfall) > 0)
+          throw new StockError(
+            'insufficient_stock',
+            'Not enough material for the complete production request',
+          );
+        picks = result.picks;
+      }
       for (const [pickIndex, pick] of picks.entries()) {
         await postMovement(client, {
           organizationId: order.organization_id,
@@ -155,11 +187,12 @@ export async function recordProductionOutput(
       planned_qty_base: string;
     }>(
       `select status, warehouse_id, organization_id, output_item_id, planned_qty_base
-         from stock.production_orders where id = $1`,
+         from stock.production_orders where id = $1 for update`,
       [productionOrderId],
     );
     const order = po.rows[0];
-    if (!order) throw new StockError('not_found', 'Production order not found');
+    if (order?.organization_id !== actor.organizationId)
+      throw new StockError('not_found', 'Production order not found');
     assertWarehouseAccess(actor, order.warehouse_id);
     if (order.status !== 'materials_issued') {
       throw new StockError('conflict', `Order must have materials issued, is ${order.status}`);
@@ -169,6 +202,10 @@ export async function recordProductionOutput(
       throw new StockError('not_found', 'Warehouse locations missing');
     }
 
+    if (
+      ![cmd.acceptedQtyBase, cmd.rejectedQtyBase ?? '0'].every((q) => /^\d+(\.\d{1,6})?$/.test(q))
+    )
+      throw new StockError('validation', 'Invalid production quantity');
     const parent = await client.query<{ batch_id: string | null }>(
       `select batch_id from stock.production_inputs
         where production_order_id = $1 and batch_id is not null limit 1`,
@@ -178,7 +215,6 @@ export async function recordProductionOutput(
       `insert into stock.batches
          (organization_id, item_id, batch_code, expiry_date, origin, parent_batch_id)
        values ($1,$2,$3,$4,'produced',$5)
-       on conflict (item_id, batch_code) do update set expiry_date = excluded.expiry_date
        returning id`,
       [
         order.organization_id,
@@ -251,11 +287,12 @@ export async function postProduction(
 ): Promise<void> {
   ensureStockAllowed(actor, 'stock.production.operate');
   await withStockActorContext(pool, stockContextForActor(actor), async (client) => {
-    const wh = await client.query<{ warehouse_id: string }>(
-      'select warehouse_id from stock.production_orders where id = $1',
+    const wh = await client.query<{ warehouse_id: string; organization_id: string }>(
+      'select warehouse_id,organization_id from stock.production_orders where id = $1 for update',
       [productionOrderId],
     );
-    if (!wh.rows[0]) throw new StockError('not_found', 'Production order not found');
+    if (wh.rows[0]?.organization_id !== actor.organizationId)
+      throw new StockError('not_found', 'Production order not found');
     assertWarehouseAccess(actor, wh.rows[0].warehouse_id);
     const r = await client.query(
       `update stock.production_orders set status = 'posted', posted_by = $2
@@ -616,13 +653,17 @@ export async function createTransfer(
 ): Promise<{ id: string }> {
   ensureStockAllowed(actor, 'stock.transfer.operate');
   if (cmd.lines.length === 0) throw new StockError('validation', 'A transfer needs a line');
+  if (cmd.organizationId !== actor.organizationId)
+    throw new StockError('forbidden', 'Organization does not match');
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
     // A transfer operator must be assigned to BOTH the source and the
     // destination warehouse.
-    const whs = await client.query<{ warehouse_id: string | null }>(
-      `select warehouse_id from stock.stock_locations where id = any($1::uuid[])`,
+    const whs = await client.query<{ warehouse_id: string | null; organization_id: string }>(
+      `select warehouse_id,organization_id from stock.stock_locations where id = any($1::uuid[])`,
       [[cmd.fromLocationId, cmd.toLocationId]],
     );
+    if (whs.rows.length !== 2 || whs.rows.some((w) => w.organization_id !== actor.organizationId))
+      throw new StockError('validation', 'Choose two different warehouses in your organization');
     for (const w of whs.rows) {
       if (w.warehouse_id) assertWarehouseAccess(actor, w.warehouse_id);
     }
@@ -634,6 +675,13 @@ export async function createTransfer(
     );
     const id = requireRow(ins, 'transfer').id;
     for (const line of cmd.lines) {
+      const item = await client.query(
+        `select 1 from stock.items i where i.id=$1 and i.organization_id=$2 and i.is_active
+        and ($3::uuid is null or exists(select 1 from stock.batches b where b.id=$3 and b.item_id=i.id and b.organization_id=$2))`,
+        [line.itemId, actor.organizationId, line.batchId ?? null],
+      );
+      if (!item.rowCount)
+        throw new StockError('validation', 'Item or batch is not available in this organization');
       await client.query(
         `insert into stock.stock_transfer_lines (stock_transfer_id, item_id, batch_id, qty_base)
          values ($1,$2,$3,$4)`,
@@ -656,11 +704,12 @@ export async function dispatchTransfer(
       organization_id: string;
       from_location_id: string;
     }>(
-      'select status, organization_id, from_location_id from stock.stock_transfers where id = $1',
+      'select status, organization_id, from_location_id from stock.stock_transfers where id = $1 for update',
       [transferId],
     );
     const transfer = t.rows[0];
-    if (!transfer) throw new StockError('not_found', 'Transfer not found');
+    if (transfer?.organization_id !== actor.organizationId)
+      throw new StockError('not_found', 'Transfer not found');
     if (transfer.status !== 'draft') {
       throw new StockError('conflict', `Cannot dispatch a ${transfer.status} transfer`);
     }
@@ -738,8 +787,31 @@ export async function receiveTransfer(
   actor: StockActor,
   transferId: string,
   receipts: TransferReceiptInput[],
+  submissionId?: string,
 ): Promise<{ status: string }> {
   ensureStockAllowed(actor, 'stock.transfer.operate');
+  if (!receipts.length || new Set(receipts.map((r) => r.lineId)).size !== receipts.length)
+    throw new StockError('validation', 'Provide each transfer line once per receipt');
+  const quantity = (value: string) => {
+    if (!/^\d{1,12}(\.\d{1,6})?$/.test(value))
+      throw new StockError('validation', 'Invalid receipt quantity');
+    const [whole, fraction = ''] = value.split('.');
+    return BigInt(whole ?? '0') * 1000000n + BigInt(fraction.padEnd(6, '0'));
+  };
+  const decimal = (value: bigint) =>
+    `${(value / 1000000n).toString()}.${(value % 1000000n).toString().padStart(6, '0')}`;
+  const normalized = receipts
+    .map((r) => ({
+      lineId: r.lineId,
+      acceptedQtyBase: decimal(quantity(r.acceptedQtyBase)),
+      damagedQtyBase: decimal(quantity(r.damagedQtyBase ?? '0')),
+      shortageQtyBase: decimal(quantity(r.shortageQtyBase ?? '0')),
+    }))
+    .sort((a, b) => a.lineId.localeCompare(b.lineId));
+  const payload = JSON.stringify(normalized);
+  const key = submissionId ?? createHash('sha256').update(payload).digest('hex');
+  if (!/^[a-zA-Z0-9-]{1,100}$/.test(key))
+    throw new StockError('validation', 'Invalid receipt reference');
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
     const t = await client.query<{
       status: string;
@@ -748,14 +820,12 @@ export async function receiveTransfer(
       to_location_id: string;
     }>(
       `select status, organization_id, from_location_id, to_location_id
-         from stock.stock_transfers where id = $1`,
+         from stock.stock_transfers where id = $1 for update`,
       [transferId],
     );
     const transfer = t.rows[0];
-    if (!transfer) throw new StockError('not_found', 'Transfer not found');
-    if (!['dispatched', 'partially_received'].includes(transfer.status)) {
-      throw new StockError('conflict', `Cannot receive a ${transfer.status} transfer`);
-    }
+    if (transfer?.organization_id !== actor.organizationId)
+      throw new StockError('not_found', 'Transfer not found');
     const fromWh = (
       await client.query<{ warehouse_id: string }>(
         'select warehouse_id from stock.stock_locations where id = $1',
@@ -769,6 +839,28 @@ export async function receiveTransfer(
       )
     ).rows[0]?.warehouse_id;
     if (toWh) assertWarehouseAccess(actor, toWh);
+    const replay = await client.query<{ payload: unknown; status: string }>(
+      'select payload,status from stock.transfer_receipt_submissions where transfer_id=$1 and submission_id=$2',
+      [transferId, key],
+    );
+    if (replay.rows[0]) {
+      const previous = replay.rows[0].payload as typeof normalized;
+      const previousPayload = JSON.stringify(
+        previous.map((r) => ({
+          lineId: r.lineId,
+          acceptedQtyBase: r.acceptedQtyBase,
+          damagedQtyBase: r.damagedQtyBase,
+          shortageQtyBase: r.shortageQtyBase,
+        })),
+      );
+      if (previousPayload !== payload)
+        throw new StockError('conflict', 'Receipt reference already used for different quantities');
+      return { status: replay.rows[0].status };
+    }
+    if (!['dispatched', 'partially_received'].includes(transfer.status)) {
+      throw new StockError('conflict', `Cannot receive a ${transfer.status} transfer`);
+    }
+
     const inTransit = (
       await client.query<{ id: string }>(
         `select id from stock.stock_locations where warehouse_id = $1 and kind = 'in_transit'`,
@@ -783,28 +875,37 @@ export async function receiveTransfer(
     ).rows[0]?.id;
     if (!inTransit || !damaged) throw new StockError('not_found', 'Warehouse locations missing');
 
-    for (const receipt of receipts) {
+    for (const receipt of normalized) {
       const line = (
-        await client.query<{ item_id: string; batch_id: string | null }>(
-          'select item_id, batch_id from stock.stock_transfer_lines where id = $1 and stock_transfer_id = $2',
+        await client.query<{ item_id: string; batch_id: string | null; remaining: string }>(
+          'select item_id, batch_id, (dispatched_qty_base-received_qty_base-damaged_qty_base-shortage_qty_base)::text as remaining from stock.stock_transfer_lines where id = $1 and stock_transfer_id = $2',
           [receipt.lineId, transferId],
         )
       ).rows[0];
       if (!line) throw new StockError('not_found', 'Transfer line not found');
       const accepted = Number(receipt.acceptedQtyBase);
-      const damagedQty = Number(receipt.damagedQtyBase ?? '0');
-      const outQty = accepted + damagedQty;
+      const damagedQty = Number(receipt.damagedQtyBase);
+      const total =
+        quantity(receipt.acceptedQtyBase) +
+        quantity(receipt.damagedQtyBase) +
+        quantity(receipt.shortageQtyBase);
+      if (total <= 0n || total > quantity(line.remaining))
+        throw new StockError(
+          'validation',
+          'Receipt must be positive and cannot exceed the remaining dispatched quantity',
+        );
+      const outQty = Number(decimal(total));
       if (outQty > 0) {
         await postMovement(client, {
           organizationId: transfer.organization_id,
           stockLocationId: inTransit,
           itemId: line.item_id,
           batchId: line.batch_id,
-          quantity: (-outQty).toFixed(6),
+          quantity: `-${decimal(total)}`,
           movementType: 'transfer_out',
           sourceDocType: 'stock_transfer_receipt',
           sourceDocId: transferId,
-          idempotencyKey: `transfer:${transferId}:rcv:transit:${receipt.lineId}`,
+          idempotencyKey: `transfer:${transferId}:rcv:${key}:transit:${receipt.lineId}`,
           actorRequest: actor.request,
           actorAccountId: actor.accountId ?? null,
         });
@@ -815,11 +916,11 @@ export async function receiveTransfer(
           stockLocationId: transfer.to_location_id,
           itemId: line.item_id,
           batchId: line.batch_id,
-          quantity: accepted.toFixed(6),
+          quantity: receipt.acceptedQtyBase,
           movementType: 'transfer_in',
           sourceDocType: 'stock_transfer_receipt',
           sourceDocId: transferId,
-          idempotencyKey: `transfer:${transferId}:rcv:accepted:${receipt.lineId}`,
+          idempotencyKey: `transfer:${transferId}:rcv:${key}:accepted:${receipt.lineId}`,
           actorRequest: actor.request,
           actorAccountId: actor.accountId ?? null,
         });
@@ -830,11 +931,11 @@ export async function receiveTransfer(
           stockLocationId: damaged,
           itemId: line.item_id,
           batchId: line.batch_id,
-          quantity: damagedQty.toFixed(6),
+          quantity: receipt.damagedQtyBase,
           movementType: 'transfer_in',
           sourceDocType: 'stock_transfer_receipt',
           sourceDocId: transferId,
-          idempotencyKey: `transfer:${transferId}:rcv:damaged:${receipt.lineId}`,
+          idempotencyKey: `transfer:${transferId}:rcv:${key}:damaged:${receipt.lineId}`,
           actorRequest: actor.request,
           actorAccountId: actor.accountId ?? null,
         });
@@ -845,12 +946,7 @@ export async function receiveTransfer(
                 damaged_qty_base = damaged_qty_base + $3,
                 shortage_qty_base = shortage_qty_base + $4
           where id = $1`,
-        [
-          receipt.lineId,
-          accepted.toFixed(6),
-          damagedQty.toFixed(6),
-          Number(receipt.shortageQtyBase ?? '0').toFixed(6),
-        ],
+        [receipt.lineId, receipt.acceptedQtyBase, receipt.damagedQtyBase, receipt.shortageQtyBase],
       );
     }
 
@@ -863,6 +959,10 @@ export async function receiveTransfer(
     await client.query(
       `update stock.stock_transfers set status = $2, received_by = $3 where id = $1`,
       [transferId, status, actor.accountId ?? null],
+    );
+    await client.query(
+      'insert into stock.transfer_receipt_submissions(transfer_id,submission_id,payload,status) values($1,$2,$3,$4)',
+      [transferId, key, payload, status],
     );
     return { status };
   });

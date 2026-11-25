@@ -22,6 +22,15 @@ export interface RazorpayPayment {
   status: 'created' | 'authorized' | 'captured' | 'failed' | 'refunded';
 }
 
+export interface RazorpayRefund {
+  id: string;
+  payment_id: string;
+  amount: number;
+  status: 'pending' | 'processed' | 'failed';
+  /** Our refund row id, echoed back so a retry can find an existing refund. */
+  refundRef: string | null;
+}
+
 export interface RazorpayGateway {
   createOrder(input: {
     amountPaise: number;
@@ -31,6 +40,14 @@ export interface RazorpayGateway {
   verifyCheckoutSignature(orderId: string, paymentId: string, signature: string): boolean;
   verifyWebhookSignature(rawBody: string, signature: string): boolean;
   fetchPayment(paymentId: string): Promise<RazorpayPayment>;
+  /** Start a refund of a captured payment, tagged with our refund row id. */
+  refundPayment(input: {
+    paymentId: string;
+    amountPaise: number;
+    refundRef: string;
+  }): Promise<RazorpayRefund>;
+  /** The refund already created for `refundRef`, if any. */
+  findRefund(paymentId: string, refundRef: string): Promise<RazorpayRefund | null>;
 }
 
 function hmacHex(secret: string, message: string): string {
@@ -64,6 +81,10 @@ export interface StubOptions {
   webhookSecret?: string | undefined;
   /** payment id -> reconciliation state the caller wants fetchPayment to report */
   payments?: Map<string, RazorpayPayment> | undefined;
+  /** refunds created through this stub, keyed by refund id (tests inspect it) */
+  refunds?: Map<string, RazorpayRefund> | undefined;
+  /** make the next N refundPayment calls throw (simulates an outage) */
+  failRefunds?: { remaining: number } | undefined;
 }
 
 /**
@@ -75,6 +96,7 @@ export function stubRazorpayGateway(opts: StubOptions = {}): RazorpayGateway {
   const keySecret = opts.keySecret ?? 'stub_key_secret';
   const webhookSecret = opts.webhookSecret ?? 'stub_webhook_secret';
   const payments = opts.payments ?? new Map<string, RazorpayPayment>();
+  const refunds = opts.refunds ?? new Map<string, RazorpayRefund>();
 
   return {
     createOrder({ amountPaise, currency }) {
@@ -102,6 +124,28 @@ export function stubRazorpayGateway(opts: StubOptions = {}): RazorpayGateway {
         status: 'captured',
       });
     },
+    refundPayment({ paymentId, amountPaise, refundRef }) {
+      if (opts.failRefunds && opts.failRefunds.remaining > 0) {
+        opts.failRefunds.remaining -= 1;
+        return Promise.reject(new Error('Razorpay unavailable'));
+      }
+      const refund: RazorpayRefund = {
+        id: `rfnd_${randomUUID().replace(/-/g, '').slice(0, 14)}`,
+        payment_id: paymentId,
+        amount: amountPaise,
+        status: 'pending',
+        refundRef,
+      };
+      refunds.set(refund.id, refund);
+      return Promise.resolve(refund);
+    },
+    findRefund(paymentId, refundRef) {
+      return Promise.resolve(
+        [...refunds.values()].find(
+          (r) => r.payment_id === paymentId && r.refundRef === refundRef,
+        ) ?? null,
+      );
+    },
   };
 }
 
@@ -110,6 +154,24 @@ interface RazorpayApiOrder {
   amount: number;
   currency: string;
   status: string;
+}
+interface RazorpayApiRefund {
+  id: string;
+  payment_id: string;
+  amount: number;
+  status: string;
+  receipt?: string | null;
+  notes?: Record<string, string> | unknown[] | null;
+}
+function toRefund(r: RazorpayApiRefund): RazorpayRefund {
+  const notes = r.notes && !Array.isArray(r.notes) ? r.notes : {};
+  return {
+    id: r.id,
+    payment_id: r.payment_id,
+    amount: r.amount,
+    status: r.status === 'processed' ? 'processed' : r.status === 'failed' ? 'failed' : 'pending',
+    refundRef: notes.jksh_refund_id ?? r.receipt ?? null,
+  };
 }
 interface RazorpayApiPayment {
   id: string;
@@ -187,6 +249,24 @@ export function httpRazorpayGateway(opts: {
         currency: p.currency,
         status: normStatus(p.status),
       };
+    },
+    async refundPayment({ paymentId, amountPaise, refundRef }) {
+      const r = await call<RazorpayApiRefund>(`/payments/${paymentId}/refund`, {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: amountPaise,
+          speed: 'normal',
+          receipt: refundRef,
+          notes: { jksh_refund_id: refundRef },
+        }),
+      });
+      return toRefund(r);
+    },
+    async findRefund(paymentId, refundRef) {
+      const list = await call<{ items?: RazorpayApiRefund[] }>(
+        `/payments/${paymentId}/refunds?count=100`,
+      );
+      return (list.items ?? []).map(toRefund).find((r) => r.refundRef === refundRef) ?? null;
     },
   };
 }

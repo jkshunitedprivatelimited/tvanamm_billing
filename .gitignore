@@ -4,6 +4,7 @@ coverage/
 .turbo/
 .vite/
 .next/
+.next-demo/
 next-env.d.ts
 *.tsbuildinfo
 .DS_Store

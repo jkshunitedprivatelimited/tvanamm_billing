@@ -1,3 +1,5 @@
+import { getWarehouseWork } from './warehouse-workspace';
+import { getTransferWorkspace } from './transfer-workspace';
 /**
  * Stock S3 (part 2) warehouse operations against a real Postgres: production
  * with batch genealogy, physical counts with the second-approver rule, wastage,
@@ -120,7 +122,24 @@ describe.skipIf(!RUN)('Stock warehouse operations', () => {
       outputItemId: teaBaseId,
       plannedQtyBase: '2000',
     });
-    await issueProductionMaterials(pool, sys, po.id, [{ itemId: teaId, qtyBase: '600' }]);
+    await expect(
+      issueProductionMaterials(pool, sys, po.id, [{ itemId: teaId, qtyBase: '999999999' }]),
+    ).rejects.toMatchObject({ code: 'insufficient_stock' });
+    expect(await onHand(teaId, wh1.locationIds.sellable!)).toBe(before);
+    const issues = await Promise.allSettled([
+      issueProductionMaterials(pool, sys, po.id, [{ itemId: teaId, qtyBase: '600' }]),
+      issueProductionMaterials(pool, sys, po.id, [{ itemId: teaId, qtyBase: '600' }]),
+    ]);
+    expect(issues.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(issues.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    const foreign = stockSystemActor('02000000-0000-4000-8000-000000000002');
+    await expect(
+      recordProductionOutput(pool, foreign, po.id, {
+        outputBatchCode: `FOREIGN-${S}`,
+        acceptedQtyBase: '1',
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+
     expect(await onHand(teaId, wh1.locationIds.sellable!)).toBe(before - 600);
 
     const out = await recordProductionOutput(pool, sys, po.id, {
@@ -143,6 +162,10 @@ describe.skipIf(!RUN)('Stock warehouse operations', () => {
     );
     expect(order.rows[0]!.status).toBe('posted');
     expect(Number(order.rows[0]!.loss_qty_base)).toBe(50);
+    expect((await getWarehouseWork(pool, sys)).production.some((p) => p.id === po.id)).toBe(true);
+    expect((await getWarehouseWork(pool, foreign)).production.some((p) => p.id === po.id)).toBe(
+      false,
+    );
   });
 
   it('enforces the second-approver rule and posts variance adjustments', async () => {
@@ -264,5 +287,69 @@ describe.skipIf(!RUN)('Stock warehouse operations', () => {
     expect(await onHand(teaId, wh1.locationIds.in_transit!)).toBe(0);
     expect(await onHand(teaId, wh2.locationIds.sellable!)).toBe(880);
     expect(await onHand(teaId, wh2.locationIds.damaged!)).toBe(20);
+  });
+  it('receives partial transfers exactly once and clears confirmed shortages from transit', async () => {
+    const transfer = await createTransfer(pool, sys, {
+      organizationId: ORG,
+      fromLocationId: wh1.locationIds.sellable!,
+      toLocationId: wh2.locationIds.sellable!,
+      transferNumber: `TR-RETRY-${S}`,
+      lines: [{ itemId: teaId, qtyBase: '100' }],
+    });
+    await expect(
+      dispatchTransfer(pool, stockSystemActor('02000000-0000-4000-8000-000000000002'), transfer.id),
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await dispatchTransfer(pool, sys, transfer.id);
+    const lineId = (
+      await pool.query<{ id: string }>(
+        'select id from stock.stock_transfer_lines where stock_transfer_id=$1',
+        [transfer.id],
+      )
+    ).rows[0]!.id;
+    const before = await onHand(teaId, wh2.locationIds.sellable!);
+    const receipts = [{ lineId, acceptedQtyBase: '40' }];
+    await Promise.all([
+      receiveTransfer(pool, sys, transfer.id, receipts, 'first'),
+      receiveTransfer(pool, sys, transfer.id, receipts, 'first'),
+    ]);
+    expect(await onHand(teaId, wh2.locationIds.sellable!)).toBe(before + 40);
+    await expect(
+      receiveTransfer(pool, sys, transfer.id, [{ lineId, acceptedQtyBase: '41' }], 'first'),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    await expect(
+      receiveTransfer(pool, sys, transfer.id, [{ lineId, acceptedQtyBase: '61' }], 'too-many'),
+    ).rejects.toMatchObject({ code: 'validation' });
+    await expect(
+      receiveTransfer(pool, sys, transfer.id, [...receipts, ...receipts], 'duplicate-lines'),
+    ).rejects.toMatchObject({ code: 'validation' });
+    const final = [{ lineId, acceptedQtyBase: '50', damagedQtyBase: '5', shortageQtyBase: '5' }];
+    expect((await receiveTransfer(pool, sys, transfer.id, final, 'second')).status).toBe(
+      'received',
+    );
+    expect((await receiveTransfer(pool, sys, transfer.id, final, 'second')).status).toBe(
+      'received',
+    );
+    expect(await onHand(teaId, wh2.locationIds.sellable!)).toBe(before + 90);
+    expect(await onHand(teaId, wh1.locationIds.in_transit!)).toBe(0);
+  });
+  it('lists scoped transfer lines and stock and rejects foreign organization drafts', async () => {
+    const workspace = await getTransferWorkspace(pool, sys);
+    const row = workspace.transfers.find((t) => t.number === `TR-${S}`);
+    expect(row?.fromName).toBeTruthy();
+    expect(row?.lines[0]?.quantity).toBe('900.000000');
+    expect(workspace.stock.some((s) => s.itemId === teaId)).toBe(true);
+    const foreign = stockSystemActor('02000000-0000-4000-8000-000000000002');
+    const other = await getTransferWorkspace(pool, foreign);
+    expect(other.transfers.some((t) => t.id === row?.id)).toBe(false);
+    expect(other.stock.some((s) => s.itemId === teaId)).toBe(false);
+    await expect(
+      createTransfer(pool, foreign, {
+        organizationId: foreign.organizationId,
+        fromLocationId: wh1.locationIds.sellable!,
+        toLocationId: wh2.locationIds.sellable!,
+        transferNumber: `FOREIGN-${S}`,
+        lines: [{ itemId: teaId, qtyBase: '1' }],
+      }),
+    ).rejects.toMatchObject({ code: 'validation' });
   });
 });

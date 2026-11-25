@@ -13,6 +13,7 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  distDir: process.env.JKSH_CUSTOMER_DEMO === 'true' ? '.next-demo' : '.next',
   reactStrictMode: true,
   agentRules: false,
   transpilePackages: [

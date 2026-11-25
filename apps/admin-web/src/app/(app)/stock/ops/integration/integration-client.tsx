@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import type { IntegrationHealth } from '@jksh/stock';
+import { getWorkerHealthViews } from './worker-health';
 
 function Stat({ label, value, bad }: { label: string; value: number; bad?: boolean }) {
   return (
@@ -46,10 +47,14 @@ export function IntegrationClient() {
         inbox?: unknown;
         reconciliation?: unknown;
         message?: string;
+        paused?: boolean;
+        reason?: string;
       };
       setMsg(
         res.ok
-          ? 'Stock update check completed.'
+          ? body.paused
+            ? 'Stock updates are paused. Review the outlet list and tracking start time before enabling processing.'
+            : 'Stock update check completed.'
           : (body.message ?? 'Could not complete the stock update check.'),
       );
     } catch {
@@ -60,9 +65,12 @@ export function IntegrationClient() {
     }
   }
 
-  async function retry(id: string) {
+  async function retry(
+    id: string,
+    source: 'inbox' | 'billing-outbox' | 'low-stock-events' = 'inbox',
+  ) {
     setMsg(null);
-    const res = await fetch(`/api/v1/stock/inbox/${id}/retry`, {
+    const res = await fetch(`/api/v1/stock/${source}/${id}/retry`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
@@ -81,6 +89,32 @@ export function IntegrationClient() {
 
   return (
     <>
+      <section className="card">
+        <h2>Background processing</h2>
+        <p>Expected every 30–60 seconds. A run older than five minutes needs checking.</p>
+        {getWorkerHealthViews(health.workers).map((worker) => (
+          <div key={worker.worker}>
+            <strong style={worker.needsAttention ? { color: 'var(--danger)' } : undefined}>
+              {worker.label}: {worker.status}
+            </strong>
+            {worker.record ? (
+              <p>
+                Last started: {new Date(worker.record.startedAt).toLocaleString()}. Last completed
+                run:{' '}
+                {worker.record.lastSuccessAt
+                  ? new Date(worker.record.lastSuccessAt).toLocaleString()
+                  : 'None recorded'}
+                .
+              </p>
+            ) : (
+              <p>
+                This worker has no recorded run for this organization. Verify its hosting and
+                schedule.
+              </p>
+            )}
+          </div>
+        ))}
+      </section>
       <div className="card">
         <div className="spread">
           <strong>Updates awaiting processing</strong>
@@ -94,6 +128,12 @@ export function IntegrationClient() {
           style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', marginTop: 10 }}
         >
           <Stat label="Bills awaiting transfer" value={health.billingOutbox.pending} />
+          <Stat label="Stock notifications pending" value={health.lowStockNotifications.pending} />
+          <Stat
+            label="Stock notifications needing attention"
+            value={health.lowStockNotifications.deadLettered}
+            bad
+          />
           <Stat
             label="Bill transfers needing attention"
             value={health.billingOutbox.deadLetter}
@@ -134,6 +174,45 @@ export function IntegrationClient() {
         )}
       </div>
 
+      {health.billingDeadLetters.length ? (
+        <section className="card">
+          <h2>Failed bill transfers</h2>
+          <p>
+            Review the failure cause before retrying. Retry keeps the original bill and event
+            unchanged.
+          </p>
+          {health.billingDeadLetters.map((d) => (
+            <div className="row" key={d.id}>
+              <span>
+                {d.eventType} · version {d.eventVersion} · {d.attempts} attempts ·{' '}
+                {new Date(d.createdAt).toLocaleString()}
+              </span>
+              <button className="secondary sm" onClick={() => void retry(d.id, 'billing-outbox')}>
+                Retry transfer
+              </button>
+            </div>
+          ))}
+        </section>
+      ) : null}
+      {health.lowStockNotifications.failures.length ? (
+        <section className="card">
+          <h2>Failed low-stock notifications</h2>
+          <p>
+            Check delivery configuration before retrying. Notifications remain subject to the
+            selected pilot outlets.
+          </p>
+          {health.lowStockNotifications.failures.map((event) => (
+            <div className="row" key={event.id}>
+              <span>
+                Outlet {event.outletId} · {event.attempts} attempts
+              </span>
+              <button onClick={() => void retry(event.id, 'low-stock-events')}>
+                Retry notification
+              </button>
+            </div>
+          ))}
+        </section>
+      ) : null}
       <h2 className="section-label">Failed stock deductions</h2>
       {health.deadLetters.length === 0 ? (
         <p className="ok">No failed stock deductions. Pending updates, if any, are shown above.</p>

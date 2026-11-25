@@ -134,6 +134,8 @@ export interface RecipeComponentInput {
 }
 
 export interface PublishRecipeVersionCommand {
+  expectedDraftRevision?: number | undefined;
+  expectedCurrentVersion?: number | undefined;
   servingQtyBase: string;
   servingUnit: string;
   batchYieldBase?: string | null | undefined;
@@ -161,14 +163,27 @@ export async function publishRecipeVersion(
       validation.error.issues[0]?.message ?? 'Invalid recipe measurements',
     );
   return withStockActorContext(pool, stockContextForActor(actor), async (client) => {
-    const recipe = await client.query<{ current_version: number; organization_id: string }>(
-      'select current_version, organization_id from stock.recipes where id = $1 for update',
+    const recipe = await client.query<{
+      current_version: number;
+      organization_id: string;
+      version_draft_revision: number;
+    }>(
+      'select current_version, organization_id, version_draft_revision from stock.recipes where id = $1 for update',
       [recipeId],
     );
     const r = recipe.rows[0];
     if (!r) throw new StockError('not_found', 'Recipe not found');
     if (r.organization_id !== actor.organizationId)
       throw new StockError('forbidden', 'Recipe is outside your organization');
+    if (
+      (cmd.expectedDraftRevision != null &&
+        cmd.expectedDraftRevision !== r.version_draft_revision) ||
+      (cmd.expectedCurrentVersion != null && cmd.expectedCurrentVersion !== r.current_version)
+    )
+      throw new StockError(
+        'conflict',
+        'Recipe or draft changed. Reload and review before publication.',
+      );
     const itemIds = [
       ...new Set([
         ...cmd.components.map((c) => c.itemId),
@@ -193,6 +208,7 @@ export async function publishRecipeVersion(
           servingUnit: cmd.servingUnit,
           batchYieldBase: cmd.batchYieldBase ?? null,
           preparedBaseItemId: cmd.preparedBaseItemId ?? null,
+          preparedBaseQtyBase: cmd.preparedBaseQtyBase ?? null,
           components: cmd.components
             .map((c) => ({
               t: c.componentType,
@@ -247,6 +263,11 @@ export async function publishRecipeVersion(
       `update stock.recipes set current_version = $2, status = 'published' where id = $1`,
       [recipeId, version],
     );
+    if (cmd.expectedDraftRevision != null)
+      await client.query(
+        'update stock.recipes set version_draft=null, version_draft_base_version=null, version_draft_revision=version_draft_revision+1 where id=$1',
+        [recipeId],
+      );
     await recordStockAudit(client, {
       action: 'recipe.published',
       actorRequest: actor.request,

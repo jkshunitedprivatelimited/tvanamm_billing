@@ -156,10 +156,10 @@ export async function setStockFeatureFlag(
   await withStockActorContext(pool, stockContextForActor(actor), (client) =>
     client.query(
       `insert into stock.feature_flags (key, enabled, config)
-       values ($1,$2,$3)
+       values ($1,$2,coalesce($3::jsonb, '{}'::jsonb))
        on conflict (key) do update set enabled = excluded.enabled,
-         config = coalesce(excluded.config, stock.feature_flags.config), updated_at = now()`,
-      [key, enabled, config ? JSON.stringify(config) : JSON.stringify({})],
+         config = coalesce($3::jsonb, stock.feature_flags.config), updated_at = now()`,
+      [key, enabled, config === undefined ? null : JSON.stringify(config)],
     ),
   );
 }

@@ -1,4 +1,4 @@
-export type ApiResult = { ok: true } | { ok: false; error: string };
+export type ApiResult = { ok: true } | { ok: false; error: string; uncertain?: boolean };
 
 export async function apiPost(url: string, body?: unknown): Promise<ApiResult> {
   try {
@@ -13,10 +13,11 @@ export async function apiPost(url: string, body?: unknown): Promise<ApiResult> {
       data && typeof data === 'object' && 'message' in data && typeof data.message === 'string'
         ? data.message
         : `HTTP ${String(res.status)}`;
-    return { ok: false, error };
+    return { ok: false, error, uncertain: res.status >= 500 };
   } catch {
     return {
       ok: false,
+      uncertain: true,
       error:
         'Connection interrupted. Refresh to check whether the change was saved before retrying.',
     };

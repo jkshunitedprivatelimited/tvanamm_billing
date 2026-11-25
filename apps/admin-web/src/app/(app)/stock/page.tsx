@@ -1,7 +1,12 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { listOutlets } from '@jksh/identity';
-import { getCentralOversight, getOwnerDashboard, listCentralLowStockAlerts } from '@jksh/stock';
+import {
+  getCentralOversight,
+  getOwnerDashboard,
+  listCentralLowStockAlerts,
+  listOwnerPilotOutlets,
+} from '@jksh/stock';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { stockActorFor, stockDb } from '@/server/stock';
@@ -30,10 +35,22 @@ export default async function StockPortfolioPage() {
   }
 
   if (actor.role === 'franchise_owner') {
-    const owned = await listOutlets(db(), actor);
-    if (owned.length === 1 && owned[0]) redirect(`/stock/${owned[0].id}`);
+    const pilot = actor.scope.franchiseId
+      ? await listOwnerPilotOutlets(
+          stockDb(),
+          actor.scope.organizationId,
+          actor.scope.franchiseId,
+        ).catch(() => [])
+      : [];
+    if (!pilot.length) return null; // The parent retains the existing expenses workspace.
   }
   const stockActor = await stockActorFor(actor);
+  if (actor.role === 'franchise_owner') {
+    const owned = (await listOutlets(db(), actor)).filter((o) =>
+      stockActor.allowedOutletIds?.includes(o.id),
+    );
+    if (owned.length === 1 && owned[0]) redirect(`/stock/${owned[0].id}`);
+  }
 
   if (actor.role === 'central_admin') {
     const [oversight, alerts, outlets] = await Promise.all([
@@ -138,7 +155,9 @@ export default async function StockPortfolioPage() {
     );
   }
 
-  const outlets = await listOutlets(db(), actor);
+  const outlets = (await listOutlets(db(), actor)).filter(
+    (o) => actor.role !== 'franchise_owner' || stockActor.allowedOutletIds?.includes(o.id),
+  );
   const cards = await Promise.all(
     outlets.map(async (o) => {
       try {

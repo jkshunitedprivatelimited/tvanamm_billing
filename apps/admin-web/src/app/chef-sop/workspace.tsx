@@ -23,6 +23,7 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
   const [addingItem, setAddingItem] = useState(false);
   const [itemName, setItemName] = useState('');
   const [itemCategory, setItemCategory] = useState('Other');
+  const [stockRecipeId, setStockRecipeId] = useState('');
   const readOnly = !!reviewId || !!data?.closed || !!data?.submitted;
   useEffect(() => {
     token.current = window.location.hash.slice(1);
@@ -62,6 +63,7 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
     if (dirty && !confirm('Discard unsaved changes for this item?')) return;
     const e = data?.entries.find((e) => e.itemId === id);
     setSelected(id);
+    setStockRecipeId('');
     setDraft(e?.draft ?? { ...emptyChefDraft(), chefName: draft.chefName });
     setRevision(e?.revision ?? 0);
     setDirty(false);
@@ -108,6 +110,30 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
       setBusy(false);
     }
   }
+  async function prepareStockDraft() {
+    if (!reviewId || !selected || busy) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      const r = await fetch('/api/v1/sop-collection/stock-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ collectionId: reviewId, itemId: selected, revision }),
+      });
+      const b = (await r.json()) as { recipeId: string; created: boolean; message?: string };
+      if (!r.ok) throw new Error(b.message ?? 'Could not prepare Stock draft');
+      setStockRecipeId(b.recipeId);
+      setMessage(
+        b.created
+          ? 'Stock draft saved. Map ingredients and verify packaging before publication.'
+          : 'This SOP revision already has a Stock draft.',
+      );
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not prepare Stock draft');
+    } finally {
+      setBusy(false);
+    }
+  }
   async function addItem() {
     if (readOnly || busy) return;
     const valid = chefItemInputSchema.safeParse({ name: itemName, category: itemCategory });
@@ -128,6 +154,7 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
       if (!r.ok) throw Error(b.message ?? 'Could not add item');
       setData((d) => (d ? { ...d, menu: b.menu } : d));
       setSelected(b.item.id);
+      setStockRecipeId('');
       setDraft({ ...emptyChefDraft(), chefName: draft.chefName });
       setRevision(0);
       setDirty(false);
@@ -170,6 +197,7 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
           : d,
       );
       setSelected('');
+      setStockRecipeId('');
       setDraft({ ...emptyChefDraft(), chefName: draft.chefName });
       setRevision(0);
       setDirty(false);
@@ -615,6 +643,25 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
                     </label>
                   ))}
                 </fieldset>
+                {reviewId ? (
+                  <div className="chef-actions">
+                    <button
+                      disabled={busy || draft.status !== 'ready'}
+                      onClick={() => void prepareStockDraft()}
+                    >
+                      Prepare Stock recipe draft
+                    </button>
+                    {stockRecipeId ? (
+                      <a href={`/stock/ops/recipes?recipe=${stockRecipeId}`}>
+                        Map ingredients & review version →
+                      </a>
+                    ) : null}
+                    <p>
+                      Creates a saved copy of this SOP revision. Map stock items, verify quantities
+                      and publish separately.
+                    </p>
+                  </div>
+                ) : null}
                 {!readOnly ? (
                   <div className="chef-actions">
                     <button

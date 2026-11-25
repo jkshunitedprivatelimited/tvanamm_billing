@@ -60,6 +60,10 @@ Never put `SUPABASE_SECRET_KEY`, `DATABASE_URL`, `MSG91_AUTHKEY`, or
 
 ## Commands
 
+For an isolated customer demo with a fixed local OTP, run `npm run demo`.
+See [customer demo access and setup](docs/customer-demo.md). It uses dedicated
+local databases and does not connect to the saved live database URLs.
+
 ```bash
 npm run dev:admin        # admin-web on :3000
 npm run dev:pos          # pos-web on :3001

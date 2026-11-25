@@ -142,6 +142,40 @@ describe.skipIf(!RUN)('Stock feature flags', () => {
     expect(await isStockFeatureEnabled(stockPool, 'stock.enabled')).toBe(true);
     await setStockFeatureFlag(stockPool, sys, 'stock.enabled', false);
   });
+
+  it('preserves pilot scope when paused and resumed without config', async () => {
+    const key = `stock.pilot-scope-${S}`;
+    const scope = { organizationId: ORG, outletIds: [OUTLET] };
+    const readFlag = async () =>
+      (
+        await stockPool.query<{ enabled: boolean; config: Record<string, unknown> }>(
+          'select enabled, config from stock.feature_flags where key = $1',
+          [key],
+        )
+      ).rows[0];
+
+    await setStockFeatureFlag(stockPool, sys, key, true, scope);
+    await setStockFeatureFlag(stockPool, sys, key, false);
+    expect(await readFlag()).toEqual({ enabled: false, config: scope });
+    await setStockFeatureFlag(stockPool, sys, key, true);
+    expect(await readFlag()).toEqual({ enabled: true, config: scope });
+
+    const replacement = { organizationId: ORG, outletIds: [randomUUID()], rollout: 'expanded' };
+    await setStockFeatureFlag(stockPool, sys, key, true, replacement);
+    expect(await readFlag()).toEqual({ enabled: true, config: replacement });
+    await setStockFeatureFlag(stockPool, sys, key, false, {});
+    expect(await readFlag()).toEqual({ enabled: false, config: {} });
+  });
+
+  it('defaults a new flag to empty config when config is omitted', async () => {
+    const key = `stock.new-flag-${S}`;
+    await setStockFeatureFlag(stockPool, sys, key, true);
+    const { rows } = await stockPool.query<{ enabled: boolean; config: Record<string, unknown> }>(
+      'select enabled, config from stock.feature_flags where key = $1',
+      [key],
+    );
+    expect(rows[0]).toEqual({ enabled: true, config: {} });
+  });
 });
 
 describe.skipIf(!RUN)('Billing -> Stock relay', () => {
@@ -193,5 +227,82 @@ describe.skipIf(!RUN)('Billing -> Stock relay', () => {
     const report = await reconcileCrossSystem(stockPool, ORG);
     expect(report.unprocessedInbox).toBe(0);
     expect(report.deadLetteredInbox).toBe(0);
+  });
+  it('delays poison-event retries, dead-letters at the cap and allows explicit recovery', async () => {
+    const { withStockActorContext, stockSystemContext } = await import('@jksh/db');
+    const { ingestInboundEvent } = await import('./events');
+    const { retryInboxDeadLetter } = await import('./integration-health');
+    const eventId = randomUUID();
+    const landed = await withStockActorContext(stockPool, stockSystemContext(), (c) =>
+      ingestInboundEvent(c, {
+        eventId,
+        eventType: 'SaleCompleted',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        source: 'billing',
+        correlationId: randomUUID(),
+        organizationId: ORG,
+        franchiseId: FRANCHISE,
+        outletId: OUTLET,
+        payload: {},
+      }),
+    );
+    expect((await processStockInbox(stockPool, { maxAttempts: 2 })).failed).toBe(1);
+    expect((await processStockInbox(stockPool, { maxAttempts: 2 })).failed).toBe(0);
+    await stockPool.query('update stock_inbox.events set next_attempt_at = now() where id = $1', [
+      landed.inboxId,
+    ]);
+    expect((await processStockInbox(stockPool, { maxAttempts: 2 })).deadLettered).toBe(1);
+    expect(await retryInboxDeadLetter(stockPool, landed.inboxId)).toBe(true);
+    expect((await processStockInbox(stockPool, { maxAttempts: 2 })).failed).toBe(1);
+  });
+
+  it('continues delivery past an unsupported version without duplicate concurrent effects', async () => {
+    const bad = randomUUID();
+    const good = randomUUID();
+    for (const [id, version] of [
+      [bad, 2],
+      [good, 1],
+    ] as const) {
+      await billingPool.query(
+        `insert into outbox.events(id,event_type,event_version,aggregate_id,organization_id,
+          franchise_id,outlet_id,correlation_id,idempotency_key,payload)
+         values ($2,'SaleCompleted',$1,$2,$3,$4,$5,$6,$7,$8)`,
+        [version, id, ORG, FRANCHISE, OUTLET, randomUUID(), id, JSON.stringify({})],
+      );
+    }
+    const deliveries = await Promise.all([
+      deliverBillingEventsToStock(billingPool, stockPool),
+      deliverBillingEventsToStock(billingPool, stockPool),
+    ]);
+    expect(deliveries.reduce((n, r) => n + r.failed, 0)).toBe(1);
+    expect(deliveries.reduce((n, r) => n + r.delivered, 0)).toBe(1);
+    expect(
+      (
+        await billingPool.query('select status,attempts from outbox.events where aggregate_id=$1', [
+          bad,
+        ])
+      ).rows[0],
+    ).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(
+      (
+        await stockPool.query(
+          'select count(*)::int n from stock_inbox.events where source_event_id=$1',
+          [good],
+        )
+      ).rows[0].n,
+    ).toBe(1);
+  });
+  it('only requeues failed Billing transfers in the selected organization', async () => {
+    const { retryBillingDeadLetter } = await import('./integration-health');
+    const id = randomUUID();
+    await billingPool.query(
+      `insert into outbox.events(id,event_type,aggregate_id,organization_id,outlet_id,correlation_id,idempotency_key,payload,status)
+       values($1::uuid,'SaleCompleted',$1::uuid,$2,$3,$4,$1::text,'{}','dead_letter')`,
+      [id, ORG, OUTLET, randomUUID()],
+    );
+    expect(await retryBillingDeadLetter(billingPool, id, randomUUID())).toBe(false);
+    expect(await retryBillingDeadLetter(billingPool, id, ORG)).toBe(true);
+    expect(await retryBillingDeadLetter(billingPool, id, ORG)).toBe(false);
   });
 });

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 /**
  * Stock S3 procurement against a real Postgres: purchase orders, receiving with
  * the mandatory supplier invoice number gate, receipt posting to the ledger,
@@ -197,13 +198,42 @@ describe.skipIf(!RUN)('Stock procurement', () => {
 
   it('moves eligible quantity to quarantine on a supplier return and out on dispatch', async () => {
     const beforeSellable = await balanceAt(sellableLocId);
-    const ret = await initiateSupplierReturn(pool, sys, {
+    const submissionId = randomUUID();
+    const batchId = (
+      await pool.query<{ id: string }>(
+        'select id from stock.batches where item_id=$1 and batch_code=$2',
+        [milkItemId, `MB-${S}-1`],
+      )
+    ).rows[0]!.id;
+    const command = {
+      submissionId,
+      batchId,
       organizationId: ORG,
       supplierId,
       warehouseId,
       itemId: milkItemId,
       quantityBase: '1000',
-      reason: 'quality_failed',
+      reason: 'quality_failed' as const,
+    };
+    await expect(
+      initiateSupplierReturn(pool, sys, {
+        ...command,
+        submissionId: randomUUID(),
+        quantityBase: '999999999',
+      }),
+    ).rejects.toMatchObject({ code: 'insufficient_stock' });
+    expect(await balanceAt(sellableLocId)).toBe(beforeSellable);
+    const [ret, retry] = await Promise.all([
+      initiateSupplierReturn(pool, sys, command),
+      initiateSupplierReturn(pool, sys, command),
+    ]);
+    expect(retry.id).toBe(ret.id);
+    await expect(
+      initiateSupplierReturn(pool, sys, { ...command, quantityBase: '999' }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    const foreign = stockSystemActor('02000000-0000-4000-8000-000000000002');
+    await expect(confirmSupplierReturnDispatch(pool, foreign, ret.id)).rejects.toMatchObject({
+      code: 'not_found',
     });
     expect(await balanceAt(sellableLocId)).toBe(beforeSellable - 1000);
 

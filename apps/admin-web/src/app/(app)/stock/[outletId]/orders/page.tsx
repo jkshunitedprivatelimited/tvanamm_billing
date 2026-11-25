@@ -2,10 +2,11 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 import { listOutlets } from '@jksh/identity';
-import { listOutletOrders, getStockOrder } from '@jksh/stock';
+import { listOutletOrders, getStockOrder, listStockOrderRefunds } from '@jksh/stock';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { stockActorFor, stockDb } from '@/server/stock';
+import { CancelOrderButton } from './cancel-order';
 
 export const dynamic = 'force-dynamic';
 const stages: Record<string, [string, string]> = {
@@ -58,6 +59,16 @@ export default async function OrdersPage({
     sp.order ? getStockOrder(stockDb(), stockActor, sp.order) : null,
   ]);
   if (detail && detail.outletId !== outletId) notFound();
+  const refunds =
+    detail?.status === 'cancelled'
+      ? await listStockOrderRefunds(stockDb(), stockActor, detail.id).catch(() => [])
+      : [];
+  const refundText: Record<string, string> = {
+    requested: 'Refund is being started by Central.',
+    pending: 'Refund started. Razorpay usually returns the money in 5–7 working days.',
+    processed: 'Refund completed.',
+    failed: 'Refund failed. Central will retry it.',
+  };
   const base = `/stock/${outletId}`;
   return (
     <main>
@@ -123,6 +134,14 @@ export default async function OrdersPage({
             <Link className="btn" href={`${base}/order?order=${detail.id}`}>
               Review order & payment
             </Link>
+          ) : null}
+          {['draft', 'awaiting_payment', 'failed', 'expired'].includes(detail.status) ? (
+            <CancelOrderButton orderId={detail.id} orderNumber={detail.orderNumber} />
+          ) : null}
+          {refunds[0] ? (
+            <p className={refunds[0].status === 'failed' ? 'error' : 'muted'}>
+              {money(refunds[0].amountPaise)} · {refundText[refunds[0].status] ?? refunds[0].status}
+            </p>
           ) : null}
           {['partially_dispatched', 'dispatched', 'partially_received', 'received'].includes(
             detail.status,

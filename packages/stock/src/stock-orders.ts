@@ -9,6 +9,7 @@ import { StockError } from './errors';
 import { requireRow } from './rows';
 import { recordStockAudit } from './audit';
 import { recordStockOutbox } from './events';
+import { applyRefundWebhook } from './order-refunds';
 import { resolveRazorpayGateway, type RazorpayGateway } from './razorpay';
 
 interface DeliveryRule {
@@ -543,8 +544,19 @@ export async function handleRazorpayWebhook(
                 where id = $1 and status in ('awaiting_payment','payment_pending')`,
               [row.id, paymentId, amount],
             );
+            // Paid after it was cancelled: keep the money on record so Central
+            // can refund it (cancelStockOrder treats this as refundable).
+            const late = await client.query(
+              `update stock.stock_orders
+                  set razorpay_payment_id = coalesce(razorpay_payment_id, $2),
+                      captured_amount_paise = $3, paid_at = coalesce(paid_at, now())
+                where id = $1 and status = 'cancelled'`,
+              [row.id, paymentId, amount],
+            );
+            if (late.rowCount) note = 'captured after cancellation: refund required';
             await client.query(
-              `update stock.stock_order_payments set status = 'captured', signature_verified = true
+              `update stock.stock_order_payments set status = 'captured', signature_verified = true,
+                  razorpay_payment_id = coalesce(razorpay_payment_id, $2)
                 where stock_order_id = $1
                   and (razorpay_payment_id = $2 or razorpay_payment_id is null)`,
               [row.id, paymentId],
@@ -553,6 +565,11 @@ export async function handleRazorpayWebhook(
           }
         }
       }
+    }
+    if (input.eventType.startsWith('refund.')) {
+      const res = await applyRefundWebhook(pool, input.eventType, input.payload);
+      processed = res.processed;
+      note = res.note;
     }
     await client.query(
       'update stock.razorpay_webhook_events set processed_at = now(), process_note = $2 where event_id = $1',

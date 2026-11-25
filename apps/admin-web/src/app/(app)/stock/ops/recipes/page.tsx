@@ -9,7 +9,12 @@ import { RecipesClient } from './recipes-client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function RecipesPage() {
+export default async function RecipesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ recipe?: string }>;
+}) {
+  const { recipe } = await searchParams;
   const actor = await requireAdminActor();
   if (actor.role !== 'central_admin') redirect('/stock/ops');
   const stockActor = await stockActorFor(actor);
@@ -49,6 +54,7 @@ export default async function RecipesPage() {
         </div>
       ) : null}
       <RecipesClient
+        initialRecipeId={recipe}
         rows={recipes}
         menuItems={menu.items.map((i) => ({ id: i.id, name: i.name }))}
         addons={menu.addonGroups.flatMap((g) =>

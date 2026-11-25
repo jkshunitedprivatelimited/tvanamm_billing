@@ -1,3 +1,4 @@
+import { assertWarehouseAvailable } from './warehouse-availability';
 import { randomUUID } from 'node:crypto';
 import { withStockActorContext, stockSystemContext, type StockPool } from '@jksh/db';
 import {
@@ -598,6 +599,7 @@ export async function getSupplierInvoice(
 
 export interface InitiateSupplierReturnCommand {
   organizationId: string;
+  submissionId?: string | undefined;
   supplierId: string;
   warehouseId: string;
   itemId: string;
@@ -618,6 +620,43 @@ export async function initiateSupplierReturn(
   ensureStockAllowed(actor, 'stock.receiving.operate');
   assertWarehouseAccess(actor, cmd.warehouseId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    if (cmd.organizationId !== actor.organizationId)
+      throw new StockError('forbidden', 'Organization does not match');
+    const scope = await client.query(
+      `select 1 from stock.warehouses w,stock.suppliers s,stock.items i
+      where w.id=$1 and s.id=$2 and i.id=$3 and w.organization_id=$4 and s.organization_id=$4 and i.organization_id=$4`,
+      [cmd.warehouseId, cmd.supplierId, cmd.itemId, actor.organizationId],
+    );
+    if (!scope.rowCount) throw new StockError('not_found', 'Warehouse, supplier or item not found');
+    const id = cmd.submissionId ?? randomUUID();
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1,0))', [id]);
+    const previous = await client.query<{ same: boolean }>(
+      `select (
+      organization_id=$2 and supplier_id=$3 and warehouse_id=$4 and item_id=$5
+      and batch_id is not distinct from $6::uuid and quantity_base=$7::numeric and reason=$8
+      and purchase_order_id is not distinct from $9::uuid and supplier_receipt_id is not distinct from $10::uuid
+      and supplier_invoice_id is not distinct from $11::uuid and evidence_url is not distinct from $12::text
+    ) as same from stock.supplier_returns where id=$1`,
+      [
+        id,
+        cmd.organizationId,
+        cmd.supplierId,
+        cmd.warehouseId,
+        cmd.itemId,
+        cmd.batchId ?? null,
+        cmd.quantityBase,
+        cmd.reason,
+        cmd.purchaseOrderId ?? null,
+        cmd.supplierReceiptId ?? null,
+        cmd.supplierInvoiceId ?? null,
+        cmd.evidenceUrl ?? null,
+      ],
+    );
+    if (previous.rows[0]) {
+      if (!previous.rows[0].same)
+        throw new StockError('conflict', 'Return reference already used for different details');
+      return { id };
+    }
     const locs = await client.query<{ kind: string; id: string }>(
       `select kind::text as kind, id from stock.stock_locations
         where warehouse_id = $1 and scope = 'warehouse' and kind in ('sellable','quarantine')`,
@@ -626,8 +665,14 @@ export async function initiateSupplierReturn(
     const sellable = locs.rows.find((r) => r.kind === 'sellable')?.id;
     const quarantine = locs.rows.find((r) => r.kind === 'quarantine')?.id;
     if (!sellable || !quarantine) throw new StockError('not_found', 'Warehouse locations missing');
+    await assertWarehouseAvailable(
+      client,
+      sellable,
+      cmd.itemId,
+      cmd.batchId ?? null,
+      cmd.quantityBase,
+    );
 
-    const id = randomUUID();
     await client.query(
       `insert into stock.supplier_returns
          (id, organization_id, supplier_id, purchase_order_id, supplier_receipt_id,
@@ -697,11 +742,12 @@ export async function confirmSupplierReturnDispatch(
       quantity_base: string;
     }>(
       `select status, warehouse_id, organization_id, item_id, batch_id, quantity_base
-         from stock.supplier_returns where id = $1`,
+         from stock.supplier_returns where id = $1 for update`,
       [returnId],
     );
     const row = r.rows[0];
-    if (!row) throw new StockError('not_found', 'Supplier return not found');
+    if (row?.organization_id !== actor.organizationId)
+      throw new StockError('not_found', 'Supplier return not found');
     assertWarehouseAccess(actor, row.warehouse_id);
     if (row.status !== 'requested') {
       throw new StockError('conflict', `Cannot dispatch a ${row.status} return`);
@@ -743,12 +789,14 @@ export async function resolveSupplierReturn(
 ): Promise<void> {
   ensureStockAllowed(actor, 'stock.supplier.manage');
   await withStockActorContext(pool, stockContextForActor(actor), async (client) => {
-    const r = await client.query<{ status: string }>(
-      'select status from stock.supplier_returns where id = $1',
+    const r = await client.query<{ status: string; organization_id: string; warehouse_id: string }>(
+      'select status,organization_id,warehouse_id from stock.supplier_returns where id = $1 for update',
       [returnId],
     );
     const row = r.rows[0];
-    if (!row) throw new StockError('not_found', 'Supplier return not found');
+    if (row?.organization_id !== actor.organizationId)
+      throw new StockError('not_found', 'Supplier return not found');
+    assertWarehouseAccess(actor, row.warehouse_id);
     if (row.status !== 'dispatched') {
       throw new StockError('conflict', `Cannot resolve a ${row.status} return`);
     }

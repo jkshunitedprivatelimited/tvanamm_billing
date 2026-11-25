@@ -16,7 +16,12 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   // Keep local production checks separate from dev; Vercel expects .next.
-  distDir: isProd && !process.env.VERCEL ? '.next-production' : '.next',
+  distDir:
+    process.env.JKSH_CUSTOMER_DEMO === 'true'
+      ? '.next-demo'
+      : isProd && !process.env.VERCEL
+        ? '.next-production'
+        : '.next',
   agentRules: false,
   transpilePackages: ['@jksh/config', '@jksh/contracts', '@jksh/db', '@jksh/identity'],
   serverExternalPackages: ['pg', '@node-rs/argon2'],

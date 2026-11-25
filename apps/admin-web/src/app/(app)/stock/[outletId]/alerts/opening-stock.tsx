@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { LowStockItem } from '@jksh/stock';
 export function OpeningStock({
   outletId,
@@ -14,31 +14,42 @@ export function OpeningStock({
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [review, setReview] = useState<{
+    submissionId: string;
+    lines: { itemId: string; quantity: string }[];
+  } | null>(null);
+  const saving = useRef(false);
   const pending = items.filter((i) => !i.trackingStarted);
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (busy) return;
+    if (saving.current || !review) return;
+    saving.current = true;
     setBusy(true);
     setMessage('');
     try {
-      const lines = pending
-        .filter((i) => values[i.itemId]?.trim())
-        .map((i) => ({ itemId: i.itemId, quantity: (values[i.itemId] ?? '').trim() }));
       const res = await fetch(`/api/v1/stock/outlets/${outletId}/opening`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ lines }),
+        body: JSON.stringify(review),
       });
       const body = (await res.json()) as { message?: string };
       if (!res.ok)
         throw new Error(body.message ?? 'Could not save stock. Please refresh and try again.');
       setValues({});
       setOpen(false);
-      setMessage('Starting stock saved. Future deliveries and sales will update these quantities.');
-      await onSaved();
+      setMessage(`Starting stock saved. Reference: ${review.submissionId}.`);
+      setReview(null);
+      try {
+        await onSaved();
+      } catch {
+        setMessage(
+          `Starting stock saved. Reference: ${review.submissionId}. Refresh to see updated quantities.`,
+        );
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not save stock.');
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
@@ -52,10 +63,20 @@ export function OpeningStock({
             way.
           </p>
         </div>
-        <button disabled={!pending.length || busy} onClick={() => setOpen(!open)}>
+        <button
+          disabled={!pending.length || busy}
+          onClick={() => {
+            setOpen(!open);
+            setReview(null);
+          }}
+        >
           {open ? 'Cancel' : 'Enter current stock'}
         </button>
       </div>
+      <p>
+        {items.length - pending.length} of {items.length} materials have a starting quantity
+        recorded.
+      </p>
       {!items.length ? (
         <p className="muted">
           No stock items are available yet. You can enter quantities once items appear here. Billing
@@ -68,7 +89,22 @@ export function OpeningStock({
       ) : null}
       {message ? <p role="status">{message}</p> : null}
       {open ? (
-        <form onSubmit={(e) => void save(e)}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (review) {
+              void save(e);
+              return;
+            }
+            setMessage('');
+            setReview({
+              submissionId: crypto.randomUUID(),
+              lines: pending
+                .filter((i) => values[i.itemId]?.trim())
+                .map((i) => ({ itemId: i.itemId, quantity: (values[i.itemId] ?? '').trim() })),
+            });
+          }}
+        >
           <p>
             Count each item using the unit shown. Leave items blank to start tracking when they
             arrive; enter 0 only if you counted none.
@@ -84,16 +120,39 @@ export function OpeningStock({
                   value={values[item.itemId] ?? ''}
                   onChange={(e) => setValues({ ...values, [item.itemId]: e.target.value })}
                   placeholder="Not counted"
-                  disabled={busy}
+                  disabled={busy || !!review}
                 />
               </label>
             ))}
           </div>
+          {review ? (
+            <div role="region" aria-label="Review starting stock">
+              <h3>Review {review.lines.length} counted materials</h3>
+              <ul>
+                {review.lines.map((line) => {
+                  const item = items.find((i) => i.itemId === line.itemId);
+                  return (
+                    <li key={line.itemId}>
+                      {item?.name}: {line.quantity} {item?.baseUnit}
+                    </li>
+                  );
+                })}
+              </ul>
+              <p>
+                {pending.length - review.lines.length} materials will remain uncounted. Zero means
+                you physically checked and found none. Saved quantities must be corrected through a
+                stock count.
+              </p>
+              <button type="button" disabled={busy} onClick={() => setReview(null)}>
+                Edit quantities
+              </button>
+            </div>
+          ) : null}
           <button
             style={{ marginTop: 16 }}
             disabled={busy || !pending.some((i) => values[i.itemId]?.trim())}
           >
-            {busy ? 'Saving…' : 'Save starting stock'}
+            {busy ? 'Saving…' : review ? 'Confirm starting stock' : 'Review quantities'}
           </button>
         </form>
       ) : null}

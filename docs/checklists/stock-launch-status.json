@@ -1,0 +1,168 @@
+{
+  "updatedOn": "2026-11-25",
+  "protectedLiveOutlets": [
+    "Tvanamm_Araku",
+    "Tvanamm_Bangalore",
+    "Tvanamm_Gowlidoddi",
+    "Tvanamm_Ramalayam"
+  ],
+  "productionStockChangesThisSession": false,
+  "statusMeaning": {
+    "implemented_local": "Code exists locally; deployment and operational acceptance are not complete",
+    "pending": "Implementation or verification remains",
+    "business_input": "Requires measured data or account configuration"
+  },
+  "items": [
+    {
+      "id": "billing_release",
+      "status": "deployed",
+      "evidence": "d73c0a4; actual outlet-device offline acceptance remains pending"
+    },
+    {
+      "id": "alert_pilot_scope",
+      "status": "implemented_local"
+    },
+    {
+      "id": "opening_count_recovery",
+      "status": "implemented_local",
+      "migration": "0019_opening_stock_submissions.sql"
+    },
+    {
+      "id": "owner_outlet_rollout",
+      "status": "implemented_local",
+      "migration": "0020_owner_outlet_rollout.sql"
+    },
+    {
+      "id": "event_worker_pilot_and_cutoff",
+      "status": "implemented_local"
+    },
+    {
+      "id": "notification_backoff_and_recovery",
+      "status": "implemented_local",
+      "migration": "0021_low_stock_delivery_retries.sql"
+    },
+    {
+      "id": "worker_status_and_stale_run_visibility",
+      "status": "implemented_local",
+      "migration": "0022_worker_status.sql"
+    },
+    {
+      "id": "worker_hosting_and_operational_acceptance",
+      "status": "pending"
+    },
+    {
+      "id": "sop_measurements_and_approval",
+      "status": "business_input"
+    },
+    {
+      "id": "materials_units_recipe_mapping",
+      "status": "implemented_local",
+      "evidence": "SOP coverage screen: per menu item stage (SOP → Stock items → recipe → publish → Billing link), unmatched ingredient names, outlet-created items without recipes. Actual mapping work needs approved SOP data."
+    },
+    {
+      "id": "physical_opening_counts",
+      "status": "business_input"
+    },
+    {
+      "id": "owner_daily_workflow_device_acceptance",
+      "status": "pending"
+    },
+    {
+      "id": "warehouse_production_supplier_return_screens",
+      "status": "implemented_local",
+      "evidence": "Production planning, one-time material issue, actual output, finalization; supplier return quarantine, dispatch and resolution recording. Review forms and retry protection; browser acceptance pending. Financial/refund execution and replacement receiving remain separate."
+    },
+    {
+      "id": "prepared_base_posting",
+      "status": "implemented_local",
+      "migration": "0026_prepared_batch_posting.sql",
+      "evidence": "Outlet records prepared bases from published intermediate recipes; scaled raw inputs issued once, retry-safe on submission id; sales draw from the base; leftover discard; POS Prepared bases section. 9 integration tests."
+    },
+    {
+      "id": "stock_offline_queue_recovery",
+      "status": "implemented_local",
+      "evidence": "POS device queue (IndexedDB) for purchases, wastage, prepared bases and discards; per-employee, ordered, idempotent resend; refused entries kept until dismissed. Counts remain unavailable. Device acceptance pending."
+    },
+    {
+      "id": "cross_system_result_consumer_and_reconciliation",
+      "status": "implemented_local",
+      "migration": "billing 0044_stock_sync_results.sql",
+      "evidence": "Stock results consumed into Billing; dead-lettered events emit SaleConsumptionFailed; per-outlet business-day reconciliation (delivery, processing, result, recipe-vs-ledger) on the integration screen."
+    },
+    {
+      "id": "stock_payment_refund_acceptance",
+      "status": "implemented_local",
+      "migration": "0027_stock_order_refunds.sql",
+      "evidence": "Owner cancel of unpaid orders; Central cancel + Razorpay refund of paid, unallocated orders; refund row before API call with notes lookup on retry; refund.* webhooks; late capture after cancel recorded. Tested with the Razorpay stub only; Razorpay test-mode callback acceptance pending."
+    },
+    {
+      "id": "shiprocket_pilot_products_and_pickup",
+      "status": "business_input",
+      "evidence": "Prepaid policy confirmed; exact products, pickup location and measured package details pending"
+    },
+    {
+      "id": "shiprocket_account_and_carrier_acceptance",
+      "status": "business_input"
+    },
+    {
+      "id": "shiprocket_booking_tracking_returns_reconciliation",
+      "status": "pending"
+    },
+    {
+      "id": "outlet_hardware_and_offline_acceptance",
+      "status": "pending"
+    },
+    {
+      "id": "pilot_full_day_reconciliation",
+      "status": "pending"
+    },
+    {
+      "id": "production_migrations_and_scoped_rollout",
+      "status": "pending"
+    },
+    {
+      "id": "verified_prepaid_fulfilment",
+      "status": "implemented_local",
+      "evidence": "Approval, allocation and dispatch require matching captured payment; webhook-only capture retains provider payment ID"
+    },
+    {
+      "id": "shipment_preparation_drafts",
+      "status": "implemented_local",
+      "migration": "0023_shipment_preparation.sql",
+      "evidence": "Prepaid-only draft form, missing-details checklist, revision checks, retry recovery and org/warehouse authorization; no provider booking"
+    },
+    {
+      "id": "transfer_receipt_recovery",
+      "status": "implemented_local",
+      "migration": "0024_transfer_receipt_submissions.sql",
+      "evidence": "Serialized receipts; stable submission reference; duplicate, over-receipt and cross-org guards; shortages cleared from transit"
+    },
+    {
+      "id": "warehouse_transfer_screens",
+      "status": "implemented_local",
+      "evidence": "Multi-item batch selection, transfer drafts, dispatch review, partial receipt review, stable receipt references, organization-scoped stock and transfer lists; browser/device acceptance pending"
+    },
+    {
+      "id": "warehouse_production_and_return_safety",
+      "status": "implemented_local",
+      "evidence": "Production row locks and single material issue, organization checks, new output batch requirement, supplier-return submission IDs, exact-batch unallocated quantity checks and atomic rollback on shortages"
+    }
+  ],
+  "latestValidation": {
+    "environment": "fresh isolated local billing and stock databases",
+    "testsPassed": 503,
+    "testFilesPassed": 81,
+    "lint": "passed for changed files",
+    "typecheck": "passed",
+    "adminBuild": "passed",
+    "billingBuild": "passed",
+    "browserDeviceAcceptance": "pending",
+    "productionDeployment": "not performed"
+  },
+  "launchDecisions": {
+    "stockOrderPayment": "prepaid_only",
+    "cod": "deferred",
+    "pilotProducts": "tea powders mentioned; exact list pending from user",
+    "pickupCity": "pending from user"
+  }
+}

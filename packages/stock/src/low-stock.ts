@@ -209,13 +209,25 @@ async function evaluateRule(client: StockPoolClient, id: string): Promise<void> 
 
 /** Bounded, oldest-first scan also detects expiry, recall, and reservation
  * changes without adding notification work to the sale transaction. */
-export async function scanLowStockRules(pool: StockPool, limit = 500): Promise<number> {
+export interface LowStockScope {
+  organizationId: string;
+  outletIds: string[];
+}
+
+export async function scanLowStockRules(
+  pool: StockPool,
+  limit = 500,
+  scope?: LowStockScope,
+): Promise<number> {
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
     const { rows } = await client.query<{ id: string }>(
       `select id from stock.low_stock_rules
-      where enabled or episode_id is not null order by checked_at nulls first, id
+      where (enabled or episode_id is not null)
+        and ($2::uuid is null or organization_id = $2)
+        and ($3::uuid[] is null or outlet_id = any($3))
+      order by checked_at nulls first, id
       limit $1 for update skip locked`,
-      [Math.min(Math.max(limit, 1), 2000)],
+      [Math.min(Math.max(limit, 1), 2000), scope?.organizationId ?? null, scope?.outletIds ?? null],
     );
     for (const r of rows) await evaluateRule(client, r.id);
     return rows.length;
@@ -229,32 +241,86 @@ export async function deliverLowStockEvents(
   pool: StockPool,
   receive: (event: LowStockEvent) => Promise<void>,
   limit = 100,
+  scope?: LowStockScope,
 ) {
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
     const lock = await client.query<{ acquired: boolean }>(
       "select pg_try_advisory_xact_lock(hashtextextended('low-stock-delivery', 0)) as acquired",
     );
     if (!lock.rows[0]?.acquired) return { delivered: 0, failed: 0 };
-    const { rows } = await client.query<{ id: string; rule_id: string; payload: unknown }>(
-      'select id, rule_id, payload from stock.low_stock_events where delivered_at is null order by id limit $1',
-      [Math.min(Math.max(limit, 1), 500)],
+    const { rows } = await client.query<{
+      id: string;
+      rule_id: string;
+      payload: unknown;
+      attempts: number;
+    }>(
+      `select e.id, e.rule_id, e.payload, e.attempts from stock.low_stock_events e
+       join stock.low_stock_rules r on r.id = e.rule_id
+       where e.delivered_at is null
+         and e.dead_lettered_at is null and e.next_attempt_at <= now()
+         and not exists (select 1 from stock.low_stock_events previous
+           where previous.rule_id=e.rule_id and previous.id<e.id and previous.delivered_at is null
+             and (previous.dead_lettered_at is not null or previous.next_attempt_at>now()))
+         and ($2::uuid is null or r.organization_id = $2)
+         and ($3::uuid[] is null or r.outlet_id = any($3))
+       order by e.id limit $1`,
+      [Math.min(Math.max(limit, 1), 500), scope?.organizationId ?? null, scope?.outletIds ?? null],
     );
     const failedRules = new Set<string>();
     let delivered = 0;
     for (const r of rows) {
       if (failedRules.has(r.rule_id)) continue;
       try {
-        await receive(lowStockEventSchema.parse(r.payload));
+        const event = lowStockEventSchema.parse(r.payload);
+        if (
+          scope &&
+          (event.organizationId !== scope.organizationId ||
+            !scope.outletIds.includes(event.outletId))
+        )
+          throw new StockError('forbidden', 'Notification does not match the rollout scope');
+        await receive(event);
       } catch {
         failedRules.add(r.rule_id);
+        const attempts = r.attempts + 1;
+        await client.query(
+          `update stock.low_stock_events set attempts=$2, last_error='DeliveryFailed',
+           next_attempt_at=now()+$3 * interval '1 second',
+           dead_lettered_at=case when $2>=5 then now() else null end where id=$1`,
+          [r.id, attempts, Math.min(30 * 2 ** Math.min(attempts - 1, 7), 3600)],
+        );
         continue;
       }
-      await client.query('update stock.low_stock_events set delivered_at = now() where id = $1', [
-        r.id,
-      ]);
+      await client.query(
+        'update stock.low_stock_events set delivered_at = now(), attempts=attempts+1, last_error=null where id = $1',
+        [r.id],
+      );
       delivered++;
     }
     return { delivered, failed: failedRules.size };
+  });
+}
+
+/** Recover the same immutable event; never invent a new notification identity. */
+export async function retryLowStockEvent(pool: StockPool, actor: StockActor, eventId: string) {
+  if (actor.role !== 'central_admin') throw new StockError('forbidden', 'Central admin only');
+  return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    const result = await client.query(
+      `update stock.low_stock_events e set attempts=0, next_attempt_at=now(),
+       dead_lettered_at=null, last_error=null from stock.low_stock_rules r
+       where e.rule_id=r.id and r.organization_id=$2 and e.id=$1 and e.delivered_at is null
+       returning e.id`,
+      [eventId, actor.organizationId],
+    );
+    if (!result.rowCount) throw new StockError('not_found', 'Pending notification not found');
+    await recordStockAudit(client, {
+      action: 'low_stock.delivery_retried',
+      actorRequest: actor.request,
+      accountId: actor.accountId,
+      organizationId: actor.organizationId,
+      subjectType: 'low_stock_event',
+      data: { eventId },
+    });
+    return { retried: true };
   });
 }
 

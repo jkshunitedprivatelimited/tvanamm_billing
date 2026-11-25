@@ -8,6 +8,7 @@ import {
 } from './authorize';
 import { StockError } from './errors';
 import { requireRow } from './rows';
+import { assertPrepaidOrder } from './prepaid';
 import { recordStockAudit } from './audit';
 import { recordStockOutbox } from './events';
 import { postMovement, pickFefo } from './ledger';
@@ -69,6 +70,7 @@ export async function approveStockOrder(
 ): Promise<void> {
   ensureStockAllowed(actor, 'stock.order.oversee');
   await withStockActorContext(pool, stockContextForActor(actor), async (client) => {
+    await assertPrepaidOrder(client, actor, orderId);
     const r = await client.query(
       `update stock.stock_orders set status = 'approved' where id = $1 and status = 'paid'`,
       [orderId],
@@ -100,6 +102,7 @@ export async function allocateStockOrder(
   assertWarehouseAccess(actor, warehouseId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
     // Serialise concurrent allocation of the same order.
+    await assertPrepaidOrder(client, actor, orderId);
     const order = await client.query<{ status: string; organization_id: string }>(
       'select status, organization_id from stock.stock_orders where id = $1 for update',
       [orderId],
@@ -196,6 +199,7 @@ export async function dispatchStockOrder(
   ensureStockAllowed(actor, 'stock.dispatch.operate');
   assertWarehouseAccess(actor, opts.warehouseId);
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    await assertPrepaidOrder(client, actor, orderId);
     const order = await client.query<{
       status: string;
       organization_id: string;
@@ -366,6 +370,26 @@ export interface RecordOutletInwardCommand {
   lines: OutletInwardLineInput[];
 }
 
+/** Compare the persisted receipt quantities, independent of line order or decimal formatting. */
+function inwardLinesSignature(lines: OutletInwardLineInput[]): string {
+  return JSON.stringify(
+    lines
+      .map((line) =>
+        JSON.stringify([
+          line.stockDispatchLineId.toLowerCase(),
+          ...[
+            line.acceptedQtyBase,
+            line.shortQtyBase,
+            line.damagedQtyBase,
+            line.excessQtyBase,
+            line.rejectedQtyBase,
+          ].map((qty) => Number(qty ?? '0').toFixed(6)),
+        ]),
+      )
+      .sort(),
+  );
+}
+
 export async function recordOutletInward(
   pool: StockPool,
   actor: StockActor,
@@ -393,7 +417,9 @@ export async function recordOutletInward(
       [cmd.stockDispatchId],
     );
     const c = chain.rows[0];
-    if (!c) throw new StockError('not_found', 'Dispatch not found');
+    if (c?.order_org !== actor.organizationId || c.dispatch_org !== actor.organizationId) {
+      throw new StockError('not_found', 'Dispatch not found');
+    }
     if (c.dispatch_order !== cmd.stockOrderId) {
       throw new StockError('validation', 'Dispatch does not belong to this order');
     }
@@ -404,19 +430,12 @@ export async function recordOutletInward(
       throw new StockError('validation', 'Organization mismatch on the order / dispatch');
     }
 
-    const sellable = (
-      await client.query<{ id: string }>(
-        `select id from stock.stock_locations where outlet_id = $1 and scope = 'outlet' and kind = 'sellable'`,
-        [cmd.outletId],
-      )
-    ).rows[0]?.id;
-    if (!sellable) throw new StockError('conflict', 'Outlet stock tracking is not configured');
-
     const inwardIns = await client.query<{ id: string }>(
       `insert into stock.outlet_inwards
          (organization_id, stock_order_id, stock_dispatch_id, outlet_id, franchise_id,
           inward_number, status, received_by)
-       values ($1,$2,$3,$4,$5,$6,'draft',$7) returning id`,
+       values ($1,$2,$3,$4,$5,$6,'draft',$7)
+       on conflict (organization_id, inward_number) do nothing returning id`,
       [
         cmd.organizationId,
         cmd.stockOrderId,
@@ -427,7 +446,64 @@ export async function recordOutletInward(
         actor.accountId ?? null,
       ],
     );
+    if (!inwardIns.rows[0]) {
+      // The unique receipt number also serialises collisions across different
+      // dispatches. Read only after INSERT has waited for the first commit;
+      // never acknowledge a different document or changed quantities as a retry.
+      const previous = await client.query<{
+        id: string;
+        stock_order_id: string;
+        stock_dispatch_id: string;
+        outlet_id: string;
+        franchise_id: string;
+        status: string;
+      }>(
+        `select id, stock_order_id, stock_dispatch_id, outlet_id, franchise_id, status
+           from stock.outlet_inwards where organization_id = $1 and inward_number = $2`,
+        [cmd.organizationId, cmd.inwardNumber],
+      );
+      const saved = requireRow(previous, 'outlet inward');
+      const savedLines = await client.query<OutletInwardLineInput>(
+        `select stock_dispatch_line_id as "stockDispatchLineId",
+                accepted_qty_base as "acceptedQtyBase", short_qty_base as "shortQtyBase",
+                damaged_qty_base as "damagedQtyBase", excess_qty_base as "excessQtyBase",
+                rejected_qty_base as "rejectedQtyBase"
+           from stock.outlet_inward_lines where outlet_inward_id = $1`,
+        [saved.id],
+      );
+      if (
+        saved.stock_order_id !== cmd.stockOrderId ||
+        saved.stock_dispatch_id !== cmd.stockDispatchId ||
+        saved.outlet_id !== cmd.outletId ||
+        saved.franchise_id !== cmd.franchiseId ||
+        saved.status === 'draft' ||
+        inwardLinesSignature(savedLines.rows) !== inwardLinesSignature(cmd.lines)
+      ) {
+        throw new StockError(
+          'conflict',
+          'This inward number was already used for a different receipt',
+        );
+      }
+      const count = await client.query<{ n: string }>(
+        `select count(*) as n from stock.stock_order_discrepancies where outlet_inward_id = $1`,
+        [saved.id],
+      );
+      return {
+        inwardId: saved.id,
+        status: saved.status,
+        discrepancies: Number(count.rows[0]?.n ?? '0'),
+      };
+    }
     const inwardId = requireRow(inwardIns, 'outlet inward').id;
+
+    const sellable = (
+      await client.query<{ id: string }>(
+        `select id from stock.stock_locations
+          where outlet_id = $1 and organization_id = $2 and scope = 'outlet' and kind = 'sellable'`,
+        [cmd.outletId, cmd.organizationId],
+      )
+    ).rows[0]?.id;
+    if (!sellable) throw new StockError('conflict', 'Outlet stock tracking is not configured');
 
     let discrepancies = 0;
     for (const [index, line] of cmd.lines.entries()) {

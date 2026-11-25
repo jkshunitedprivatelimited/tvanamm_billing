@@ -2,6 +2,7 @@ import 'server-only';
 import { stockPgPool, type StockPool } from '@jksh/db';
 import {
   isStockFeatureEnabled,
+  listOwnerPilotOutlets,
   resolveStockActor,
   StockError,
   type StockActor,
@@ -64,6 +65,14 @@ export async function stockActorFor(
         details: { flag: 'stock.enabled' },
       });
     }
+  }
+  if (stockActor.role === 'franchise_owner') {
+    const allowed = stockActor.franchiseId
+      ? await listOwnerPilotOutlets(stockDb(), stockActor.organizationId, stockActor.franchiseId)
+      : [];
+    if (!allowed.length || (opts.outletId && !allowed.includes(opts.outletId)))
+      throw new StockError('forbidden', 'Stock is not enabled for this outlet yet');
+    stockActor.allowedOutletIds = allowed;
   }
   return stockActor;
 }

@@ -58,7 +58,10 @@ See [Vercel environment-variable documentation](https://vercel.com/docs/environm
 2. Apply outstanding billing and stock migrations through a controlled release task. Do not run development seeds against production.
 3. Deploy both web applications and configure the final application URLs.
 4. Run low-stock notification processing separately. `npm run stock:alerts` is a long-running worker; `npm run stock:alerts -- --once` is available for a scheduler.
-5. Arrange recurring billing-to-stock delivery, inbox processing and reconciliation. The current `/api/v1/stock/relay` endpoint is an authenticated central-admin manual action, not a public cron endpoint.
+5. Apply additive Stock migrations `0017_inbox_retry_backoff.sql` and `0018_recipe_editor_drafts.sql` before deploying the event processor and mapped-recipe editor.
+   Stock `0026_prepared_batch_posting.sql` (prepared bases), `0027_stock_order_refunds.sql` (order cancel/refund) and Billing `0044_stock_sync_results.sql` (Stock result consumer) are additive and must be applied before the code that uses them. Subscribe the Razorpay webhook to `refund.processed` and `refund.failed` in addition to `payment.captured`.
+6. Run `npm run stock:events` under a process supervisor, or schedule `npm run stock:events -- --once` with the deployment environment. It requires separate `DATABASE_URL` and `STOCK_DATABASE_URL` values, `stock.enabled`, and `STOCK_EVENT_SECRET` in production. This command does not automatically install a hosted worker.
+7. Arrange reconciliation and verify downstream Stock result/availability processing. The current `/api/v1/stock/relay` endpoint is an authenticated central-admin manual action, not a public cron endpoint. Do not replay the existing shared queue until its recipe versions and tracking start times have been reviewed.
 
 Deploying the two Next.js applications does not automatically run these background tasks. Do not advertise live stock deduction or alerts until processing is verified. A Vercel cron invokes a configured HTTP route; it does not run an arbitrary persistent Node script. See [Vercel cron documentation](https://vercel.com/docs/cron-jobs).
 

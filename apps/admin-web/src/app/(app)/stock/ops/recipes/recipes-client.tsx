@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import type { RecipeRow } from '@jksh/stock';
+import { chefStockDraftSchema } from '@/server/chef-stock-draft-schema';
 import { aiDraftSchema } from '@/server/ai-draft-schema';
 import { DataTable } from '@/components/DataTable';
 import { apiPost } from '../api';
@@ -14,11 +15,13 @@ export function RecipesClient({
   items,
   menuItems,
   addons,
+  initialRecipeId,
 }: {
   rows: RecipeRow[];
   items: RecipeItemOption[];
   menuItems: { id: string; name: string }[];
   addons: { id: string; name: string }[];
+  initialRecipeId?: string | undefined;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -31,7 +34,12 @@ export function RecipesClient({
   const [billingAddonId, setBillingAddonId] = useState('');
   const [outputItemId, setOutputItemId] = useState('');
 
-  const [openRecipe, setOpenRecipe] = useState<string | null>(null);
+  const [openRecipe, setOpenRecipe] = useState<string | null>(
+    rows.some((r) => r.id === initialRecipeId) ? (initialRecipeId ?? null) : null,
+  );
+  const chefSource = chefStockDraftSchema.safeParse(
+    rows.find((r) => r.id === openRecipe)?.sopDraft,
+  );
   async function createRecipe(e: React.FormEvent) {
     e.preventDefault();
     if (saving) return;
@@ -218,10 +226,29 @@ export function RecipesClient({
           <a href="/ai">Edit draft in JKSH AI →</a>
         </section>
       ) : null}
+      {openRecipe && chefSource.success ? (
+        <section className="card">
+          <h2>Reviewed chef SOP · revision {chefSource.data.revision}</h2>
+          <p>
+            Chef: {chefSource.data.draft.chefName} · Portion: {chefSource.data.draft.portionName}
+          </p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>{chefSource.data.draft.method}</p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>Packaging: {chefSource.data.draft.packaging}</p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>
+            Measurements: {chefSource.data.draft.measurements}
+          </p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>Variations: {chefSource.data.draft.variations}</p>
+          <p>
+            Ingredient names require explicit stock mapping. Add measured packaging rows separately.
+            If a stock item uses a different unit, enter the verified quantity in its base unit.
+          </p>
+        </section>
+      ) : null}
       {openRecipe ? (
         <RecipeVersionEditor
           key={openRecipe}
           recipeId={openRecipe}
+          chefDraft={chefSource.success ? chefSource.data.draft : undefined}
           recipeName={rows.find((r) => r.id === openRecipe)?.name ?? 'Recipe'}
           items={items}
           onPublished={() => {

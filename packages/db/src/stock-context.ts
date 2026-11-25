@@ -32,6 +32,8 @@ export interface StockDbContext {
   operatorEmployeeId?: string;
   /** Comma-separated warehouse ids the actor is assigned to (manager/staff). */
   warehouseIds?: string;
+  ownerRolloutEnforced?: string;
+  ownerOutletIds?: string;
 }
 
 const GUC_KEYS: Record<string, keyof StockDbContext> = {
@@ -43,15 +45,15 @@ const GUC_KEYS: Record<string, keyof StockDbContext> = {
   'app.outlet_id': 'outletId',
   'app.operator_employee_id': 'operatorEmployeeId',
   'app.warehouse_ids': 'warehouseIds',
+  'app.owner_rollout_enforced': 'ownerRolloutEnforced',
+  'app.owner_outlet_ids': 'ownerOutletIds',
 };
 
 export async function applyStockContext(client: PoolClient, ctx: StockDbContext): Promise<void> {
   await client.query('set local role stock_api');
   for (const [guc, key] of Object.entries(GUC_KEYS)) {
-    const value = ctx[key];
-    if (value != null && value !== '') {
-      await client.query('select set_config($1, $2, true)', [guc, value]);
-    }
+    // Clear absent values too: pooled sessions must never inherit another actor's scope.
+    await client.query('select set_config($1, $2, true)', [guc, ctx[key] ?? '']);
   }
 }
 

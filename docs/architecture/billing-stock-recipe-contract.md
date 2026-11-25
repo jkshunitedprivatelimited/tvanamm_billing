@@ -92,8 +92,10 @@ sellable quantity = minimum(
 
 ## Offline Sale Allowance
 
-Because the outlet has one active Billing terminal, Stock can publish a bounded
-offline allowance for each menu item/add-on along with the availability version.
+Stock can publish a bounded offline allowance for each menu item/add-on along
+with the availability version. When several counters bill in parallel, the
+allowance must be split across the outlet's active terminals (not yet built;
+offline allowances are not implemented).
 
 - The allowance is based on current raw materials minus a configurable safety
   buffer.

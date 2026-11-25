@@ -4,6 +4,8 @@ import { useRouter } from 'next/navigation';
 import { ExpensesClient } from '../expenses/expenses-client';
 import type { ExpenseView } from '@jksh/contracts';
 import type { EmployeeStockEntry } from '@jksh/stock';
+import { isNetworkFailure } from '@/lib/stock-queue';
+import { useStockActionQueue } from './stock-queue-panel';
 interface Item {
   id: string;
   name: string;
@@ -35,6 +37,7 @@ export function StockEntryClient({
   expenses?: ExpenseView[];
 }) {
   const router = useRouter();
+  const queue = useStockActionQueue();
   const saving = useRef(false);
   const [kind, setKind] = useState<EmployeeStockEntry['kind']>('purchase');
   const [itemId, setItem] = useState('');
@@ -95,6 +98,25 @@ export function StockEntryClient({
       );
       router.refresh();
     } catch (e) {
+      if (queue && isNetworkFailure(e)) {
+        // No connection: keep the exact entry on this device and send it later.
+        const name =
+          command.itemId === 'other'
+            ? (command.otherItemName ?? 'Other item')
+            : (items.find((i) => i.id === command.itemId)?.name ?? 'Stock item');
+        await queue.enqueue({
+          key: command.id,
+          path: '/api/v1/stock/entries',
+          body: command,
+          label: `${command.kind === 'purchase' ? 'Purchase' : 'Wastage'} · ${name} · ${command.quantity} ${command.unit}`,
+        });
+        setAttempt(null);
+        setQuantity('');
+        setAmount('');
+        setReason('');
+        setMessage('No internet. Saved on this device — it will send automatically.');
+        return;
+      }
       setMessage(
         `${e instanceof Error ? e.message : 'Connection interrupted.'} Retry the same entry; it will not be recorded twice.`,
       );

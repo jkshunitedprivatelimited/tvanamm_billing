@@ -7,6 +7,7 @@ import { postMovement } from './ledger';
 import { recordStockAudit } from './audit';
 
 const schema = z.object({
+  submissionId: z.uuid().optional(),
   lines: z
     .array(z.object({ itemId: z.uuid(), quantity: z.string().regex(/^\d{1,10}(\.\d{1,6})?$/) }))
     .min(1)
@@ -23,17 +24,45 @@ export async function saveOpeningStock(
   if (actor.role !== 'central_admin' && actor.role !== 'franchise_owner')
     throw new StockError('forbidden', 'Only the owner or central admin can enter starting stock');
   await assertOutletInFranchise(pool, actor, outletId);
-  const { lines } = schema.parse(input);
+  const parsed = schema.parse(input);
+  const lines = [...parsed.lines].sort((a, b) => a.itemId.localeCompare(b.itemId));
+  const submissionId = parsed.submissionId ?? randomUUID();
   if (new Set(lines.map((l) => l.itemId)).size !== lines.length)
     throw new StockError('validation', 'Enter each item once');
   return withStockActorContext(pool, stockSystemContext(), async (client) => {
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      `opening-submission:${submissionId}`,
+    ]);
+    const previous = await client.query<{
+      organization_id: string;
+      outlet_id: string;
+      lines: unknown;
+    }>(
+      'select organization_id, outlet_id, lines from stock.opening_stock_submissions where id=$1',
+      [submissionId],
+    );
+    const existing = previous.rows[0];
+    if (existing) {
+      // Never let a reused token acknowledge another outlet or a different count.
+      const original = schema.parse({ lines: existing.lines }).lines;
+      if (
+        existing.organization_id !== actor.organizationId ||
+        existing.outlet_id !== outletId ||
+        JSON.stringify(original) !== JSON.stringify(lines)
+      )
+        throw new StockError(
+          'conflict',
+          'This save reference was already used for a different count. Refresh before starting another count.',
+        );
+      return { saved: lines.length, submissionId, replayed: true };
+    }
     const locations = await client.query<{ id: string; franchise_id: string }>(
       `select id,franchise_id from stock.stock_locations where outlet_id=$1 and organization_id=$2 and kind='sellable' and scope='outlet' and is_active`,
       [outletId, actor.organizationId],
     );
     const location = locations.rows[0];
     if (!location) throw new StockError('conflict', 'Stock setup is not ready for this outlet');
-    for (const line of [...lines].sort((a, b) => a.itemId.localeCompare(b.itemId))) {
+    for (const line of lines) {
       await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [
         `stock-start:${location.id}:${line.itemId}`,
       ]);
@@ -59,7 +88,7 @@ export async function saveOpeningStock(
           quantity: line.quantity,
           movementType: 'adjustment',
           sourceDocType: 'opening_stock',
-          sourceDocId: randomUUID(),
+          sourceDocId: submissionId,
           idempotencyKey: `opening:${location.id}:${line.itemId}`,
           actorRequest: actor.request,
           actorAccountId: actor.accountId,
@@ -80,9 +109,19 @@ export async function saveOpeningStock(
         outletId,
         subjectType: 'stock_item',
         subjectId: line.itemId,
-        data: { quantity: line.quantity },
+        data: { quantity: line.quantity, submissionId },
       });
     }
-    return { saved: lines.length };
+    await client.query(
+      'insert into stock.opening_stock_submissions(id,organization_id,outlet_id,actor_account_id,lines) values($1,$2,$3,$4,$5)',
+      [
+        submissionId,
+        actor.organizationId,
+        outletId,
+        actor.accountId ?? null,
+        JSON.stringify(lines),
+      ],
+    );
+    return { saved: lines.length, submissionId, replayed: false };
   });
 }

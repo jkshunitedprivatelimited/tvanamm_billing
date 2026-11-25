@@ -4,6 +4,7 @@ import { apiJson, assertSameOrigin, jsonError } from '@/server/http';
 import { currentStockActor, stockDb } from '@/server/stock';
 
 const schema = z.object({
+  submissionId: z.uuid().optional(),
   receipts: z
     .array(
       z.object({
@@ -26,9 +27,15 @@ export async function POST(request: Request, ctx: { params: Promise<{ transferId
   try {
     assertSameOrigin(request);
     const { transferId } = await ctx.params;
-    const { receipts } = schema.parse(await request.json());
+    const { receipts, submissionId } = schema.parse(await request.json());
     return apiJson(
-      await receiveTransfer(stockDb(), await currentStockActor(), transferId, receipts),
+      await receiveTransfer(
+        stockDb(),
+        await currentStockActor(),
+        transferId,
+        receipts,
+        submissionId,
+      ),
     );
   } catch (error) {
     return jsonError(error);

@@ -186,6 +186,64 @@ describe.skipIf(!RUN)('SOP publication integrity', () => {
   });
 });
 
+describe.skipIf(!RUN)('Persistent mapped recipe drafts', () => {
+  it('keeps incomplete mapping, prevents concurrent overwrites and clears only a reviewed draft on publish', async () => {
+    const { readRecipeEditorDraft, saveRecipeEditorDraft } = await import('./recipe-editor-drafts');
+    const recipe = await createRecipe(pool, sys, {
+      organizationId: ORG,
+      name: 'Persistent mapping',
+      kind: 'menu_item',
+    });
+    const draft = {
+      basis: 'serving' as const,
+      serving: '110',
+      unit: 'ml' as const,
+      yieldQty: '',
+      lines: [
+        { key: 1, itemId: '', quantity: '', kind: 'fixed' as const, group: '', isDefault: true },
+      ],
+    };
+    expect((await readRecipeEditorDraft(pool, sys, recipe.id)).draft).toBeNull();
+    expect(
+      await saveRecipeEditorDraft(pool, sys, recipe.id, { revision: 0, baseVersion: 0, draft }),
+    ).toEqual({ revision: 1 });
+    expect((await readRecipeEditorDraft(pool, sys, recipe.id)).draft).toEqual(draft);
+    const attempts = await Promise.allSettled([
+      saveRecipeEditorDraft(pool, sys, recipe.id, { revision: 1, baseVersion: 0, draft }),
+      saveRecipeEditorDraft(pool, sys, recipe.id, { revision: 1, baseVersion: 0, draft }),
+    ]);
+    expect(attempts.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const command = {
+      servingQtyBase: '110',
+      servingUnit: 'ml',
+      components: [{ componentType: 'fixed' as const, itemId: teaPowderId, qtyBase: '2' }],
+    };
+    await expect(
+      publishRecipeVersion(pool, sys, recipe.id, {
+        ...command,
+        expectedDraftRevision: 1,
+        expectedCurrentVersion: 0,
+      }),
+    ).rejects.toThrow('draft changed');
+    await publishRecipeVersion(pool, sys, recipe.id, {
+      ...command,
+      expectedDraftRevision: 2,
+      expectedCurrentVersion: 0,
+    });
+    expect(await readRecipeEditorDraft(pool, sys, recipe.id)).toMatchObject({
+      draft: null,
+      revision: 3,
+      currentVersion: 1,
+    });
+    await expect(
+      saveRecipeEditorDraft(pool, sys, recipe.id, { revision: 2, baseVersion: 0, draft }),
+    ).rejects.toThrow('changed');
+    await expect(
+      readRecipeEditorDraft(pool, { ...sys, request: 'admin', role: 'franchise_owner' }, recipe.id),
+    ).rejects.toThrow('capability');
+  });
+});
+
 describe.skipIf(!RUN)('assertRecipePublished (Billing link guard)', () => {
   it('accepts a real published version and rejects unknown / wrong-kind ones', async () => {
     const ref = await assertRecipePublished(pool, recipeId, 1);
@@ -289,6 +347,84 @@ describe.skipIf(!RUN)('Stock sale consumption', () => {
       [teaBaseId],
     );
     expect(Number(prep.rows[0]!.qty_base_remaining)).toBe(260);
+  });
+
+  it('consumes packaging with prepared bases and serializes concurrent replay', async () => {
+    const version = await publishRecipeVersion(pool, sys, recipeId, {
+      servingQtyBase: '80',
+      servingUnit: 'ml',
+      preparedBaseItemId: teaBaseId,
+      preparedBaseQtyBase: '80',
+      components: [
+        { componentType: 'fixed', itemId: teaPowderId, qtyBase: '2.4' },
+        { componentType: 'packaging', itemId: cupId, qtyBase: '1' },
+      ],
+    });
+    const cups = await outletOnHand(cupId);
+    const tea = await outletOnHand(teaPowderId);
+    const eventId = await ingestSale('SaleCompleted', {
+      billId: randomUUID(),
+      outletId: OUTLET,
+      receiptNumber: 'PREP-PACK',
+      businessDate: '2026-10-10',
+      finalTotal: '30.00',
+      lines: [
+        {
+          billLineId: randomUUID(),
+          catalogItemId: randomUUID(),
+          quantity: 1,
+          stockRecipeId: recipeId,
+          stockRecipeVersion: version.version,
+          addons: [],
+        },
+      ],
+    });
+    const results = await Promise.all([
+      processSaleCompleted(pool, eventId),
+      processSaleCompleted(pool, eventId),
+    ]);
+    expect(results.filter((r) => r.duplicate)).toHaveLength(1);
+    expect(await outletOnHand(cupId)).toBe(cups - 1);
+    expect(await outletOnHand(teaPowderId)).toBe(tea);
+  });
+
+  it('scales add-ons with sold quantity and keeps overlapping components distinct', async () => {
+    const addon = await createRecipe(pool, sys, {
+      organizationId: ORG,
+      name: 'Tea add-on',
+      kind: 'addon',
+    });
+    await publishRecipeVersion(pool, sys, addon.id, {
+      servingQtyBase: '1',
+      servingUnit: 'each',
+      components: [
+        { componentType: 'fixed', itemId: teaPowderId, qtyBase: '1' },
+        { componentType: 'optional', itemId: teaPowderId, qtyBase: '2', isDefault: true },
+        { componentType: 'optional', itemId: teaPowderId, qtyBase: '7', isDefault: false },
+      ],
+    });
+    const before = await outletOnHand(teaPowderId);
+    const eventId = await ingestSale('SaleCompleted', {
+      billId: randomUUID(),
+      outletId: OUTLET,
+      receiptNumber: 'ADDON',
+      businessDate: '2026-10-10',
+      finalTotal: '60.00',
+      lines: [
+        {
+          billLineId: randomUUID(),
+          catalogItemId: randomUUID(),
+          quantity: 2,
+          stockRecipeId: recipeId,
+          stockRecipeVersion: 1,
+          addons: [
+            { addonId: randomUUID(), quantity: 2, stockRecipeId: addon.id, stockRecipeVersion: 1 },
+          ],
+        },
+      ],
+    });
+    await processSaleCompleted(pool, eventId);
+    expect(await outletOnHand(teaPowderId)).toBeCloseTo(before - 4.8 - 12, 4);
   });
 
   it('never restores materials on a refund', async () => {

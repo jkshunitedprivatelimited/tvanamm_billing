@@ -1,3 +1,4 @@
+import { approveStockOrder } from './dispatch';
 /**
  * Stock S4 (part 1) franchise orders against a real Postgres: catalog-snapshot
  * pricing, the Razorpay boundary (server-side signature verification,
@@ -263,6 +264,8 @@ describe.skipIf(!RUN)('Stock franchise orders', () => {
     const replay = await handleRazorpayWebhook(pool, webhook, gateway);
     expect(replay.duplicate).toBe(true);
     expect((await getStockOrder(pool, owner, order2.id)).status).toBe('paid');
+    await approveStockOrder(pool, sys, order2.id);
+    expect((await getStockOrder(pool, owner, order2.id)).status).toBe('approved');
   });
 
   it('rejects a webhook with a bad signature', async () => {

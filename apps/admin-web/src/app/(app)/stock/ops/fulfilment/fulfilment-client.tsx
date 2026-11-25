@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import type { FulfilmentOrderRow } from '@jksh/stock';
 import { DataTable, type Column } from '@/components/DataTable';
 import { apiPost } from '../api';
@@ -26,20 +26,61 @@ export function FulfilmentClient({
   warehouses: Wh[];
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [refreshing, startTransition] = useTransition();
+  const [saving, setSaving] = useState(false);
+  const busy = useRef(false);
+  const pending = saving || refreshing;
   const [msg, setMsg] = useState<string | null>(null);
   const [wh, setWh] = useState<Record<string, string>>({});
 
   async function act(url: string, body?: unknown) {
+    if (busy.current || pending) return;
+    busy.current = true;
+    setSaving(true);
     setMsg(null);
-    const r = await apiPost(url, body);
-    setMsg(r.ok ? 'Done.' : `Failed: ${r.error}`);
-    startTransition(() => router.refresh());
+    try {
+      const r = await apiPost(url, body);
+      setMsg(r.ok ? 'Done.' : `Failed: ${r.error}`);
+      startTransition(() => router.refresh());
+    } catch {
+      setMsg('Connection interrupted. Refresh the order before retrying.');
+    } finally {
+      busy.current = false;
+      setSaving(false);
+    }
   }
 
   const defaultWh = warehouses[0]?.id ?? '';
 
+  function cancelAndRefund(o: FulfilmentOrderRow) {
+    const reason = window
+      .prompt(
+        `Cancel ${o.orderNumber} and refund ${rupees(o.totalPaise)} to the owner? Enter the reason:`,
+      )
+      ?.trim();
+    if (!reason) return;
+    void act(`/api/v1/stock/orders/${o.id}/cancel`, {
+      submissionId: crypto.randomUUID(),
+      reason,
+    });
+  }
+
   const columns: Column<FulfilmentOrderRow>[] = [
+    {
+      key: 'shipping',
+      header: 'Shipping',
+      render: (o) => {
+        const selected = wh[o.id] ?? defaultWh;
+        return selected &&
+          ['paid', 'approved', 'allocated', 'partially_dispatched'].includes(o.status) ? (
+          <Link href={`/stock/ops/fulfilment/${o.id}/shipping?warehouseId=${selected}`}>
+            Prepare delivery
+          </Link>
+        ) : (
+          <span>—</span>
+        );
+      },
+    },
     {
       key: 'outlet',
       header: 'Outlet',
@@ -94,30 +135,41 @@ export function FulfilmentClient({
     {
       key: 'action',
       header: '',
-      width: '120px',
+      width: '190px',
       render: (o) => {
         const selected = wh[o.id] ?? defaultWh;
+        const refund = (
+          <button className="ghost sm" disabled={pending} onClick={() => cancelAndRefund(o)}>
+            Cancel &amp; refund
+          </button>
+        );
         if (o.status === 'paid')
           return (
-            <button
-              className="secondary sm"
-              disabled={pending}
-              onClick={() => void act(`/api/v1/stock/orders/${o.id}/approve`)}
-            >
-              Approve
-            </button>
+            <>
+              <button
+                className="secondary sm"
+                disabled={pending}
+                onClick={() => void act(`/api/v1/stock/orders/${o.id}/approve`)}
+              >
+                Approve
+              </button>
+              {refund}
+            </>
           );
         if (o.status === 'approved')
           return (
-            <button
-              className="secondary sm"
-              disabled={pending || !selected}
-              onClick={() =>
-                void act(`/api/v1/stock/orders/${o.id}/allocate`, { warehouseId: selected })
-              }
-            >
-              Allocate
-            </button>
+            <>
+              <button
+                className="secondary sm"
+                disabled={pending || !selected}
+                onClick={() =>
+                  void act(`/api/v1/stock/orders/${o.id}/allocate`, { warehouseId: selected })
+                }
+              >
+                Allocate
+              </button>
+              {refund}
+            </>
           );
         if ((o.status === 'allocated' || o.status === 'partially_dispatched') && selected)
           return (

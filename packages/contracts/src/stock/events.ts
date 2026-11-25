@@ -10,7 +10,7 @@ import { z } from 'zod';
 export const stockInboundEnvelopeSchema = z.object({
   eventId: z.uuid(),
   eventType: z.enum(['SaleCompleted', 'SaleRefunded']),
-  eventVersion: z.int().positive(),
+  eventVersion: z.literal(1),
   occurredAt: z.iso.datetime(),
   source: z.literal('billing'),
   correlationId: z.uuid(),

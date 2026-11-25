@@ -1,4 +1,6 @@
 import { saveOpeningStock } from './opening-stock';
+import { runLowStockAlertCycle } from './alert-cycle';
+import { setStockFeatureFlag } from './offline';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -20,6 +22,7 @@ import {
   saveLowStockRule,
   scanLowStockRules,
   deliverLowStockEvents,
+  retryLowStockEvent,
 } from './low-stock';
 
 const RUN = !!process.env.STOCK_DATABASE_URL && !!process.env.DATABASE_URL;
@@ -107,6 +110,131 @@ async function events(outletId: string): Promise<LowStockEvent[]> {
 }
 
 describe.skipIf(!RUN)('Low-stock limits and durable notification delivery', () => {
+  it('backs off failing rules, lets other outlets proceed and preserves resolution order through recovery', async () => {
+    const broken = await fixture(),
+      healthy = await fixture();
+    await broken.save('10');
+    await healthy.save('10');
+    const scope = { organizationId: ORG, outletIds: [broken.outletId, healthy.outletId] };
+    const received: string[] = [];
+    const receiver = async (event: LowStockEvent) => {
+      if (event.outletId === broken.outletId) throw new Error('Unavailable');
+      received.push(event.outletId);
+    };
+    expect((await deliverLowStockEvents(stock, receiver, 1, scope)).failed).toBe(1);
+    expect((await deliverLowStockEvents(stock, receiver, 1, scope)).delivered).toBe(1);
+    expect(received).toEqual([healthy.outletId]);
+    await broken.move('20');
+    await scanLowStockRules(stock, 500, scope);
+    const pending = await stock.query<{ id: string }>(
+      "select id from stock.low_stock_events where payload->>'outletId'=$1 order by id",
+      [broken.outletId],
+    );
+    const firstId = pending.rows[0]?.id;
+    if (!firstId) throw new Error('Missing event');
+    for (let attempt = 1; attempt < 5; attempt++) {
+      await stock.query('update stock.low_stock_events set next_attempt_at=now() where id=$1', [
+        firstId,
+      ]);
+      expect((await deliverLowStockEvents(stock, receiver, 100, scope)).failed).toBe(1);
+    }
+    const failure = await stock.query<{ attempts: number; dead_lettered_at: Date }>(
+      'select attempts,dead_lettered_at from stock.low_stock_events where id=$1',
+      [firstId],
+    );
+    expect(failure.rows[0]?.attempts).toBe(5);
+    expect(failure.rows[0]?.dead_lettered_at).toBeTruthy();
+    const resolved: string[] = [];
+    const recover = async (event: LowStockEvent) => {
+      resolved.push(event.state);
+    };
+    expect((await deliverLowStockEvents(stock, recover, 100, scope)).delivered).toBe(0);
+    await retryLowStockEvent(stock, sys, firstId);
+    expect((await deliverLowStockEvents(stock, recover, 100, scope)).delivered).toBe(2);
+    expect(resolved).toEqual(['low', 'resolved']);
+  });
+  it('rejects an owner from another organization even with matching franchise and outlet IDs', async () => {
+    const f = await fixture();
+    await expect(
+      listLowStockItems(stock, { ...f.owner, organizationId: randomUUID() }, f.outletId),
+    ).rejects.toMatchObject({ code: 'forbidden' });
+  });
+
+  it('pauses safely and scans/delivers only the explicit pilot scope without losing queued events', async () => {
+    const pilot = await fixture();
+    const other = await fixture();
+    await pilot.save('10');
+    await other.save('10');
+    const received: LowStockEvent[] = [];
+    const receive = async (event: LowStockEvent) => {
+      received.push(event);
+    };
+    try {
+      await setStockFeatureFlag(stock, sys, 'stock.enabled', false);
+      await setStockFeatureFlag(stock, sys, 'stock.alerts.enabled', true, {
+        organizationId: ORG,
+        outletIds: [pilot.outletId],
+      });
+      expect(await runLowStockAlertCycle(stock, receive)).toMatchObject({
+        paused: true,
+        delivered: 0,
+      });
+      await setStockFeatureFlag(stock, sys, 'stock.enabled', true);
+      for (const config of [
+        {},
+        { organizationId: ORG, outletIds: [] },
+        { organizationId: ORG, outletIds: ['*'] },
+      ]) {
+        await setStockFeatureFlag(stock, sys, 'stock.alerts.enabled', true, config);
+        expect(await runLowStockAlertCycle(stock, receive)).toMatchObject({
+          reason: 'invalid_scope',
+          scanned: 0,
+        });
+      }
+      expect(received).toHaveLength(0);
+      await setStockFeatureFlag(stock, sys, 'stock.alerts.enabled', true, {
+        organizationId: randomUUID(),
+        outletIds: [pilot.outletId],
+      });
+      expect(await runLowStockAlertCycle(stock, receive)).toMatchObject({
+        scanned: 0,
+        delivered: 0,
+      });
+      await setStockFeatureFlag(stock, sys, 'stock.alerts.enabled', true, {
+        organizationId: ORG,
+        outletIds: [pilot.outletId],
+      });
+      expect(await runLowStockAlertCycle(stock, receive)).toMatchObject({
+        scanned: 1,
+        delivered: 1,
+      });
+      expect(received.map((event) => event.outletId)).toEqual([pilot.outletId]);
+      await pilot.move('20');
+      await other.move('20');
+      await setStockFeatureFlag(stock, sys, 'stock.alerts.enabled', false);
+      expect(await runLowStockAlertCycle(stock, receive)).toMatchObject({
+        paused: true,
+        scanned: 0,
+      });
+      expect(await events(pilot.outletId)).toHaveLength(1);
+      await setStockFeatureFlag(stock, sys, 'stock.alerts.enabled', true, {
+        organizationId: ORG,
+        outletIds: [pilot.outletId],
+      });
+      expect(await runLowStockAlertCycle(stock, receive)).toMatchObject({ delivered: 1 });
+      expect(received.map((event) => event.state)).toEqual(['low', 'resolved']);
+      expect(await events(other.outletId)).toHaveLength(1);
+      expect(await runLowStockAlertCycle(stock, receive)).toMatchObject({ delivered: 0 });
+      const pending = await stock.query<{ count: string }>(
+        "select count(*)::text count from stock.low_stock_events where payload->>'outletId' = $1 and delivered_at is null",
+        [other.outletId],
+      );
+      expect(pending.rows[0]?.count).toBe('1');
+    } finally {
+      await setStockFeatureFlag(stock, sys, 'stock.alerts.enabled', false);
+      await setStockFeatureFlag(stock, sys, 'stock.enabled', false);
+    }
+  });
   it('does not alert for uncounted stock until the first delivery', async () => {
     const f = await fixture('g', false);
     await f.save('10');
@@ -234,6 +362,21 @@ describe.skipIf(!RUN)('Low-stock limits and durable notification delivery', () =
       }
     };
     expect((await deliverLowStockEvents(stock, receiver, 500)).failed).toBe(1);
+    // Backoff prevents immediate retries, and recovery reuses the immutable event.
+    const pending = await stock.query<{ id: string }>(
+      "select id from stock.low_stock_events where payload->>'outletId'=$1 and delivered_at is null",
+      [f.outletId],
+    );
+    const pendingId = pending.rows[0]?.id;
+    if (!pendingId) throw new Error('Missing pending notification');
+    expect((await deliverLowStockEvents(stock, receiver, 500)).failed).toBe(0);
+    await expect(retryLowStockEvent(stock, f.owner, pendingId)).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+    await expect(
+      retryLowStockEvent(stock, stockSystemActor(randomUUID()), pendingId),
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await retryLowStockEvent(stock, sys, pendingId);
     await deliverLowStockEvents(stock, receiver, 500);
     let notices = await billing.query<{ recipient_role: string; resolved_at: Date | null }>(
       'select * from identity.notifications where outlet_id = $1',
