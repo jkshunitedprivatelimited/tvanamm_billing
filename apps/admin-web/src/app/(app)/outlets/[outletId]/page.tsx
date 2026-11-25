@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { listEmployees, listOutlets, listTerminals } from '@jksh/identity';
+import { getReceiptSettings, listEmployees, listOutlets, listTerminals } from '@jksh/identity';
 import { requireAdminActor } from '@/server/auth';
 import { db } from '@/server/pool';
 import { OutletDetail } from './detail';
 import { BillsPanel } from './bills-panel';
 import { AttendancePanel } from './AttendancePanel';
 import { ExpensePanel } from './ExpensePanel';
+import { ReceiptSettingsEditor } from './receipt-settings';
 
 export default async function OutletPage({
   params,
@@ -43,7 +44,12 @@ export default async function OutletPage({
           {
             key: 'setup',
             label: 'Team & devices',
-            description: 'Manage employees and the billing device for this outlet.',
+            description: 'Manage employees and the billing counters for this outlet.',
+          },
+          {
+            key: 'receipt',
+            label: 'Receipt',
+            description: 'Choose what your printed receipts show.',
           },
         ]
       : []),
@@ -56,6 +62,8 @@ export default async function OutletPage({
           listEmployees(db(), actor, outletId).catch(() => []),
         ])
       : [[], []];
+  const receiptSettings =
+    section?.key === 'receipt' ? await getReceiptSettings(db(), actor, outletId) : null;
 
   return (
     <main>
@@ -96,6 +104,13 @@ export default async function OutletPage({
           outlet={outlet}
           initialTerminals={terminals}
           initialEmployees={employees}
+        />
+      ) : null}
+      {receiptSettings ? (
+        <ReceiptSettingsEditor
+          outletId={outletId}
+          outletName={outlet.displayName}
+          initial={receiptSettings}
         />
       ) : null}
       {section?.key === 'attendance' ? <AttendancePanel outletId={outletId} /> : null}

@@ -83,6 +83,7 @@ export const auditActionSchema = z.enum([
   'import.previewed',
   'import.processed',
   'billing.export.created',
+  'outlet.receipt_settings_updated',
 ]);
 export type AuditAction = z.infer<typeof auditActionSchema>;
 

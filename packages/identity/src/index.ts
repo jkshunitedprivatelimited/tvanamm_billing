@@ -259,3 +259,9 @@ export {
   approveOutletOnboarding,
 } from './onboarding';
 export { getPosRecipeHelp } from './pos-recipe-help';
+export {
+  getReceiptSettings,
+  updateReceiptSettings,
+  applyReceiptSettings,
+  maskMobile,
+} from './receipt-settings';

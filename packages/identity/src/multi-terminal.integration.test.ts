@@ -207,6 +207,25 @@ describe.skipIf(!RUN)('Parallel billing terminals', () => {
     expect(next.receiptNumber).toMatch(/-T01-000004$/);
   });
 
+  it('sends a device whose counter no longer exists back to registration', async () => {
+    const gone = await addTerminal('Deleted counter');
+    await pool.query('delete from identity.terminal_credentials where terminal_id = $1', [
+      gone.terminalId,
+    ]);
+    await pool.query(
+      'delete from identity.terminal_activation_codes where consumed_terminal_id = $1',
+      [gone.terminalId],
+    );
+    await pool.query('delete from identity.terminals where id = $1', [gone.terminalId]);
+    // Any PIN, right or wrong: the device must be told to re-register, not "Incorrect PIN".
+    for (const pin of [pins[0] ?? '', '0000']) {
+      const res = await pinLogin(pool, { terminalCredential: gone.terminalCredential, pin });
+      expect(res.result).toMatchObject({ outcome: 'rejected', reason: 'terminal_revoked' });
+    }
+    const garbage = await pinLogin(pool, { terminalCredential: 'not-a-credential', pin: '1234' });
+    expect(garbage.result).toMatchObject({ outcome: 'rejected', reason: 'terminal_revoked' });
+  });
+
   it('limits counters per outlet and frees a slot when one is removed', async () => {
     const live = () =>
       listTerminals(pool, owner, outletId).then((t) => t.filter((x) => x.status !== 'revoked'));

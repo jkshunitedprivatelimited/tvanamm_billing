@@ -82,8 +82,13 @@ async function authenticatePin(
   const correlationId = meta.correlationId ?? randomUUID();
   const now = new Date();
 
+  // An unreadable or unknown device credential can never succeed, whatever PIN
+  // is typed. Answer "terminal_revoked" so the device clears it and goes back
+  // to registration, instead of showing "Incorrect PIN" forever (e.g. a device
+  // still holding the credential of a deleted outlet's terminal). The PIN
+  // itself is not checked, so this reveals nothing about PINs.
   const parsed = parseTerminalCredential(secret, cmd.terminalCredential);
-  if (!parsed) return reject('invalid');
+  if (!parsed) return reject('terminal_revoked');
 
   return withActorContext(pool, systemContext(), async (client) => {
     const { rows: termRows } = await client.query<{
@@ -98,7 +103,7 @@ async function authenticatePin(
       [parsed.terminalId],
     );
     const term = termRows[0];
-    if (!term) return reject('invalid');
+    if (!term) return reject('terminal_revoked');
 
     const cred = await client.query(
       `select 1 from identity.terminal_credentials

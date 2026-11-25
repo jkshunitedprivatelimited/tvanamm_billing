@@ -215,5 +215,36 @@ export const receiptSnapshotSchema = z.object({
   finalTotal: moneySchema,
   paymentMethod: paymentMethodSchema.nullable(),
   isComplimentary: z.boolean(),
+  /** Layout-driven extras (outlet receipt settings). Absent = not printed. */
+  customerName: z.string().nullable().optional(),
+  customerMobile: z.string().nullable().optional(),
+  cashierName: z.string().nullable().optional(),
+  headerNote: z.string().nullable().optional(),
+  footerNote: z.string().nullable().optional(),
+  layout: z
+    .object({
+      showAddress: z.boolean(),
+      showOutletPhone: z.boolean(),
+      showTime: z.boolean(),
+      showPaymentMethod: z.boolean(),
+      showItemNotes: z.boolean(),
+    })
+    .optional(),
 });
 export type ReceiptSnapshot = z.infer<typeof receiptSnapshotSchema>;
+
+/** What an outlet chooses to print. Outlet name and GSTIN always print. */
+export const receiptSettingsSchema = z.object({
+  showAddress: z.boolean().default(true),
+  showOutletPhone: z.boolean().default(true),
+  showTime: z.boolean().default(true),
+  showPaymentMethod: z.boolean().default(true),
+  showItemNotes: z.boolean().default(true),
+  showCustomerName: z.boolean().default(false),
+  customerMobile: z.enum(['hidden', 'masked', 'full']).default('hidden'),
+  showCashierName: z.boolean().default(false),
+  headerNote: z.string().trim().max(120).default(''),
+  footerNote: z.string().trim().max(160).default('Thank you, visit again!'),
+});
+export type ReceiptSettings = z.infer<typeof receiptSettingsSchema>;
+export const defaultReceiptSettings = (): ReceiptSettings => receiptSettingsSchema.parse({});

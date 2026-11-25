@@ -6,6 +6,7 @@ import { ensureAllowed } from './authz';
 import { recordAudit } from './audit';
 import { IdentityError } from './errors';
 import type { RequestMeta } from './admin-auth';
+import { applyReceiptSettings, readReceiptSettings } from './receipt-settings';
 
 async function loadBillForOutlet(
   client: PoolClient,
@@ -105,6 +106,9 @@ export async function getReceiptSnapshot(
       final_total: string;
       payment_method: ReceiptSnapshot['paymentMethod'];
       is_complimentary: boolean;
+      customer_name: string | null;
+      customer_mobile: string | null;
+      employee_name: string | null;
       receipt_header: {
         outletName?: string;
         outletAddress?: string;
@@ -114,7 +118,7 @@ export async function getReceiptSnapshot(
     }>(
       `select outlet_id, receipt_number, business_date::text as business_date, committed_at,
               subtotal, discount_total, round_adjustment, final_total, payment_method,
-              is_complimentary, receipt_header
+              is_complimentary, receipt_header, customer_name, customer_mobile, employee_name
          from billing.bills where id = $1`,
       [billId],
     );
@@ -176,7 +180,7 @@ export async function getReceiptSnapshot(
       [lines.rows.map((l) => l.id)],
     );
 
-    return {
+    const receipt: ReceiptSnapshot = {
       outletName: header.outletName ?? '',
       outletAddress: header.outletAddress ?? '',
       outletPhone: header.outletPhone ?? null,
@@ -204,5 +208,10 @@ export async function getReceiptSnapshot(
       paymentMethod: bill.payment_method,
       isComplimentary: bill.is_complimentary,
     };
+    return applyReceiptSettings(receipt, await readReceiptSettings(client, bill.outlet_id), {
+      customerName: bill.customer_name,
+      customerMobile: bill.customer_mobile,
+      cashierName: bill.employee_name,
+    });
   });
 }

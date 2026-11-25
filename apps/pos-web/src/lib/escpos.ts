@@ -81,13 +81,25 @@ export function buildReceiptEscPos(receipt: ReceiptSnapshot, paperWidthMm: 58 | 
   const cols = columnsFor(paperWidthMm);
   const out: number[] = [...INIT];
 
+  // Server-applied outlet receipt settings; older snapshots print everything.
+  const layout = receipt.layout ?? {
+    showAddress: true,
+    showOutletPhone: true,
+    showTime: true,
+    showPaymentMethod: true,
+    showItemNotes: true,
+  };
   out.push(...ALIGN_CENTER, ...BOLD_ON, ...line(receipt.outletName), ...BOLD_OFF, ...ALIGN_LEFT);
-  out.push(...centered(receipt.outletAddress));
-  if (receipt.outletPhone) out.push(...centered(receipt.outletPhone));
+  if (layout.showAddress && receipt.outletAddress) out.push(...centered(receipt.outletAddress));
+  if (layout.showOutletPhone && receipt.outletPhone) out.push(...centered(receipt.outletPhone));
   if (receipt.gstin) out.push(...centered(`GSTIN: ${receipt.gstin}`));
+  if (receipt.headerNote) out.push(...centered(receipt.headerNote));
   out.push(...hr(cols));
   out.push(...twoCol(receipt.receiptNumber, receipt.businessDate, cols));
-  out.push(...line(new Date(receipt.committedAt).toLocaleTimeString()));
+  if (layout.showTime) out.push(...line(new Date(receipt.committedAt).toLocaleTimeString()));
+  if (receipt.cashierName) out.push(...line(`Cashier: ${receipt.cashierName}`));
+  if (receipt.customerName) out.push(...line(`Customer: ${receipt.customerName}`));
+  if (receipt.customerMobile) out.push(...line(`Phone: ${receipt.customerMobile}`));
   out.push(...hr(cols));
 
   for (const l of receipt.lines) {
@@ -97,7 +109,7 @@ export function buildReceiptEscPos(receipt: ReceiptSnapshot, paperWidthMm: 58 | 
       out.push(...twoCol(`  + ${String(a.quantity)} x ${a.addonName}`, `Rs.${a.unitPrice}`, cols));
     }
     if (l.discount !== '0.00') out.push(...twoCol('  Discount', `-Rs.${l.discount}`, cols));
-    if (l.note) out.push(...line(`  Note: ${l.note}`));
+    if (layout.showItemNotes && l.note) out.push(...line(`  Note: ${l.note}`));
   }
 
   out.push(...hr(cols));
@@ -109,15 +121,16 @@ export function buildReceiptEscPos(receipt: ReceiptSnapshot, paperWidthMm: 58 | 
     out.push(...twoCol('Round-off', `Rs.${receipt.roundAdjustment}`, cols));
   }
   out.push(...BOLD_ON, ...twoCol('Total', `Rs.${receipt.finalTotal}`, cols), ...BOLD_OFF);
-  out.push(
-    ...twoCol(
-      'Payment',
-      receipt.isComplimentary ? 'Complimentary' : (receipt.paymentMethod ?? '-'),
-      cols,
-    ),
-  );
-  out.push(...hr(cols));
-  out.push(...centered('Thank you, visit again!'));
+  if (layout.showPaymentMethod || receipt.isComplimentary)
+    out.push(
+      ...twoCol(
+        'Payment',
+        receipt.isComplimentary ? 'Complimentary' : (receipt.paymentMethod ?? '-'),
+        cols,
+      ),
+    );
+  const footer = receipt.layout ? receipt.footerNote : 'Thank you, visit again!';
+  if (footer) out.push(...hr(cols), ...centered(footer));
   out.push(...FEED(3), ...CUT);
 
   return new Uint8Array(out);

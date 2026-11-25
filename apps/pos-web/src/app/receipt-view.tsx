@@ -2,9 +2,10 @@
 
 import type { ReceiptSnapshot } from '@jksh/contracts';
 
-/** Renders exactly `receiptSnapshotSchema`'s fields - never employee name,
- *  discount/refund reasons, or a GST rate/CGST/SGST breakout
- *  (`receipt-printing.md` "Confirmed Customer Receipt Content"). */
+/** Renders `receiptSnapshotSchema`'s fields. Optional lines (address, phone,
+ *  customer, cashier, notes…) follow the outlet's receipt settings, which the
+ *  server has already applied; outlet name and GSTIN always print. Never
+ *  discount/refund reasons or a GST rate/CGST/SGST breakout. */
 export function ReceiptView({
   receipt,
   paperWidthMm = 80,
@@ -12,22 +13,35 @@ export function ReceiptView({
   receipt: ReceiptSnapshot;
   paperWidthMm?: 58 | 80;
 }) {
+  const layout = receipt.layout ?? {
+    showAddress: true,
+    showOutletPhone: true,
+    showTime: true,
+    showPaymentMethod: true,
+    showItemNotes: true,
+  };
   return (
     <div className={`receipt${paperWidthMm === 58 ? ' w58' : ''}`}>
       <div className="center">
         <strong>{receipt.outletName}</strong>
-        <div>{receipt.outletAddress}</div>
-        {receipt.outletPhone ? <div>{receipt.outletPhone}</div> : null}
+        {layout.showAddress && receipt.outletAddress ? <div>{receipt.outletAddress}</div> : null}
+        {layout.showOutletPhone && receipt.outletPhone ? <div>{receipt.outletPhone}</div> : null}
         {receipt.gstin ? <div>GSTIN: {receipt.gstin}</div> : null}
+        {receipt.headerNote ? <div>{receipt.headerNote}</div> : null}
       </div>
       <hr />
       <div className="row">
         <span>{receipt.receiptNumber}</span>
         <span>{receipt.businessDate}</span>
       </div>
-      <div className="row">
-        <span>{new Date(receipt.committedAt).toLocaleTimeString()}</span>
-      </div>
+      {layout.showTime ? (
+        <div className="row">
+          <span>{new Date(receipt.committedAt).toLocaleTimeString()}</span>
+        </div>
+      ) : null}
+      {receipt.cashierName ? <div>Cashier: {receipt.cashierName}</div> : null}
+      {receipt.customerName ? <div>Customer: {receipt.customerName}</div> : null}
+      {receipt.customerMobile ? <div>Phone: {receipt.customerMobile}</div> : null}
       <hr />
       {receipt.lines.map((line, i) => (
         <div key={i} style={{ marginBottom: 4 }}>
@@ -55,7 +69,9 @@ export function ReceiptView({
               <span>-₹{line.discount}</span>
             </div>
           ) : null}
-          {line.note ? <div style={{ paddingLeft: 10 }}>Note: {line.note}</div> : null}
+          {layout.showItemNotes && line.note ? (
+            <div style={{ paddingLeft: 10 }}>Note: {line.note}</div>
+          ) : null}
         </div>
       ))}
       <hr />
@@ -79,12 +95,18 @@ export function ReceiptView({
         <span>Total</span>
         <span>₹{receipt.finalTotal}</span>
       </div>
-      <div className="row">
-        <span>Payment</span>
-        <span>{receipt.isComplimentary ? 'Complimentary' : (receipt.paymentMethod ?? '-')}</span>
-      </div>
-      <hr />
-      <div className="center">Thank you, visit again!</div>
+      {layout.showPaymentMethod || receipt.isComplimentary ? (
+        <div className="row">
+          <span>Payment</span>
+          <span>{receipt.isComplimentary ? 'Complimentary' : (receipt.paymentMethod ?? '-')}</span>
+        </div>
+      ) : null}
+      {receipt.layout && !receipt.footerNote ? null : (
+        <>
+          <hr />
+          <div className="center">{receipt.footerNote ?? 'Thank you, visit again!'}</div>
+        </>
+      )}
     </div>
   );
 }
