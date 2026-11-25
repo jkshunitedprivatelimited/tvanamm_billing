@@ -195,7 +195,9 @@ export async function reserveReceiptBlock(
       `select receipt_prefix from identity.terminals where id = $1`,
       [terminalId],
     );
-    const prefix = termRows[0]?.receipt_prefix ?? 'T01';
+    const prefix = termRows[0]?.receipt_prefix;
+    if (!prefix)
+      throw new IdentityError('terminal_not_found', 'This billing terminal is not registered');
 
     await voidExpiredReservations(client, outletId, prefix);
 

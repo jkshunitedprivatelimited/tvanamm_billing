@@ -24,6 +24,9 @@ import { recordAudit } from './audit';
 import { IdentityError } from './errors';
 import type { RequestMeta } from './admin-auth';
 
+/** Parallel billing counters allowed per outlet (receipt prefixes T01–T99 exist). */
+export const MAX_TERMINALS_PER_OUTLET = 10;
+
 interface OutletRow {
   organization_id: string;
   franchise_id: string | null;
@@ -57,6 +60,18 @@ function assertBillable(outlet: OutletRow): void {
   }
 }
 
+async function assertTerminalCapacity(client: PoolClient, outletId: string): Promise<void> {
+  const { rows } = await client.query<{ n: number }>(
+    `select count(*)::int as n from identity.terminals where outlet_id = $1 and status <> 'revoked'`,
+    [outletId],
+  );
+  if ((rows[0]?.n ?? 0) >= MAX_TERMINALS_PER_OUTLET)
+    throw new IdentityError(
+      'outlet_capacity',
+      `This outlet already has ${String(MAX_TERMINALS_PER_OUTLET)} billing counters. Remove one or replace a device instead.`,
+    );
+}
+
 export async function issueActivationCode(
   pool: Pool,
   actor: ActorContext,
@@ -83,10 +98,21 @@ export async function issueActivationCode(
       { requireFreshAuthWithinSeconds: FRESH_AUTH_SECONDS },
     );
     assertBillable(outlet);
+    if (cmd.replacesTerminalId) {
+      const t = await client.query(
+        `select 1 from identity.terminals where id = $1 and outlet_id = $2 and status <> 'revoked'`,
+        [cmd.replacesTerminalId, cmd.outletId],
+      );
+      if (!t.rowCount)
+        throw new IdentityError('terminal_not_found', 'That terminal is not active at this outlet');
+    } else {
+      await assertTerminalCapacity(client, cmd.outletId);
+    }
     await client.query(
       `insert into identity.terminal_activation_codes
-         (id, outlet_id, organization_id, franchise_id, label, code_hash, expires_at, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+         (id, outlet_id, organization_id, franchise_id, label, code_hash, expires_at, created_by,
+          replaces_terminal_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
         id,
         cmd.outletId,
@@ -96,6 +122,7 @@ export async function issueActivationCode(
         hashActivationCode(secret, code),
         expiresAt,
         actor.accountId ?? null,
+        cmd.replacesTerminalId ?? null,
       ],
     );
     await recordAudit(client, {
@@ -106,7 +133,11 @@ export async function issueActivationCode(
       franchiseId: outlet.franchise_id,
       outletId: cmd.outletId,
       correlationId: meta.correlationId ?? randomUUID(),
-      metadata: { activationCodeId: id, label: cmd.label },
+      metadata: {
+        activationCodeId: id,
+        label: cmd.label,
+        replacesTerminalId: cmd.replacesTerminalId ?? null,
+      },
     });
   });
 
@@ -159,8 +190,10 @@ async function registerTerminalTxn(
       code_hash: string;
       expires_at: Date;
       consumed_at: Date | null;
+      replaces_terminal_id: string | null;
     }>(
-      `select id, outlet_id, organization_id, franchise_id, code_hash, expires_at, consumed_at
+      `select id, outlet_id, organization_id, franchise_id, code_hash, expires_at, consumed_at,
+              replaces_terminal_id
          from identity.terminal_activation_codes where code_hash = $1 for update`,
       [codeHash],
     );
@@ -181,13 +214,19 @@ async function registerTerminalTxn(
       codeRow.outlet_id,
     ]);
 
-    const replaced = await client.query<{ id: string }>(
-      `update identity.terminals
-         set status = 'revoked', revoked_at = now(), revoked_reason = 'replaced'
-       where outlet_id = $1 and status <> 'revoked'
-       returning id`,
-      [codeRow.outlet_id],
-    );
+    // A replace code revokes exactly the named terminal and continues its
+    // prefix (and so its receipt sequence). An add code takes the next free
+    // prefix; other counters keep billing.
+    const replaced = codeRow.replaces_terminal_id
+      ? await client.query<{ id: string; receipt_prefix: string }>(
+          `update identity.terminals
+             set status = 'revoked', revoked_at = now(), revoked_reason = 'replaced'
+           where id = $1 and outlet_id = $2 and status <> 'revoked'
+           returning id, receipt_prefix`,
+          [codeRow.replaces_terminal_id, codeRow.outlet_id],
+        )
+      : { rows: [] as { id: string; receipt_prefix: string }[], rowCount: 0 };
+    if (!replaced.rows.length) await assertTerminalCapacity(client, codeRow.outlet_id);
     for (const prev of replaced.rows) {
       await client.query(
         `update identity.terminal_credentials
@@ -204,7 +243,13 @@ async function registerTerminalTxn(
     }
 
     const terminalId = randomUUID();
-    const receiptPrefix = nextReceiptPrefix([]);
+    const active = await client.query<{ receipt_prefix: string }>(
+      `select receipt_prefix from identity.terminals where outlet_id = $1 and status <> 'revoked'`,
+      [codeRow.outlet_id],
+    );
+    const receiptPrefix =
+      replaced.rows[0]?.receipt_prefix ??
+      nextReceiptPrefix(active.rows.map((r) => r.receipt_prefix));
     await client.query(
       `insert into identity.terminals
          (id, outlet_id, organization_id, franchise_id, name, status, receipt_prefix,

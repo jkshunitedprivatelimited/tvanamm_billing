@@ -423,15 +423,18 @@ function resolveLines(
   return resolved;
 }
 
-/** Receipt prefix for a terminal (MVP: one active terminal per outlet, always
- *  "T01" - kept a lookup rather than a constant so multi-terminal support only
- *  needs to change `identity.terminals.receipt_prefix`, never this call site). */
+/** Receipt prefix of the billing terminal (T01, T02, … — one per counter, so
+ *  parallel counters never share a receipt sequence). */
 async function terminalPrefix(client: PoolClient, terminalId: string): Promise<string> {
   const { rows } = await client.query<{ receipt_prefix: string }>(
     `select receipt_prefix from identity.terminals where id = $1`,
     [terminalId],
   );
-  return rows[0]?.receipt_prefix ?? 'T01';
+  const prefix = rows[0]?.receipt_prefix;
+  // Never guess: with several counters a default prefix would duplicate numbers.
+  if (!prefix)
+    throw new IdentityError('terminal_not_found', 'This billing terminal is not registered');
+  return prefix;
 }
 
 export function formatReceiptNumber(businessDateStr: string, prefix: string, seq: number): string {

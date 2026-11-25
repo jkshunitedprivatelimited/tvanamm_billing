@@ -74,7 +74,7 @@ draft -> active -> suspended -> active
 
 ## Terminal Policy
 
-- One active Billing terminal per outlet for MVP.
+- Up to 10 parallel Billing terminals per outlet, each with its own receipt prefix.
 - Franchise Owner performs first registration after Central activates the outlet.
 - JKSH-owned outlet registration is performed by an authorized Central Admin.
 - Terminal replacement revokes the old credential before activating the new one.
@@ -97,7 +97,7 @@ draft -> active -> suspended -> active
 - Owner sees only assigned outlet cards.
 - Accountant sees reports for JKSH-owned and franchise-owned outlets.
 - Store Employee cannot access another outlet.
-- Only one active terminal can exist per outlet in MVP.
+- Several terminals can be active per outlet; a replacement code names the terminal it replaces.
 - Replacement revokes the prior terminal and preserves pending-bill safety.
 - Missing GSTIN does not block outlet activation.
 - Suspended/closed outlet cannot create new bills.

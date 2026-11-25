@@ -115,24 +115,26 @@ export function OutletDetail({
       ) : null}
 
       <div className="card">
-        <h2>Terminal</h2>
+        <h2>Billing counters</h2>
         <p className="muted">
-          One active terminal per outlet. Issue a code, enter it on the device at{' '}
-          <span className="mono">/register</span>. Registering a replacement revokes the previous.
+          Each counter is one device billing at the same time as the others, with its own receipt
+          numbers (T01, T02…). All counters share the outlet’s cash drawer. Issue a code, then enter
+          it on the device at <span className="mono">/register</span>.
         </p>
         <button
           disabled={busy || outlet.status !== 'active'}
           onClick={() => {
             setCode(null);
+            const n = initialTerminals.filter((t) => t.status !== 'revoked').length + 1;
             void call(
               `/api/v1/outlets/${outlet.id}/terminals/enroll`,
               'POST',
-              { label: 'Counter terminal' },
+              { label: `Counter ${String(n)}` },
               (data) => setCode(String(data.code)),
             );
           }}
         >
-          Issue activation code
+          Add a billing counter
         </button>
         {outlet.status !== 'active' ? (
           <span className="muted"> — outlet must be active</span>
@@ -166,18 +168,43 @@ export function OutletDetail({
                 </td>
                 <td>
                   {t.status !== 'revoked' ? (
-                    <button
-                      className="secondary"
-                      disabled={busy}
-                      onClick={() => {
-                        if (!confirm('Revoke this terminal?')) return;
-                        void call(`/api/v1/terminals/${t.id}/revoke`, 'POST', {
-                          reason: 'revoked from admin console',
-                        }).then((ok) => ok && router.refresh());
-                      }}
-                    >
-                      Revoke
-                    </button>
+                    <>
+                      <button
+                        className="secondary"
+                        disabled={busy}
+                        title="Use a new device for this counter; it keeps the same receipt numbers"
+                        onClick={() => {
+                          if (
+                            !confirm(
+                              `Replace the device for ${t.name}? The current device stops billing when the new one registers.`,
+                            )
+                          )
+                            return;
+                          setCode(null);
+                          void call(
+                            `/api/v1/outlets/${outlet.id}/terminals/enroll`,
+                            'POST',
+                            { label: t.name, replacesTerminalId: t.id },
+                            (data) => setCode(String(data.code)),
+                          );
+                        }}
+                      >
+                        Replace device
+                      </button>{' '}
+                      <button
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => {
+                          if (!confirm(`Remove ${t.name}? It will stop billing immediately.`))
+                            return;
+                          void call(`/api/v1/terminals/${t.id}/revoke`, 'POST', {
+                            reason: 'removed from admin console',
+                          }).then((ok) => ok && router.refresh());
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </>
                   ) : null}
                 </td>
               </tr>
@@ -185,7 +212,7 @@ export function OutletDetail({
             {initialTerminals.length === 0 ? (
               <tr>
                 <td colSpan={5} className="muted">
-                  No terminal yet.
+                  No billing counter yet.
                 </td>
               </tr>
             ) : null}

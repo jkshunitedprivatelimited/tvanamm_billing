@@ -8,6 +8,8 @@ export const issueActivationCodeCommandSchema = z.object({
   outletId: z.uuid(),
   label: z.string().trim().min(1).max(120),
   expiresInMinutes: z.number().int().min(5).max(1440).default(60),
+  /** Replace this terminal (keeps its receipt prefix). Omit to add a new counter. */
+  replacesTerminalId: z.uuid().optional(),
 });
 export type IssueActivationCodeCommand = z.infer<typeof issueActivationCodeCommandSchema>;
 

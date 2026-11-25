@@ -36,10 +36,10 @@ A Store Employee PIN alone must never authenticate an unregistered remote browse
 
 - A Franchise Owner authenticates on a new device and explicitly registers it to
   one owned outlet before Store Employee PIN login is enabled.
-- The MVP permits one active Billing terminal per outlet. Registering a
-  replacement revokes the previous terminal. The data model uses terminal records
-  rather than hard-coded single-device fields so multi-terminal support can be
-  added later without a schema redesign.
+- An outlet may run up to 10 Billing terminals in parallel (migration 0045).
+  Each has its own receipt prefix (T01, T02, …) and receipt sequence. An
+  activation code either adds a counter or replaces a named terminal; a
+  replacement revokes only that terminal and continues its prefix.
 - The server issues a revocable terminal credential.
 - A registered terminal is assigned to an organization, franchise, and store.
 - Each Store Employee is assigned to one outlet and can enter one short personal

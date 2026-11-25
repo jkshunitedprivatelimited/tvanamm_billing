@@ -360,9 +360,7 @@ describe.skipIf(!RUN)('Billing V1 Stage 4A - offline billing backend', () => {
   }, 30_000);
 
   it('attributes an offline bill to the employee who rang it up, not whoever syncs it', async () => {
-    // Registering a terminal revokes the outlet's previously active one (one
-    // live terminal at a time), so this also becomes the shared terminal for
-    // whatever runs after - same pattern as the "terminal is replaced" test.
+    // Adds another counter (parallel billing); later tests use this terminal.
     const owner = await adminActor(ownerPhone);
     const code = await issueActivationCode(pool, owner, {
       outletId,
@@ -512,11 +510,13 @@ describe.skipIf(!RUN)('Billing V1 Stage 4A - offline billing backend', () => {
   it('voids unused numbers from an expired reservation instead of reassigning them', async () => {
     const op = await operator();
     const block = await reserveReceiptBlock(pool, op, { count: 2 });
+    // Several counters may share a start number, so match on the prefix too.
+    const prefix = block.numbers[0]!.split('-')[1];
     await pool.query(
       `update billing.receipt_reservations
           set expires_at = now() - interval '1 minute'
-        where outlet_id = $1 and start_seq = $2`,
-      [outletId, Number(block.numbers[0]!.slice(-6))],
+        where outlet_id = $1 and start_seq = $2 and prefix = $3`,
+      [outletId, Number(block.numbers[0]!.slice(-6)), prefix],
     );
     // Reserving again triggers the opportunistic void-expired pass.
     await reserveReceiptBlock(pool, op, { count: 1 });
@@ -530,8 +530,8 @@ describe.skipIf(!RUN)('Billing V1 Stage 4A - offline billing backend', () => {
 
     const reservation = await pool.query<{ status: string }>(
       `select status from billing.receipt_reservations
-        where outlet_id = $1 and start_seq = $2`,
-      [outletId, Number(block.numbers[0]!.slice(-6))],
+        where outlet_id = $1 and start_seq = $2 and prefix = $3`,
+      [outletId, Number(block.numbers[0]!.slice(-6)), prefix],
     );
     expect(reservation.rows[0]!.status).toBe('voided');
   }, 30_000);
