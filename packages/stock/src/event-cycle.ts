@@ -35,5 +35,12 @@ export async function runStockEventCycle(billing: Pool, stock: StockPool, organi
   const delivery = await deliverBillingEventsToStock(billing, stock, { scope: scope.data });
   const inbox = await processStockInbox(stock, { scope: scope.data });
   const results = await consumeStockResults(billing, stock);
-  return { paused: false, reason: null, delivery, inbox, results };
+  return {
+    paused: false,
+    reason: null,
+    organizationId: scope.data.organizationId,
+    delivery,
+    inbox,
+    results,
+  };
 }
