@@ -5,6 +5,7 @@ export {
   suggestChefStockCheck,
   TVANAMM_STOCK_ITEMS,
   type ChefStockLine,
+  type ChefStockCheck,
   type ChefDraft,
   type ChefItem,
   type ChefEntry,

@@ -4,13 +4,11 @@ import {
   chefDraftSchema,
   chefItemInputSchema,
   emptyChefDraft,
-  suggestChefStockCheck,
-  TVANAMM_STOCK_ITEMS,
   type ChefCollection,
   type ChefDraft,
   type ChefItem,
-  type ChefStockLine,
 } from '@/server/chef-sop-schema';
+import { StockCheck } from './stock-check';
 import './workbook.css';
 export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
   const token = useRef('');
@@ -62,6 +60,12 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
     setDirty(true);
     setMessage('Unsaved changes');
   }
+  /** Stock-check edits never change the recipe's draft/ready status. */
+  function editStock(stock: NonNullable<ChefDraft['stock']>) {
+    setDraft((d) => ({ ...d, stock }));
+    setDirty(true);
+    setMessage('Unsaved changes');
+  }
   function choose(id: string) {
     if (dirty && !confirm('Discard unsaved changes for this item?')) return;
     const e = data?.entries.find((e) => e.itemId === id);
@@ -72,8 +76,8 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
     setDirty(false);
     setMessage('');
   }
-  async function save(status: 'draft' | 'ready') {
-    const next = { ...draft, status };
+  async function save(status: 'draft' | 'ready', base: ChefDraft = draft) {
+    const next = { ...base, status };
     const valid = chefDraftSchema.safeParse(next);
     if (!valid.success) {
       setMessage(valid.error.issues.map((i) => i.message).join(' '));
@@ -656,163 +660,12 @@ export function ChefWorkspace({ reviewId }: { reviewId?: string }) {
                       />
                     </label>
                   ))}
-                  <h3>4. Stock check — TVANAMM items &amp; milk for ONE serving</h3>
-                  <p>
-                    When this item is billed, these amounts are taken out of the outlet&apos;s
-                    stock. List only TVANAMM items and milk (not sugar, water or fruit). Tick each
-                    line when the amount for one cup / glass / plate is correct.
-                  </p>
-                  {!draft.stock ? (
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => edit('stock', suggestChefStockCheck(draft))}
-                    >
-                      Fill from ingredients above
-                    </button>
-                  ) : (
-                    <>
-                      {draft.stock.lines.map((l, n) => {
-                        const stock = draft.stock ?? suggestChefStockCheck(draft);
-                        const setLine = (patch: Partial<ChefStockLine>) =>
-                          edit('stock', {
-                            ...stock,
-                            confirmed: false,
-                            lines: stock.lines.map((r, j) => (j === n ? { ...r, ...patch } : r)),
-                          });
-                        const highTea = l.item === 'Tea Powder' && Number(l.quantity) > 5;
-                        return (
-                          <div className="chef-ingredient" key={n}>
-                            <label>
-                              TVANAMM item
-                              <select
-                                value={l.item}
-                                onChange={(e) => {
-                                  const known = TVANAMM_STOCK_ITEMS.find(
-                                    (i) => i.name === e.target.value,
-                                  );
-                                  setLine({
-                                    item: e.target.value,
-                                    unit: known?.unit ?? l.unit,
-                                    confirmed: false,
-                                  });
-                                }}
-                              >
-                                <option value="">Choose item</option>
-                                {TVANAMM_STOCK_ITEMS.map((i) => (
-                                  <option key={i.name} value={i.name}>
-                                    {i.name}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              Amount for 1 serving
-                              <input
-                                type="number"
-                                min="0.001"
-                                step="any"
-                                value={l.quantity}
-                                onChange={(e) =>
-                                  setLine({ quantity: e.target.value, confirmed: false })
-                                }
-                              />
-                            </label>
-                            <label>
-                              Unit
-                              <input value={l.unit} readOnly />
-                            </label>
-                            <label>
-                              Correct?
-                              <input
-                                type="checkbox"
-                                checked={l.confirmed}
-                                disabled={!l.item || !(Number(l.quantity) > 0)}
-                                onChange={(e) => setLine({ confirmed: e.target.checked })}
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              className="secondary"
-                              onClick={() =>
-                                edit('stock', {
-                                  ...stock,
-                                  confirmed: false,
-                                  lines: stock.lines.filter((_, j) => j !== n),
-                                })
-                              }
-                            >
-                              Remove
-                            </button>
-                            {highTea ? (
-                              <small className="chef-warning">
-                                Normal tea uses about 2.5 g tea powder per cup (30 g per litre). Is{' '}
-                                {l.quantity} g right for one serving?
-                              </small>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={draft.stock.lines.length >= 30}
-                        onClick={() => {
-                          const stock = draft.stock ?? suggestChefStockCheck(draft);
-                          edit('stock', {
-                            ...stock,
-                            confirmed: false,
-                            lines: [
-                              ...stock.lines,
-                              { item: '', quantity: '', unit: 'g', confirmed: false },
-                            ],
-                          });
-                        }}
-                      >
-                        + Add TVANAMM item / milk
-                      </button>
-                      <label className="chef-long">
-                        Cup / glass / box used
-                        <input
-                          list="tvanamm-containers"
-                          value={draft.stock.container}
-                          maxLength={160}
-                          placeholder="e.g. Tea cups, Sip Glass - 300 ml"
-                          onChange={(e) =>
-                            edit('stock', {
-                              ...(draft.stock ?? suggestChefStockCheck(draft)),
-                              container: e.target.value,
-                              confirmed: false,
-                            })
-                          }
-                        />
-                        <datalist id="tvanamm-containers">
-                          {TVANAMM_STOCK_ITEMS.filter((i) => i.unit === 'pieces').map((i) => (
-                            <option key={i.name} value={i.name} />
-                          ))}
-                        </datalist>
-                      </label>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={draft.stock.confirmed}
-                          disabled={
-                            !draft.stock.lines.length ||
-                            draft.stock.lines.some(
-                              (l) => !l.item || !(Number(l.quantity) > 0) || !l.confirmed,
-                            )
-                          }
-                          onChange={(e) =>
-                            edit('stock', {
-                              ...(draft.stock ?? suggestChefStockCheck(draft)),
-                              confirmed: e.target.checked,
-                            })
-                          }
-                        />{' '}
-                        All TVANAMM items and milk for this item are listed and correct
-                      </label>
-                    </>
-                  )}
+                  <StockCheck
+                    draft={draft}
+                    disabled={readOnly || busy}
+                    onChange={editStock}
+                    onConfirm={(stock) => void save(draft.status, { ...draft, stock })}
+                  />
                 </fieldset>
                 {reviewId ? (
                   <div className="chef-actions">

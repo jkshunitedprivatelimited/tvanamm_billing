@@ -253,10 +253,137 @@
   }
 }
 
-.chef-warning {
+/* Stock used for one serving */
+.stock-check {
+  margin-top: 28px;
+  padding: 20px;
+  border: 1px solid #d9cbb5;
+  border-radius: 14px;
+  background: #fffaf3;
+}
+.stock-check-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.stock-check-head h3 {
+  margin: 0;
+}
+.stock-badge {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.stock-badge.todo {
+  background: #fff1c2;
+  color: #7a5200;
+}
+.stock-badge.done {
+  background: #dff3e4;
+  color: #1f6b35;
+}
+.stock-check-help {
+  margin: 8px 0 16px;
+  font-size: 16px;
+}
+.stock-rows {
+  display: grid;
+  gap: 10px;
+}
+.stock-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #e6dccb;
+  border-radius: 10px;
+}
+.stock-item {
+  font-size: 18px;
+  font-weight: 600;
+}
+select.stock-item {
+  font-weight: 400;
+  margin: 0;
+}
+.stock-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.stock-amount input {
+  width: 110px;
+  margin: 0;
+  font-size: 18px;
+  text-align: right;
+}
+.stock-unit {
+  min-width: 34px;
+  font-size: 18px;
+  color: #5b3a29;
+  font-weight: 600;
+}
+.stock-remove {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #8a6a55;
+  border: 1px solid #e0d2bf;
+}
+.stock-warn {
   grid-column: 1 / -1;
-  color: #8a5a00;
-  background: #fff4cc;
-  padding: 6px 8px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fff1c2;
+  color: #7a5200;
+  font-size: 14px;
+}
+.stock-empty {
+  margin: 0;
+  color: #7a6a5c;
+}
+.stock-add {
+  margin-top: 12px;
+}
+.stock-container {
+  display: grid;
+  gap: 6px;
+  margin-top: 18px;
+  max-width: 420px;
+  font-weight: 600;
+}
+.stock-container select,
+.stock-container input {
+  margin: 0;
+  font-weight: 400;
+}
+.stock-confirm {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+.stock-confirm button {
+  font-size: 17px;
+  padding: 12px 22px;
+}
+@media (max-width: 640px) {
+  .stock-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .stock-amount {
+    grid-row: 2;
+  }
+  .stock-remove {
+    grid-row: 1;
+    grid-column: 2;
+  }
 }
