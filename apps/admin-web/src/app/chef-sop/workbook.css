@@ -252,3 +252,11 @@
     font-size: 28px;
   }
 }
+
+.chef-warning {
+  grid-column: 1 / -1;
+  color: #8a5a00;
+  background: #fff4cc;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
